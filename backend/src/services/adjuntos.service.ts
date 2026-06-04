@@ -50,6 +50,12 @@ export class AdjuntosService {
       folderKey: folderId,
       size: input.size,
     });
+    // @fastify/multipart trunca el stream al llegar al limite en vez de fallar:
+    // si quedo truncado, el objeto subido esta incompleto -> borrar y rechazar.
+    if ((input.fileStream as Readable & { truncated?: boolean }).truncated) {
+      await storage.deleteObject(uploaded.key).catch(() => undefined);
+      throw new Error("FILE_TOO_LARGE");
+    }
     const adjunto = await AdjuntosQueries.insertAdjunto({
       scope: input.scope,
       scopeId: input.scopeId,

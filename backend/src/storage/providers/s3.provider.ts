@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../../env.js";
@@ -20,6 +21,8 @@ import type {
   TemporaryUrl,
   UploadStreamInput,
 } from "../types.js";
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export class S3Provider implements StorageProvider {
   readonly driver = "s3" as const;
@@ -83,13 +86,29 @@ export class S3Provider implements StorageProvider {
 
   async uploadStream(input: UploadStreamInput): Promise<StoredObject> {
     const key = normalizeKey(`${input.folderKey}${safeSegment(input.name)}`);
-    await this.client.send(new PutObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-      Body: input.body,
-      ContentType: input.mimeType,
-      ContentLength: input.size,
-    }));
+
+    // Tope de seguridad: aborta el stream si supera el maximo permitido,
+    // incluso cuando el tamano no se conoce de antemano.
+    let bytes = 0;
+    input.body.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_UPLOAD_BYTES) {
+        input.body.destroy(new Error("FILE_TOO_LARGE"));
+      }
+    });
+
+    // Upload (lib-storage) sube por multipart en chunks, sin necesidad de
+    // conocer ContentLength: soporta streams de tamano desconocido.
+    const uploader = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: key,
+        Body: input.body,
+        ContentType: input.mimeType,
+      },
+    });
+    await uploader.done();
     return this.getObject(key);
   }
 

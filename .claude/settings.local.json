@@ -43,7 +43,11 @@
       "Bash(grep -iE \"\\(^|/\\)\\\\.env|credentials.*json|\\\\.pem$|\\\\.key$\")",
       "Bash(git commit -q -m ' *)",
       "Bash(git push *)",
-      "Bash(git commit -q --amend -m ' *)"
+      "Bash(git commit -q --amend -m ' *)",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\('multipart', require\\('/c/Users/Gaspar/Desktop/iuris/backend/node_modules/@fastify/multipart/package.json'\\).version\\); console.log\\('fastify', require\\('/c/Users/Gaspar/Desktop/iuris/backend/node_modules/fastify/package.json'\\).version\\)\")",
+      "Bash(node /c/Users/Gaspar/Desktop/iuris/scratch/test-50mb-limit.mjs)",
+      "Bash(node _test50mb.mjs)"
     ]
   }
 }
