@@ -26,6 +26,13 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+.cursorrules
+.claude/
 
-# Temporales de trabajo (notas internas, no versionar)
+# Scripts locales de desarrollo (especificos de cada maquina)
+*.bat
+*.ps1
+
+# Notas y documentacion interna (no versionar)
+TODO.md
 scratch/
