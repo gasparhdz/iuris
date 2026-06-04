@@ -1,0 +1,31 @@
+# Dependencias
+node_modules/
+
+# Build / artefactos compilados
+dist/
+build/
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Credenciales de Google / service accounts
+credentials.json
+credentials*.json
+*.bak
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporales de trabajo (notas internas, no versionar)
+scratch/

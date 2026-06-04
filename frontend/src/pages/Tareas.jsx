@@ -1,0 +1,745 @@
+import { useMemo, useState } from "react";
+import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSnackbar } from "notistack";
+import { alpha, useTheme } from "@mui/material/styles";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import api from "../api/axios";
+import {
+  Avatar,
+  Box,
+  Button,
+  ButtonGroup,
+  Card,
+  CardContent,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  IconButton,
+  InputAdornment,
+  InputLabel,
+  LinearProgress,
+  Link,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TablePagination,
+  TableRow,
+  TableSortLabel,
+  Tabs,
+  TextField,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import Grid from "@mui/material/Grid";
+import {
+  Add,
+  Assignment,
+  CalendarToday,
+  CheckCircle,
+  Delete,
+  Edit,
+  ErrorOutline,
+  FolderOpen,
+  PlaylistAddCheck,
+  Search,
+  TableRows,
+  Today,
+  ViewModule,
+  WarningAmber,
+} from "@mui/icons-material";
+import {
+  casoLabel,
+  checklistStats,
+  clienteLabel,
+  formatFriendlyDate,
+  getApiError,
+  isOverdue,
+  isToday,
+  priorityStyles,
+  unwrapData,
+  unwrapEntity,
+  unwrapItems,
+} from "./tareasUtils";
+
+export default function Tareas() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = `${location.pathname}${location.search}`;
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const queryClient = useQueryClient();
+  const { enqueueSnackbar } = useSnackbar();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("pendientes");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [view, setView] = useState("list");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [cascadeTarget, setCascadeTarget] = useState(null);
+
+  const [orderBy, setOrderBy] = useState("titulo");
+  const [order, setOrder] = useState("asc");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  const tareasQuery = useQuery({
+    queryKey: ["tareas", statusFilter],
+    queryFn: async () => {
+      const params = { page: 1, limit: 100 };
+      if (statusFilter === "pendientes") params.completada = "false";
+      if (statusFilter === "completadas") params.completada = "true";
+      const { data } = await api.get("/tareas", { params });
+      return unwrapItems(data);
+    },
+    staleTime: 1000 * 60,
+  });
+
+  const prioridadesQuery = useQuery({
+    queryKey: ["catalogos", "parametros", "PRIORIDAD"],
+    queryFn: async () => {
+      const { data } = await api.get("/catalogos/parametros", { params: { categoria: "PRIORIDAD" } });
+      return unwrapData(data);
+    },
+    staleTime: 1000 * 60 * 30,
+  });
+
+  const clientesQuery = useQuery({
+    queryKey: ["clientes", "lookup"],
+    queryFn: async () => {
+      const { data } = await api.get("/clientes", { params: { limit: 100 } });
+      return unwrapItems(data);
+    },
+    staleTime: 1000 * 60 * 5,
+    enabled: Boolean(tareasQuery.data && tareasQuery.data.length > 0),
+  });
+
+  const expedientesQuery = useQuery({
+    queryKey: ["expedientes", "lookup"],
+    queryFn: async () => {
+      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
+      return unwrapItems(data);
+    },
+    staleTime: 1000 * 60 * 5,
+    enabled: Boolean(tareasQuery.data && tareasQuery.data.length > 0),
+  });
+
+  const prioridadesById = useMemo(() => new Map((prioridadesQuery.data ?? []).map((p) => [Number(p.id), p])), [prioridadesQuery.data]);
+  const clientesById = useMemo(() => new Map((clientesQuery.data ?? []).map((c) => [Number(c.id), c])), [clientesQuery.data]);
+  const expedientesById = useMemo(() => new Map((expedientesQuery.data ?? []).map((c) => [Number(c.id), c])), [expedientesQuery.data]);
+  const allTasks = tareasQuery.data ?? [];
+
+  const filteredTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allTasks.filter((task) => {
+      const priorityMatch = priorityFilter === "all" || Number(task.prioridadId) === Number(priorityFilter);
+      const searchable = [
+        task.titulo,
+        task.descripcion,
+        clienteLabel(clientesById.get(Number(task.clienteId))),
+        casoLabel(expedientesById.get(Number(task.casoId))),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return priorityMatch && (!q || searchable.includes(q));
+    });
+  }, [allTasks, clientesById, expedientesById, priorityFilter, search]);
+
+  const sortedTasks = useMemo(() => {
+    const comparator = (a, b) => {
+      let valA = a[orderBy];
+      let valB = b[orderBy];
+
+      if (orderBy === "prioridad") {
+        const pA = prioridadesById.get(Number(a.prioridadId))?.nombre || "";
+        const pB = prioridadesById.get(Number(b.prioridadId))?.nombre || "";
+        valA = pA;
+        valB = pB;
+      } else if (orderBy === "vencimiento") {
+        valA = a.fechaLimite || "";
+        valB = b.fechaLimite || "";
+      } else if (orderBy === "vinculacion") {
+        const cliA = clientesById.get(Number(a.clienteId));
+        const casoA = expedientesById.get(Number(a.casoId));
+        valA = [clienteLabel(cliA), casoLabel(casoA)].filter(Boolean).join(" ");
+        const cliB = clientesById.get(Number(b.clienteId));
+        const casoB = expedientesById.get(Number(b.casoId));
+        valB = [clienteLabel(cliB), casoLabel(casoB)].filter(Boolean).join(" ");
+      } else if (orderBy === "checklist") {
+        valA = checklistStats(a).percent;
+        valB = checklistStats(b).percent;
+      }
+
+      if (valA === valB) return 0;
+      if (valA === null || valA === undefined) return 1;
+      if (valB === null || valB === undefined) return -1;
+
+      if (typeof valA === "string") {
+        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+      }
+
+      return valA < valB ? -1 : 1;
+    };
+
+    return [...filteredTasks].sort((a, b) => {
+      const cmp = comparator(a, b);
+      return order === "desc" ? -cmp : cmp;
+    });
+  }, [filteredTasks, orderBy, order, prioridadesById, clientesById, expedientesById]);
+
+  const paginatedTasks = useMemo(() => {
+    return sortedTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  }, [sortedTasks, page, rowsPerPage]);
+
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === "asc";
+    setOrder(isAsc ? "desc" : "asc");
+    setOrderBy(property);
+    setPage(0);
+  };
+
+  const kpis = useMemo(() => [
+    { label: "Pendientes", value: allTasks.filter((t) => !t.completada).length, icon: <Assignment />, tone: theme.palette.primary.main },
+    { label: "Vencidas", value: allTasks.filter(isOverdue).length, icon: <WarningAmber />, tone: "hsl(350, 80%, 45%)" },
+    { label: "Para Hoy", value: allTasks.filter(isToday).length, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
+    { label: "Completadas", value: allTasks.filter((t) => t.completada).length, icon: <CheckCircle />, tone: "hsl(150, 80%, 35%)" },
+  ], [allTasks, theme.palette.primary.main]);
+
+  function invalidateTareas() {
+    queryClient.invalidateQueries({ queryKey: ["tareas"] });
+    queryClient.invalidateQueries({ queryKey: ["agenda"] });
+  }
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ task, cascade }) => {
+      const { data } = await api.put(`/tareas/${task.id}`, {
+        completada: !task.completada,
+        completarSubtareas: cascade,
+      });
+      return unwrapEntity(data);
+    },
+    onSuccess: (_, { task }) => {
+      enqueueSnackbar(task.completada ? "Tarea marcada como pendiente" : "Tarea completada", { variant: "success" });
+      invalidateTareas();
+    },
+    onError: (error) => enqueueSnackbar(getApiError(error, "No se pudo actualizar la tarea"), { variant: "error" }),
+  });
+
+  async function handleToggleTask(task) {
+    if (task.completada) {
+      toggleMutation.mutate({ task, cascade: false });
+      return;
+    }
+
+    try {
+      const { data } = await api.get(`/tareas/${task.id}`);
+      const detailedTask = unwrapEntity(data);
+      const subtasks = Array.isArray(detailedTask.items) ? detailedTask.items : [];
+      const incompleteCount = subtasks.filter((item) => !item.completada).length;
+
+      if (incompleteCount > 0) {
+        setCascadeTarget({ task, incompleteCount });
+        return;
+      }
+    } catch {
+      // Si falla la consulta de detalle, mantenemos el flujo principal funcionando.
+    }
+
+    toggleMutation.mutate({ task, cascade: false });
+  }
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id) => api.delete(`/tareas/${id}`),
+    onSuccess: () => {
+      enqueueSnackbar("Tarea eliminada correctamente", { variant: "success" });
+      setDeleteTarget(null);
+      invalidateTareas();
+    },
+    onError: (error) => enqueueSnackbar(getApiError(error, "No se pudo eliminar la tarea"), { variant: "error" }),
+  });
+
+  return (
+    <Box>
+      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 3 }}>
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0 }}>Tareas</Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>Gestión operativa de pendientes, vencimientos y subtareas del estudio.</Typography>
+        </Box>
+        <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/tareas/nuevo", { state: { from: currentPath } })} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+          Nueva Tarea
+        </Button>
+      </Stack>
+
+      <Paper elevation={0} sx={{ p: 2, mb: 2.5, borderRadius: "16px", border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
+        <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ xs: "stretch", lg: "center" }}>
+          <TextField
+            size="small"
+            value={search}
+            onChange={(event) => { setSearch(event.target.value); setPage(0); }}
+            placeholder="Buscar por título, descripción, cliente o expediente"
+            sx={{ flex: 1, minWidth: { lg: 300 } }}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" sx={{ color: "text.secondary" }} /></InputAdornment> } }}
+          />
+          <Tabs value={statusFilter} onChange={(_, value) => { setStatusFilter(value); setPage(0); }} sx={{ minHeight: 40, "& .MuiTab-root": { minHeight: 40, fontWeight: 900 } }}>
+            <Tab value="pendientes" label="Pendientes" />
+            <Tab value="completadas" label="Completadas" />
+            <Tab value="todas" label="Todas" />
+          </Tabs>
+          <FormControl size="small" sx={{ minWidth: { xs: "100%", lg: 190 } }}>
+            <InputLabel>Prioridad</InputLabel>
+            <Select label="Prioridad" value={priorityFilter} onChange={(event) => { setPriorityFilter(event.target.value); setPage(0); }}>
+              <MenuItem value="all">Todas</MenuItem>
+              {(prioridadesQuery.data ?? []).map((prioridad) => <MenuItem key={prioridad.id} value={prioridad.id}>{prioridad.nombre}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <ButtonGroup variant="outlined" size="small" sx={{ alignSelf: { xs: "flex-start", lg: "center" } }}>
+            <Tooltip title="Vista de lista"><Button variant={view === "list" ? "contained" : "outlined"} onClick={() => setView("list")} aria-label="Vista de lista"><TableRows fontSize="small" /></Button></Tooltip>
+            <Tooltip title="Vista de tarjetas"><Button variant={view === "grid" ? "contained" : "outlined"} onClick={() => setView("grid")} aria-label="Vista de tarjetas"><ViewModule fontSize="small" /></Button></Tooltip>
+          </ButtonGroup>
+        </Stack>
+      </Paper>
+
+      <Grid container spacing={2} sx={{ mb: 2.5 }}>
+        {kpis.map((kpi) => (
+          <Grid key={kpi.label} size={{ xs: 12, sm: 6, lg: 3 }}>
+            <Paper elevation={0} sx={{ p: 2.25, borderRadius: "16px", border: "1px solid", borderColor: alpha(kpi.tone, 0.35), bgcolor: "background.paper", transition: "transform 0.18s ease, box-shadow 0.18s ease", "&:hover": { transform: "translateY(-4px)", boxShadow: theme.palette.mode === "dark" ? "0 18px 38px rgba(0,0,0,0.34)" : "0 18px 38px rgba(15,23,42,0.08)" } }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 900, textTransform: "uppercase" }}>{kpi.label}</Typography>
+                  <Typography variant="h4" sx={{ fontWeight: 950, mt: 0.5 }}>{kpi.value}</Typography>
+                </Box>
+                <Avatar sx={{ bgcolor: alpha(kpi.tone, 0.12), color: kpi.tone }}>{kpi.icon}</Avatar>
+              </Stack>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+
+      {tareasQuery.isLoading ? (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
+      ) : filteredTasks.length === 0 ? (
+        <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
+          <PlaylistAddCheck sx={{ fontSize: 58, color: "text.disabled", mb: 1 }} />
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>No hay tareas para mostrar</Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>Probá ajustar los filtros o cargar un nuevo pendiente.</Typography>
+        </Paper>
+      ) : view === "grid" || isMobile ? (
+        <Stack spacing={1.5}>
+          <Grid container spacing={2}>
+            {paginatedTasks.map((task) => (
+              <Grid key={task.id} size={{ xs: 12, md: 6, xl: 4 }}>
+                <TaskCard
+                  task={task}
+                  theme={theme}
+                  priority={prioridadesById.get(Number(task.prioridadId))}
+                  cliente={clientesById.get(Number(task.clienteId))}
+                  caso={expedientesById.get(Number(task.casoId))}
+                  currentPath={currentPath}
+                  onOpen={() => navigate(`/tareas/${task.id}`, { state: { from: currentPath } })}
+                  onToggle={(event) => { event.stopPropagation(); handleToggleTask(task); }}
+                  onEdit={(event) => { event.stopPropagation(); navigate(`/tareas/editar/${task.id}`, { state: { from: currentPath } }); }}
+                  onDelete={(event) => { event.stopPropagation(); setDeleteTarget(task); }}
+                  disabled={toggleMutation.isPending}
+                />
+              </Grid>
+            ))}
+          </Grid>
+          <TablePagination
+            component="div"
+            count={filteredTasks.length}
+            page={page}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[5, 10, 25, 50]}
+            labelRowsPerPage="Filas:"
+            labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count}`}
+            sx={{ borderTop: "1px solid", borderColor: "divider", mt: 1 }}
+          />
+        </Stack>
+      ) : (
+        <TaskTable
+          tasks={paginatedTasks}
+          totalCount={filteredTasks.length}
+          page={page}
+          setPage={setPage}
+          rowsPerPage={rowsPerPage}
+          setRowsPerPage={setRowsPerPage}
+          orderBy={orderBy}
+          order={order}
+          handleRequestSort={handleRequestSort}
+          theme={theme}
+          prioridadesById={prioridadesById}
+          clientesById={clientesById}
+          expedientesById={expedientesById}
+          currentPath={currentPath}
+          onOpen={(task) => navigate(`/tareas/${task.id}`, { state: { from: currentPath } })}
+          onToggle={(event, task) => { event.stopPropagation(); handleToggleTask(task); }}
+          onEdit={(event, task) => { event.stopPropagation(); navigate(`/tareas/editar/${task.id}`, { state: { from: currentPath } }); }}
+          onDelete={(event, task) => { event.stopPropagation(); setDeleteTarget(task); }}
+          disabled={toggleMutation.isPending}
+        />
+      )}
+
+      {tareasQuery.isFetching && !tareasQuery.isLoading && (
+        <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 1.5 }}>Sincronizando tareas...</Typography>
+      )}
+
+      <CascadeConfirmDialog
+        open={Boolean(cascadeTarget)}
+        incompleteCount={cascadeTarget?.incompleteCount ?? 0}
+        onClose={() => setCascadeTarget(null)}
+        onOnlyTask={() => {
+          if (cascadeTarget?.task) toggleMutation.mutate({ task: cascadeTarget.task, cascade: false });
+          setCascadeTarget(null);
+        }}
+        onCascade={() => {
+          if (cascadeTarget?.task) toggleMutation.mutate({ task: cascadeTarget.task, cascade: true });
+          setCascadeTarget(null);
+        }}
+        theme={theme}
+      />
+
+      <Dialog open={Boolean(deleteTarget)} onClose={() => !deleteMutation.isPending && setDeleteTarget(null)} PaperProps={{ sx: { borderRadius: "16px", width: "100%", maxWidth: 420 } }}>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <Avatar sx={{ bgcolor: alpha("#EF4444", 0.12), color: "#EF4444" }}><WarningAmber /></Avatar>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>Eliminar tarea</Typography>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>Esta acción requiere confirmación</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: "text.secondary", lineHeight: 1.7 }}>
+            ¿Seguro que querés eliminar <Box component="span" sx={{ color: "text.primary", fontWeight: 900 }}>{deleteTarget?.titulo}</Box>?
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button variant="outlined" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending} sx={{ borderRadius: "10px", fontWeight: 800 }}>Cancelar</Button>
+          <Button variant="contained" color="error" onClick={() => deleteTarget?.id && deleteMutation.mutate(deleteTarget.id)} disabled={deleteMutation.isPending} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+            {deleteMutation.isPending ? <CircularProgress size={20} color="inherit" /> : "Eliminar"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+function PriorityChip({ priority, theme }) {
+  const styles = priorityStyles(priority, theme);
+  return <Chip size="small" label={priority?.nombre ?? "Sin prioridad"} sx={{ bgcolor: styles.bg, color: styles.color, border: "1px solid", borderColor: styles.border, fontWeight: 900 }} />;
+}
+
+function CascadeConfirmDialog({ open, incompleteCount, onClose, onOnlyTask, onCascade, theme }) {
+  return (
+    <Dialog open={open} onClose={onClose} PaperProps={{ sx: { borderRadius: "16px", p: 1, width: "100%", maxWidth: 500 } }}>
+      <DialogTitle sx={{ display: "flex", gap: 1.5, alignItems: "center", pb: 1 }}>
+        <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.12), color: "primary.main" }}>
+          <CheckCircle />
+        </Avatar>
+        <Box>
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>¿Completar subtareas pendientes?</Typography>
+          <Typography variant="caption" sx={{ color: "text.secondary" }}>Confirmación de completado en cascada</Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ color: "text.secondary", lineHeight: 1.7 }}>
+          Esta tarea tiene{" "}
+          <Box component="span" sx={{ color: "text.primary", fontWeight: 900 }}>
+            {incompleteCount}
+          </Box>{" "}
+          subtareas sin completar. ¿Querés marcarlas todas como completadas también?
+        </Typography>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2.5, gap: 1, flexWrap: "wrap" }}>
+        <Button variant="outlined" color="inherit" onClick={onClose} sx={{ borderRadius: "10px", fontWeight: 800 }}>
+          Cancelar
+        </Button>
+        <Button variant="outlined" onClick={onOnlyTask} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+          Solo la tarea
+        </Button>
+        <Button variant="contained" onClick={onCascade} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+          Sí, completar todo
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function TaskMeta({ task, cliente, caso, showDate = true, currentPath }) {
+  const overdue = isOverdue(task);
+  return (
+    <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap sx={{ minWidth: 0 }}>
+      {showDate && (
+        <Typography variant="caption" sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, color: overdue ? "error.main" : "text.secondary", fontWeight: 800, whiteSpace: "nowrap" }}>
+          {overdue ? <ErrorOutline sx={{ fontSize: 15 }} /> : <CalendarToday sx={{ fontSize: 14 }} />}
+          {formatFriendlyDate(task.fechaLimite)}
+        </Typography>
+      )}
+      {cliente && (
+        <Tooltip title={clienteLabel(cliente)}>
+          <Link
+            component={RouterLink}
+            to={`/clientes/${cliente.id}`}
+            state={{ from: currentPath }}
+            variant="caption"
+            sx={{
+              fontWeight: 800,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 180,
+              display: "inline-block"
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {clienteLabel(cliente)}
+          </Link>
+        </Tooltip>
+      )}
+      {caso && (
+        <Tooltip title={casoLabel(caso)}>
+          <Link
+            component={RouterLink}
+            to={`/expedientes/${caso.id}`}
+            state={{ from: currentPath }}
+            variant="caption"
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 0.35,
+              fontWeight: 800,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 220
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <FolderOpen sx={{ fontSize: 15, flexShrink: 0 }} />
+            <Box component="span" sx={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {casoLabel(caso)}
+            </Box>
+          </Link>
+        </Tooltip>
+      )}
+    </Stack>
+  );
+}
+
+function ChecklistProgress({ task, compact = false }) {
+  const stats = checklistStats(task);
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: compact ? 72 : 120 }}>
+      <LinearProgress variant="determinate" value={stats.percent} sx={{ flex: 1, height: 6, borderRadius: 99 }} />
+      <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 900 }}>{stats.done}/{stats.total}</Typography>
+    </Stack>
+  );
+}
+
+function TaskCard({ task, theme, priority, cliente, caso, currentPath, onOpen, onToggle, onEdit, onDelete, disabled }) {
+  return (
+    <Card elevation={0} sx={{ height: "100%", border: "1px solid", borderColor: isOverdue(task) ? alpha(theme.palette.error.main, 0.45) : "divider", borderRadius: "16px", cursor: "pointer", transition: "transform 0.16s ease, border-color 0.16s ease", "&:hover": { transform: "translateY(-3px)", borderColor: "primary.main" } }} onClick={onOpen}>
+      <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={1} alignItems="flex-start">
+            <Checkbox checked={Boolean(task.completada)} disabled={disabled} onClick={(event) => event.stopPropagation()} onChange={onToggle} sx={{ p: 0.25 }} />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 900, lineHeight: 1.25, textDecoration: task.completada ? "line-through" : "none", color: task.completada ? "text.secondary" : "text.primary" }}>{task.titulo}</Typography>
+              {task.descripcion && <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }} noWrap>{task.descripcion}</Typography>}
+            </Box>
+          </Stack>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+            <PriorityChip priority={priority} theme={theme} />
+            <ChecklistProgress task={task} />
+          </Stack>
+          <TaskMeta task={task} cliente={cliente} caso={caso} currentPath={currentPath} />
+          <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
+            <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>
+            <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={onDelete}><Delete fontSize="small" /></IconButton></Tooltip>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TaskTable({
+  tasks,
+  totalCount,
+  page,
+  setPage,
+  rowsPerPage,
+  setRowsPerPage,
+  orderBy,
+  order,
+  handleRequestSort,
+  theme,
+  prioridadesById,
+  clientesById,
+  expedientesById,
+  currentPath,
+  onOpen,
+  onToggle,
+  onEdit,
+  onDelete,
+  disabled
+}) {
+  const columns = [
+    { id: "titulo", label: "Tarea" },
+    { id: "prioridad", label: "Prioridad" },
+    { id: "vencimiento", label: "Vencimiento" },
+    { id: "vinculacion", label: "Vinculación" },
+    { id: "checklist", label: "Checklist" },
+    { id: "acciones", label: "Acciones" }
+  ];
+
+  return (
+    <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
+              {columns.map((column) => {
+                const isSortable = column.id !== "acciones";
+                return (
+                  <TableCell
+                    key={column.id}
+                    sortDirection={orderBy === column.id ? order : false}
+                    sx={{
+                      fontWeight: 900,
+                      color: "text.secondary",
+                      fontSize: "0.72rem",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase"
+                    }}
+                  >
+                    {isSortable ? (
+                      <TableSortLabel
+                        active={orderBy === column.id}
+                        direction={orderBy === column.id ? order : "asc"}
+                        onClick={() => handleRequestSort(column.id)}
+                        sx={{
+                          "&.MuiTableSortLabel-active": { color: "text.primary" },
+                          "& .MuiTableSortLabel-icon": { color: "text.secondary" }
+                        }}
+                      >
+                        {column.label}
+                      </TableSortLabel>
+                    ) : (
+                      column.label
+                    )}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {tasks.map((task) => {
+              const cliente = clientesById.get(Number(task.clienteId));
+              const caso = expedientesById.get(Number(task.casoId));
+              return (
+                <TableRow
+                  key={task.id}
+                  hover
+                  sx={{
+                    cursor: "pointer",
+                    "& td": { py: 0.75, px: 2 }
+                  }}
+                  onClick={() => onOpen(task)}
+                >
+                  <TableCell>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Checkbox
+                        checked={Boolean(task.completada)}
+                        disabled={disabled}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => onToggle(event, task)}
+                        size="small"
+                        sx={{ p: 0.5 }}
+                      />
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: 900,
+                            textDecoration: task.completada ? "line-through" : "none",
+                            color: task.completada ? "text.secondary" : "text.primary"
+                          }}
+                        >
+                          {task.titulo}
+                        </Typography>
+                        {task.descripcion && (
+                          <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }} noWrap>
+                            {task.descripcion}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <PriorityChip priority={prioridadesById.get(Number(task.prioridadId))} theme={theme} />
+                  </TableCell>
+                  <TableCell>
+                    <Typography
+                      variant="caption"
+                      sx={{ color: isOverdue(task) ? "error.main" : "text.secondary", fontWeight: 800 }}
+                    >
+                      {formatFriendlyDate(task.fechaLimite)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell sx={{ maxWidth: 240 }}>
+                    <TaskMeta task={task} cliente={cliente} caso={caso} showDate={false} currentPath={currentPath} />
+                  </TableCell>
+                  <TableCell>
+                    <ChecklistProgress task={task} compact />
+                  </TableCell>
+                  <TableCell onClick={(event) => event.stopPropagation()}>
+                    <Tooltip title="Editar">
+                      <IconButton size="small" color="primary" onClick={(event) => onEdit(event, task)}>
+                        <Edit fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Eliminar">
+                      <IconButton size="small" color="error" onClick={(event) => onDelete(event, task)}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <TablePagination
+        component="div"
+        count={totalCount}
+        page={page}
+        onPageChange={(_, newPage) => setPage(newPage)}
+        rowsPerPage={rowsPerPage}
+        onRowsPerPageChange={(event) => {
+          setRowsPerPage(parseInt(event.target.value, 10));
+          setPage(0);
+        }}
+        rowsPerPageOptions={[5, 10, 25, 50]}
+        labelRowsPerPage="Filas por página:"
+        labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count}`}
+        sx={{ borderTop: "1px solid", borderColor: "divider" }}
+      />
+    </Paper>
+  );
+}

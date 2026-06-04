@@ -1,0 +1,1 @@
+ALTER TABLE "terceros" ADD COLUMN "fecha_nacimiento" timestamp;

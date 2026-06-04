@@ -1,0 +1,102 @@
+# Iuris — Cursor Rules & Development Guidelines
+
+Estas reglas son la "Constitución" del proyecto Iuris. Están basadas en tus exitosas convenciones de WellUp, pero adaptadas para una arquitectura **Web SaaS**.
+
+## Stack Tecnológico — NO sugerir alternativas
+
+### Backend (Fastify)
+- **TypeScript** — strict mode.
+- **Drizzle ORM** — queries y definición de esquema.
+- **Drizzle Kit** — migraciones de base de datos.
+- **Zod** — validación de input en endpoints.
+- **@fastify/jwt** — autenticación con JWT + refresh tokens rotativos.
+- **@fastify/swagger** — documentación OpenAPI generada automáticamente desde los schemas Zod.
+- **@fastify/rate-limit** — rate limiting en endpoints de auth.
+- **PostgreSQL** — base de datos relacional.
+
+### Frontend (Web)
+- **React 19 + Vite** — Framework base.
+- **TypeScript** — strict mode activado desde el día 1, sin `any` salvo casos justificados.
+- **Material UI (MUI) v5+** — Sistema de diseño base, provisión de temas claro/oscuro unificados y componentes interactivos premium.
+- **Responsive Design Obligatorio** — Diseño Mobile First. Todas las vistas y pantallas deben soportar y estar optimizadas para Desktop y Mobile desde el día 0. No hay excepciones.
+- **Zustand** — manejo de estado global.
+- **React Hook Form + Zod** — formularios y validación.
+- **MUI Icons (@mui/icons-material)** — Librería de iconos oficial del proyecto.
+- **PostHog** — analytics de producto.
+- **Sentry** — error tracking y performance monitoring.
+
+### Infraestructura
+- **VPS Don Web** — backend + base de datos.
+- **Nginx** — reverse proxy.
+- **PM2** — process manager para Node.js.
+- **Let's Encrypt** — SSL/TLS gratuito.
+- **UptimeRobot** — monitoreo de uptime.
+- **GitHub Actions** — CI/CD.
+
+### Environments
+- **dev** — máquina local, PostgreSQL local, logs verbose, Sentry desactivado.
+- **production** — VPS Don Web, base de datos real, Sentry activo, logs mínimos.
+- Variables de entorno en `.env.local` y `.env.production`, nunca hardcodeadas, validadas con Zod al arrancar.
+
+### Control de Versiones
+- **GitHub Flow** — una rama por feature, PR a main.
+- **Conventional Commits** — feat:, fix:, chore:, docs:, refactor:, test:.
+
+---
+
+## Autenticación y Tokens (Estrategia Web)
+
+A diferencia de React Native (donde usabas `expo-secure-store`), en la Web el almacenamiento seguro de tokens se maneja distinto para evitar ataques XSS (robo de tokens por scripts maliciosos):
+
+- **Access Token (15 minutos)**: Se guarda en **Memoria** (Zustand). El frontend lo envía en el header `Authorization: Bearer <token>`.
+- **Refresh Token (30 días, rotativo)**: Se envía al frontend como una **Cookie `HttpOnly`, `Secure` y `SameSite=Strict`**. JavaScript no puede leer esta cookie, por lo que es inmune a XSS. 
+- **Flujo**: Cuando el Access Token vence, el cliente hace una petición a `/api/v1/auth/refresh`. El navegador envía automáticamente la cookie HttpOnly, y el servidor devuelve un nuevo Access Token. El logout revoca el token en la BD y limpia la cookie.
+- **Hashing**: bcrypt (cost factor 12).
+- **Rate limiting**: 5 intentos fallidos en 15 min → bloqueo 30 min.
+
+---
+
+## Seguridad
+- Validar `estudio_id` obligatoriamente en CADA query. Un usuario NUNCA accede a datos de otro estudio jurídico.
+- TLS 1.2+ obligatorio en todos los endpoints.
+- Headers de seguridad configurados en Nginx (HSTS, X-Frame-Options).
+- Queries parametrizadas con Drizzle ORM — sin concatenación de strings en SQL.
+- Nunca loguear passwords, tokens ni PII (Datos Personales).
+
+---
+
+## Convenciones Backend (Fastify)
+- Cada ruta en su propio archivo dentro de `src/routes/`.
+- Schema Zod definido antes del handler, nunca inline.
+- Respuestas siempre tipadas. Sin `any`.
+- Autenticación mediante hook `preHandler` de Fastify, nunca dentro del handler.
+- Variables de entorno validadas con Zod al arrancar en `src/env.ts`.
+
+## Convenciones Base de Datos (Drizzle ORM)
+- El schema de la DB se define en `src/db/schema.ts` (o dividido por dominios).
+- Migraciones solo con `drizzle-kit generate` y `drizzle-kit migrate`. Nunca SQL manual en producción.
+- Cada migración de Drizzle tiene su rollback.
+- Queries en archivos separados por dominio (`src/db/queries/casos.ts`).
+
+## API y Formato de Respuesta
+- Todos los endpoints bajo `/api/v1/`.
+- Documentación OpenAPI generada con `@fastify/swagger`.
+- Estructura unificada:
+  ```json
+  // Éxito
+  { "data": { ... } }
+  // Error
+  { "error": { "code": "INVALID_INPUT", "message": "..." } }
+  ```
+- **Códigos HTTP**: `200` (Éxito), `201` (Creado), `400` (Input inválido / Zod), `401` (No autenticado), `403` (Sin permisos), `404` (No encontrado), `500` (Error interno).
+
+## Paginación y Fechas
+- Cursor-based o Offset-based (limit/offset) estandarizado.
+- Todas las fechas se almacenan en **UTC** en PostgreSQL.
+- El cliente Web envía y recibe en ISO 8601 (`2026-04-28T15:30:00Z`) y formatea a UTC-3 (Argentina) visualmente.
+
+## Logging
+- Uso de `pino` (integrado en Fastify).
+- `info`: requests entrantes, éxitos.
+- `warn`: fallos de validación, accesos denegados.
+- `error`: excepciones inesperadas (Sentry).

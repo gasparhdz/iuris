@@ -1,0 +1,25 @@
+{
+  "name": "Iuris",
+  "short_name": "Iuris",
+  "description": "Sistema de gestión legal",
+  "start_url": "/lex/",
+  "scope": "/lex/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1565C0",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/lex/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/lex/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
