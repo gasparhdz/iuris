@@ -1,7 +1,9 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
+import { Redis } from "ioredis";
 import { env } from "./env.js";
 import { authPlugin } from "./plugins/auth.plugin.js";
 import { authRoutes } from "./routes/auth.routes.js";
@@ -26,6 +28,7 @@ import { plantillasRoutes } from "./routes/plantillas.routes.js";
 import { adminRoutes } from "./routes/admin.routes.js";
 import { equipoRoutes } from "./routes/equipo.routes.js";
 import { notificacionesRoutes } from "./routes/notificaciones.routes.js";
+import { sseRoutes } from "./routes/sse.routes.js";
 import { searchRoutes } from "./routes/search.routes.js";
 import { auditoriaRoutes } from "./routes/auditoria.routes.js";
 import { sisfeRoutes } from "./routes/sisfe.routes.js";
@@ -33,6 +36,7 @@ import { webhooksRoutes } from "./routes/webhooks.routes.js";
 import { closeSisfeQueue, sisfeSyncQueue } from "./queue/sisfe.queue.js";
 import { closeSisfeWorker } from "./queue/sisfe.worker.js";
 import { closeBrowserPool } from "./services/browser-pool.js";
+import { closeLoginThrottle } from "./services/login-throttle.js";
 import { iniciarCronNotificaciones } from "./services/notificaciones.service.js";
 import { iniciarCronValorJus } from "./services/valorjus-cron.service.js";
 import { iniciarCronStorageWatch } from "./services/storage-watch.service.js";
@@ -70,8 +74,33 @@ const corsOrigin = env.NODE_ENV === "production" && env.CORS_ORIGIN
 server.register(cors, {
   origin: corsOrigin,
 });
+
+// Cabeceras de seguridad (HSTS, X-Frame-Options, X-Content-Type-Options, etc.).
+// - CSP desactivada: la API sirve JSON + Swagger UI + la pagina HTML de retorno de SISFE
+//   (que usa scripts inline); la CSP del SPA debe definirla quien sirve el frontend.
+// - COOP desactivada: el popup de login de SISFE usa window.opener.postMessage; COOP
+//   "same-origin" cortaria esa relacion y rompe el flujo.
+server.register(helmet, {
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+});
+
+// Store de rate-limit en Redis para que el limite sea global entre instancias (no por proceso).
+// Config fail-open: si Redis no responde rapido, no bloquea la request (el limite degrada a no
+// aplicarse en vez de romper el endpoint).
+const rateLimitRedis = new Redis({
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
+  connectTimeout: 500,
+  maxRetriesPerRequest: 1,
+  enableOfflineQueue: false,
+  lazyConnect: true,
+});
+rateLimitRedis.on("error", (err: Error) => server.log.warn({ err }, "Redis de rate-limit no disponible (degradando a sin limite)"));
+
 server.register(rateLimit, {
   global: false, // Solo aplica a rutas que lo configuren explícitamente
+  redis: rateLimitRedis,
 });
 server.register(multipart, {
   limits: {
@@ -83,11 +112,14 @@ server.register(dateSerializationPlugin);
 server.register(errorHandlerPlugin);
 server.register(authPlugin);
 
+// Auditoria de seguridad en el hot path: se ENCOLA (no se await-ea) para no acoplar la
+// escritura (transaccion + advisory lock) al ciclo del request. Un drainer en background la
+// persiste; asi un flood de 401/403 no amplifica el DoS bloqueando cada respuesta.
 server.addHook("onResponse", async (request, reply) => {
   const pathname = new URL(request.url, "http://iuris.local").pathname;
   const isDenied = reply.statusCode === 401 || reply.statusCode === 403;
   if (isDenied) {
-    await SecurityAuditService.log({
+    SecurityAuditService.enqueue({
       evento: "ACCESS_DENIED",
       request,
       statusCode: reply.statusCode,
@@ -96,7 +128,7 @@ server.addHook("onResponse", async (request, reply) => {
   }
 
   if (pathname.startsWith("/api/v1/admin")) {
-    await SecurityAuditService.log({
+    SecurityAuditService.enqueue({
       evento: "ADMIN_ACTION",
       request,
       statusCode: reply.statusCode,
@@ -128,6 +160,7 @@ server.register(plantillasRoutes, { prefix: "/api/v1" });
 server.register(adminRoutes, { prefix: "/api/v1/admin" });
 server.register(equipoRoutes, { prefix: "/api/v1/equipo" });
 server.register(notificacionesRoutes, { prefix: "/api/v1/notificaciones" });
+server.register(sseRoutes, { prefix: "/api/v1/notificaciones/sse" });
 server.register(searchRoutes, { prefix: "/api/v1/search" });
 server.register(auditoriaRoutes, { prefix: "/api/v1/auditoria" });
 server.register(sisfeRoutes, { prefix: "/api/v1/sisfe" });
@@ -209,6 +242,9 @@ async function shutdown(signal: NodeJS.Signals) {
     await closeSisfeWorker();
     await closeSisfeQueue();
     await closeBrowserPool();
+    await SecurityAuditService.flush().catch(() => {});
+    await rateLimitRedis.quit().catch(() => {});
+    await closeLoginThrottle();
     process.exit(0);
   } catch (error) {
     server.log.error(error, "Error durante el cierre ordenado");

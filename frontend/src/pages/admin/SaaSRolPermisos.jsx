@@ -33,6 +33,7 @@ function moduleLabel(modulo) {
     TERCEROS: "Terceros",
     PLANES: "Planes",
     ADJUNTOS: "Adjuntos",
+    EQUIPO: "Equipo",
   };
   return map[modulo] || modulo;
 }

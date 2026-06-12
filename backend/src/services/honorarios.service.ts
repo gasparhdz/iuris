@@ -4,8 +4,10 @@ import { HonorariosQueries } from "../db/queries/honorarios.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
 import { serializeDates } from "../utils/serialize.js";
 import { ValorJusService } from "./valorjus.service.js";
+import { PlanesService } from "./planes.service.js";
 import type { CreateHonorarioInput, HonorarioQueryInput, UpdateHonorarioInput } from "../schemas/honorarios.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
+import { assertMonedaSoportada } from "./moneda.validator.js";
 
 export class HonorariosService {
   static async findAll(estudioId: number, query: HonorarioQueryInput) {
@@ -39,6 +41,7 @@ export class HonorariosService {
   }
 
   static async create(estudioId: number, userId: number, data: CreateHonorarioInput) {
+    await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
     const fechaRegulacion = new Date(data.fechaRegulacion);
@@ -80,6 +83,7 @@ export class HonorariosService {
     const current = await HonorariosQueries.findHonorarioById(id, estudioId);
     if (!current) throw new Error("HONORARIO_NOT_FOUND");
 
+    if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
     const fechaRegulacion = data.fechaRegulacion ? new Date(data.fechaRegulacion) : current.fechaRegulacion;
@@ -197,12 +201,19 @@ export class HonorariosService {
 
   static async recomputeHonorarioEstadoSaldo(id: number, estudioId: number) {
     const honorario = await HonorariosQueries.findHonorarioById(id, estudioId);
-    if (!honorario || honorario.estadoId) return;
+    if (!honorario) return;
 
-    const pendienteId = await this.getPendingEstadoId();
-    if (!pendienteId) return;
+    // Si todavia no tiene estado asignado, sembramos PENDIENTE antes de recomputar por saldo.
+    if (!honorario.estadoId) {
+      const pendienteId = await this.getPendingEstadoId();
+      if (pendienteId) await HonorariosQueries.updateHonorario(id, estudioId, { estadoId: pendienteId });
+    }
 
-    await HonorariosQueries.updateHonorario(id, estudioId, { estadoId: pendienteId });
+    // Un honorario con plan activo se cobra por sus cuotas; su estado no depende de cobros directos.
+    const planActivo = await PlanesQueries.findPlanActivoByHonorarioId(id, estudioId);
+    if (planActivo) return;
+
+    await PlanesService.recomputeHonorarioEstado(id, estudioId);
   }
 
   private static async resolveValorJusRef(
@@ -293,6 +304,8 @@ function normalizeHonorario(honorario: Awaited<ReturnType<typeof HonorariosQueri
   const normalized = {
     ...honorario,
     jus: honorario.jus !== null ? Number(honorario.jus) : null,
+    montoCobrado: honorario.montoCobrado !== undefined && honorario.montoCobrado !== null ? Number(honorario.montoCobrado) : 0,
+    tienePlan: Boolean(honorario.tienePlan),
     montoPesos: honorario.montoPesos !== null ? Number(honorario.montoPesos) : null,
     valorJusRef: honorario.valorJusRef !== null ? Number(honorario.valorJusRef) : null,
     tasaInteresMensual: honorario.tasaInteresMensual !== null ? Number(honorario.tasaInteresMensual) : null,

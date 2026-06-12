@@ -60,4 +60,15 @@ export class CatalogosQueries {
       .where(whereCondition)
       .orderBy(asc(categorias.id), asc(parametros.orden), asc(parametros.nombre));
   }
+
+  /** Devuelve el parámetro de la categoría dada solo si existe y está activo. */
+  static async findActiveParametroByIdAndCategoria(id: number, categoriaCodigo: string) {
+    const [row] = await db
+      .select({ id: parametros.id, codigo: parametros.codigo })
+      .from(parametros)
+      .innerJoin(categorias, eq(parametros.categoriaId, categorias.id))
+      .where(and(eq(parametros.id, id), eq(categorias.codigo, categoriaCodigo), eq(parametros.activo, true)))
+      .limit(1);
+    return row ?? null;
+  }
 }

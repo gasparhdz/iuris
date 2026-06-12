@@ -3,12 +3,13 @@ import { Readable } from "node:stream";
 import { db } from "../db/index.js";
 import { casos, movimientosJudiciales, adjuntos, casoTrazabilidad } from "../db/schema.js";
 import { withContext } from "./browser-pool.js";
-import { SisfeError, attachDiagnostics, buscarExpedientePorCuij, conReintentos, fetchDetalleExpediente, parseFechaHoraSISFE, parseUbicacionActual } from "./sisfe-scraper.service.js";
+import { SisfeError, attachDiagnostics, buscarExpedientePorCuij, conReintentos, esTargetCerrado, fetchDetalleExpediente, parseFechaHoraSISFE, parseUbicacionActual } from "./sisfe-scraper.service.js";
 import { deleteSession, getSession, saveSessionLastSync, updateSyncStatus, type SisfeSyncStats } from "./sisfe-session.service.js";
 import { DriveService } from "./drive.service.js";
 import { getStorage } from "../storage/factory.js";
 import { AdjuntosQueries } from "../db/queries/adjuntos.queries.js";
 import { logger } from "../utils/logger.js";
+import { emitirAUsuario } from "../sse/sse.registry.js";
 
 const log = logger.child({ module: "SISFE-Sync" });
 
@@ -23,9 +24,6 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
     }
 
     await withContext(sesion.cookieName, sesion.cookieValue, async (context) => {
-    const page = await context.newPage();
-    attachDiagnostics(page);
-
     const queryConditions = [
       eq(casos.estudioId, estudioId),
       isNotNull(casos.nroExpte),
@@ -40,6 +38,8 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
       nroExpte: casos.nroExpte,
       caratula: casos.caratula,
       sisfeExpteId: casos.sisfeExpteId,
+      sisfeFechaUltimaActualizacion: casos.sisfeFechaUltimaActualizacion,
+      sisfeExpedienteDigitalAt: casos.sisfeExpedienteDigitalAt,
     })
       .from(casos)
       .where(and(...queryConditions));
@@ -79,6 +79,12 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         `Buscando en SISFE: ${(caso.caratula || cuijBusqueda).substring(0, 50)}...`,
       );
 
+      // Página nueva por expediente: acota la memoria del renderer (cada detalle carga
+      // una página pesada + descarga PDF + reCAPTCHA) y permite recuperar una page colgada
+      // sin arrastrar el problema al resto de los casos.
+      const page = await context.newPage();
+      attachDiagnostics(page);
+
       try {
         const resultadoBusqueda = await conReintentos(
           () => buscarExpedientePorCuij(page, cuijBusqueda),
@@ -101,7 +107,10 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         const nombresExistentes = new Set(adjuntosCaso.map(a => a.nombre.toLowerCase()));
 
         const detalle = await conReintentos(
-          () => fetchDetalleExpediente(page, resultadoBusqueda.sisfeId, cuijBusqueda),
+          () => fetchDetalleExpediente(page, resultadoBusqueda.sisfeId, cuijBusqueda, {
+            fechaUltimaActualizacionPrevia: caso.sisfeFechaUltimaActualizacion,
+            expedienteDigitalDescargadoPreviamente: caso.sisfeExpedienteDigitalAt != null,
+          }),
           `detalle expediente ${cuijBusqueda}`,
         );
         const ubicacionActual = parseUbicacionActual(detalle.ubicacionActual);
@@ -117,6 +126,11 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
             sisfeFechaUbicacionActual: ubicacionActual.fechaDesde,
             sisfeSoloDigital: detalle.soloDigital,
             sisfeFechaUltimaActualizacion: parseFechaHoraSISFE(detalle.ultimaActualizacion),
+            // Sólo se actualiza cuando esta corrida obtuvo un PDF válido; si se omitió la
+            // descarga (sin novedades) se conserva el valor previo para no perder el gate.
+            ...(detalle.expedienteDigital
+              ? { sisfeExpedienteDigitalAt: parseFechaHoraSISFE(detalle.ultimaActualizacion) ?? new Date() }
+              : {}),
             updatedAt: new Date(),
             updatedBy: usuarioId,
           })
@@ -160,16 +174,24 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         }
 
         for (const mov of detalle.movimientos) {
-          const existe = await db.select({
+          // El lookup se acota al expediente (caso.id): sisfeMovId es un id global del
+          // portal, asi que filtrar solo por sisfeMovId mezclaria movimientos entre
+          // estudios que sigan el mismo expediente publico.
+          const [existe] = await db.select({
             id: movimientosJudiciales.id,
             novedad: movimientosJudiciales.novedad,
           })
             .from(movimientosJudiciales)
-            .where(eq(movimientosJudiciales.sisfeMovId, mov.sisfeMovId))
+            .where(and(
+              eq(movimientosJudiciales.casoId, caso.id),
+              eq(movimientosJudiciales.sisfeMovId, mov.sisfeMovId),
+            ))
             .limit(1);
 
-          if (existe.length === 0) {
-            await db.insert(movimientosJudiciales).values({
+          if (!existe) {
+            // onConflictDoNothing cierra la carrera SELECT->INSERT entre dos sync
+            // concurrentes del mismo estudio (el unique index garantiza no duplicar).
+            const inserted = await db.insert(movimientosJudiciales).values({
               casoId: caso.id,
               estudioId,
               fecha: parseFechaSISFE(mov.fecha),
@@ -179,20 +201,18 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
               sisfeMovId: mov.sisfeMovId,
               origenSisfe: true,
               createdBy: usuarioId,
-            });
-            stats.movimientosNuevos++;
-          } else {
-            const dbMov = existe[0];
-            if (dbMov && !dbMov.novedad && mov.novedad) {
-              await db.update(movimientosJudiciales)
-                .set({
-                  novedad: mov.novedad,
-                  descripcion: mov.observacion || null,
-                })
-                .where(eq(movimientosJudiciales.id, dbMov.id));
-            }
+            })
+              .onConflictDoNothing({ target: [movimientosJudiciales.casoId, movimientosJudiciales.sisfeMovId] })
+              .returning({ id: movimientosJudiciales.id });
+            if (inserted.length > 0) stats.movimientosNuevos++;
+          } else if (!existe.novedad && mov.novedad) {
+            await db.update(movimientosJudiciales)
+              .set({
+                novedad: mov.novedad,
+                descripcion: mov.observacion || null,
+              })
+              .where(eq(movimientosJudiciales.id, existe.id));
           }
-
         }
 
         stats.actualizados++;
@@ -214,7 +234,17 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
           return;
         }
 
+        // El navegador/contexto se cerró (crash de Chrome): abortar toda la sincronización.
+        // Continuar con el resto de los casos solo encadenaría más errores de "Target closed".
+        if (esTargetCerrado(error)) {
+          log.error({ err: error, casoId: caso.id }, "[SISFE Sync] El navegador se cerró durante la sincronización; abortando.");
+          await updateSyncStatus(usuarioId, "error", progress, "Se interrumpió la conexión con el navegador durante la sincronización. Volvé a intentar en unos minutos.");
+          return;
+        }
+
         log.error({ err: error }, `[SISFE Sync] Error al sincronizar caso ${caso.id}`);
+      } finally {
+        await page.close().catch(() => {});
       }
     }
 
@@ -223,6 +253,15 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
       : "Sincronización completada.";
     await updateSyncStatus(usuarioId, "done", 100, mensajeFinal, stats);
     await saveSessionLastSync(usuarioId);
+
+    // Empujar novedades en tiempo real a la campanita del usuario que sincronizó.
+    if (stats.movimientosNuevos > 0) {
+      emitirAUsuario(usuarioId, "novedades", {
+        tipo: "sisfe_novedades",
+        nuevos: stats.movimientosNuevos,
+        expedientes: stats.actualizados,
+      });
+    }
     });
   } catch (error: unknown) {
     if (error instanceof SisfeError) {

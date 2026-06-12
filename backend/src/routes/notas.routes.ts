@@ -13,10 +13,12 @@ import {
 
 export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("NOTAS", accion)],
+  });
 
   server.get("/clientes/:clienteId/notas", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Notas"],
       summary: "Listar notas de un cliente",
@@ -27,7 +29,7 @@ export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   }, NotasController.findByCliente);
 
   server.post("/clientes/:clienteId/notas", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Notas"],
       summary: "Agregar nota a un cliente",
@@ -39,7 +41,7 @@ export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   }, NotasController.createCliente);
 
   server.delete("/clientes/notas/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Notas"],
       summary: "Eliminar nota de cliente",
@@ -50,7 +52,7 @@ export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   }, NotasController.deleteCliente);
 
   server.get("/expedientes/:casoId/notas", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Notas"],
       summary: "Listar notas de un expediente",
@@ -61,7 +63,7 @@ export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   }, NotasController.findByCaso);
 
   server.post("/expedientes/:casoId/notas", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Notas"],
       summary: "Agregar nota a un expediente",
@@ -73,7 +75,7 @@ export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   }, NotasController.createCaso);
 
   server.delete("/expedientes/notas/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Notas"],
       summary: "Eliminar nota de expediente",

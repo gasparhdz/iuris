@@ -12,14 +12,19 @@ import type {
   UpdateProfileInput,
 } from "../schemas/auth.schema.js";
 import { sendEmail } from "../utils/email.js";
+import { assertAccountNotLocked, clearLoginThrottle, registerFailedLogin } from "./login-throttle.js";
 
 type RefreshTokenMeta = { userAgent?: string; ip?: string };
 
 export class AuthService {
   static async login(data: LoginInput) {
+    // 0. Rate-limit por cuenta (anti brute-force distribuido, complementa el límite por IP).
+    await assertAccountNotLocked(data.email);
+
     // 1. Buscar usuario
     const user = await AuthQueries.findUserByEmail(data.email);
     if (!user) {
+      await registerFailedLogin(data.email);
       throw new Error("INVALID_CREDENTIALS");
     }
 
@@ -35,10 +40,12 @@ export class AuthService {
     // 2. Verificar contraseña (cost factor 12)
     const isValid = await bcrypt.compare(data.password, user.passwordHash);
     if (!isValid) {
+      await registerFailedLogin(data.email);
       throw new Error("INVALID_CREDENTIALS");
     }
 
-    // 3. Actualizar last_login
+    // 3. Login válido: limpiar contador y actualizar last_login
+    await clearLoginThrottle(data.email);
     await AuthQueries.updateUserLastLogin(user.id);
 
     // Obtener el rol del usuario (simplificado, asume que tiene al menos uno)
@@ -240,9 +247,18 @@ export class AuthService {
     const { roles: userRoles, permisos: userPermisos } = await AuthQueries.findUserRolesAndPermissions(userId);
     const estudio = await AuthQueries.findEstudioById(user.estudioId);
 
-    // Fallback inteligente para titulares de estudio en desarrollo si no hay permisos guardados
+    // Conveniencia SOLO para desarrollo: si un titular de estudio quedo sin permisos
+    // persistidos (p. ej. seeds no corridos), se le otorga acceso total para no trabar el
+    // entorno local. En produccion esto NUNCA debe ocurrir: los permisos son la fuente de
+    // verdad (rol DIRECTOR se siembra con acceso total en seedRolesPermisos), y conceder
+    // god-mode ante su ausencia seria una escalada de privilegios fail-open. Produccion es
+    // fail-closed: sin permisos persistidos, sin permisos.
     let finalPermisos = userPermisos;
-    if ((userRoles.includes("DIRECTOR") || userRoles.includes("ADMIN")) && userPermisos.length === 0) {
+    if (
+      env.NODE_ENV !== "production"
+      && (userRoles.includes("DIRECTOR") || userRoles.includes("ADMIN"))
+      && userPermisos.length === 0
+    ) {
       const modulos = [
         "CLIENTES", "CASOS", "TAREAS", "EVENTOS", "HONORARIOS", 
         "GASTOS", "INGRESOS", "PLANTILLAS", "NOTAS", "VALORJUS", 

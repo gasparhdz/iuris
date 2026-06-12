@@ -13,10 +13,12 @@ import {
 
 export const gastosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("GASTOS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Gastos"],
       summary: "Listar gastos",
@@ -27,7 +29,7 @@ export const gastosRoutes: FastifyPluginAsync = async (fastify) => {
   }, GastosController.findAll);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Gastos"],
       summary: "Registrar gasto",
@@ -38,7 +40,7 @@ export const gastosRoutes: FastifyPluginAsync = async (fastify) => {
   }, GastosController.create);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Gastos"],
       summary: "Modificar gasto",
@@ -50,7 +52,7 @@ export const gastosRoutes: FastifyPluginAsync = async (fastify) => {
   }, GastosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Gastos"],
       summary: "Eliminar gasto",

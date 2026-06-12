@@ -1,5 +1,7 @@
 import { type Locator, type Page } from "playwright";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SEL } from "./sisfe-selectors.js";
 import { logger } from "../utils/logger.js";
 
@@ -36,7 +38,11 @@ export async function conReintentos<T>(
       if (error instanceof SisfeError && !error.retryable) {
         throw error;
       }
-      if (intento >= maxIntentos || (error instanceof SisfeError && !error.retryable)) {
+      // Si la página/contexto/navegador se cerró, reintentar es inútil: abortar ya.
+      if (esTargetCerrado(error)) {
+        throw error;
+      }
+      if (intento >= maxIntentos) {
         break;
       }
 
@@ -61,6 +67,67 @@ function safeUrl(value: string) {
 
 function esTimeoutPlaywright(error: unknown): boolean {
   return error instanceof Error && error.name === "TimeoutError";
+}
+
+// El navegador/contexto/página se cerró (crash de Chrome, navegación abortada, etc.).
+// Reintentar no tiene sentido: la sesión Playwright ya no existe.
+export function esTargetCerrado(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === "TargetClosedError"
+    || /target (page|closed)|context or browser has been closed/i.test(error.message);
+}
+
+// Detección de sesión vencida por respuestas 401/403 del backend de SISFE.
+// Cuando la sesión murió, el SPA Angular carga la página igual (HTTP 200) y muestra
+// el formulario un instante, pero su guard de auth dispara 401 en /iol/* y recién
+// después redirige a /login. Por eso no alcanza con mirar la URL: marcamos la página
+// en cuanto vemos un 401/403 del dominio para cortar antes de operar sobre el DOM.
+const paginasConSesionVencida = new WeakSet<Page>();
+
+export function sesionVencidaDetectada(page: Page): boolean {
+  return paginasConSesionVencida.has(page);
+}
+
+// Captura el estado de la página (screenshot + HTML + estado del input + overlays) cuando
+// una interacción falla, para poder diagnosticar por qué SISFE no responde. Devuelve la ruta
+// del screenshot. No lanza: el diagnóstico nunca debe romper el flujo principal.
+async function capturarDiagnostico(page: Page, input: Locator | null, etiqueta: string): Promise<void> {
+  try {
+    const base = `sisfe-debug-${etiqueta}-${Date.now()}`.replace(/[^a-z0-9-]/gi, "_");
+    const pngPath = path.join(os.tmpdir(), `${base}.png`);
+    const htmlPath = path.join(os.tmpdir(), `${base}.html`);
+
+    await page.screenshot({ path: pngPath, fullPage: true }).catch(() => {});
+    await page.content().then((html) => fs.promises.writeFile(htmlPath, html)).catch(() => {});
+
+    let estadoInput = "n/a";
+    if (input) {
+      const count = await input.count().catch(() => 0);
+      if (count === 0) {
+        estadoInput = "input ausente del DOM (count=0)";
+      } else {
+        const [visible, editable, enabled] = await Promise.all([
+          input.isVisible().catch(() => false),
+          input.isEditable().catch(() => false),
+          input.isEnabled().catch(() => false),
+        ]);
+        estadoInput = `visible=${visible} editable=${editable} enabled=${enabled}`;
+      }
+    }
+
+    // Modales/overlays que suelen interceptar clics (Bootstrap, Angular CDK).
+    const overlays = await page
+      .locator(".modal.show, .modal-backdrop, [role='dialog'], .cdk-overlay-backdrop")
+      .count()
+      .catch(() => 0);
+
+    log.warn(
+      { etiqueta, url: page.url(), estadoInput, overlays, screenshot: pngPath, html: htmlPath },
+      `[Scraper] Diagnostico de falla de interaccion`,
+    );
+  } catch (err) {
+    log.warn({ err }, "[Scraper] No se pudo capturar el diagnostico");
+  }
 }
 
 function normalizarTexto(value: string): string {
@@ -137,6 +204,26 @@ async function esperarDescarga(page: Page) {
       throw new SisfeError("TIMEOUT_DESCARGA", "La descarga del expediente digital no respondio a tiempo.", true, error);
     }
     throw error;
+  }
+}
+
+// Tras navegar a una página protegida, decide si la sesión está viva.
+// Espera a que el SPA resuelva (renderiza el contenido o redirige a /login) y deja un
+// margen para que lleguen los 401 del guard de Angular antes de operar sobre el DOM.
+async function verificarSesionTrasCarga(page: Page, selectorEsperado: string, descripcionDom: string): Promise<void> {
+  const redirige = page.waitForURL(/\/login/, { timeout: 15000 }).then(() => true).catch(() => false);
+  const aparece = page.waitForSelector(selectorEsperado, { state: "visible", timeout: 15000 }).then(() => true).catch(() => false);
+  const resuelto = await Promise.race([redirige, aparece]);
+
+  // El form puede aparecer un instante antes de que el guard redirija a /login;
+  // este margen permite captar el 401 / la redirección tardía.
+  await page.waitForTimeout(1200);
+
+  if (sesionExpirada(page.url()) || sesionVencidaDetectada(page)) {
+    throw new SisfeError("SESION_EXPIRADA", "Sesion SISFE expirada.", false);
+  }
+  if (!resuelto) {
+    throw new SisfeError("DOM_CHANGED", `No se encontro ${descripcionDom}.`, false);
   }
 }
 
@@ -227,31 +314,54 @@ export function attachDiagnostics(page: Page): void {
     log.error(`[Browser Network Error]: Request to ${safeUrl(req.url())} failed: ${req.failure()?.errorText}`);
   });
   page.on("response", (res) => {
-    if (res.status() >= 400) {
-      log.error(`[Browser Network Error]: Response from ${safeUrl(res.url())} returned status ${res.status()}`);
+    const status = res.status();
+    if ((status === 401 || status === 403) && res.url().includes("/iol/")) {
+      paginasConSesionVencida.add(page);
+    }
+    if (status >= 400) {
+      log.error(`[Browser Network Error]: Response from ${safeUrl(res.url())} returned status ${status}`);
     }
   });
 }
 
+// SISFE recuerda la última búsqueda: al reingresar a /buscar-expediente muestra los resultados
+// previos con el panel "Filtros de Búsqueda" colapsado, por lo que el campo CUIJ no está en el
+// DOM. Si falta, se expande el panel haciendo click en su encabezado.
+async function asegurarFormularioBusqueda(page: Page): Promise<void> {
+  const input = page.locator(SEL.search.cuijInput).first();
+  if (await input.count().catch(() => 0) > 0) return;
+
+  const header = page.locator(SEL.search.filtrosHeading, { hasText: /Filtros de B/i }).first();
+  if (await header.count().catch(() => 0) === 0) return;
+
+  await header.click({ timeout: 5000 }).catch(() => {});
+  await input.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
+}
+
 export async function buscarExpedientePorCuij(page: Page, cuij: string): Promise<ResultadoBusquedaSisfe | null> {
   await gotoSisfe(page, `${SISFE_BASE_URL}/buscar-expediente`);
-  const waitSelector = page.waitForSelector(SEL.search.readyButton, { timeout: 15000 }).catch(() => null);
-  const waitRedirect = page.waitForURL(/\/login/, { timeout: 15000 }).catch(() => null);
-  const ready = await Promise.race([waitSelector, waitRedirect]);
-  if (sesionExpirada(page.url())) throw new SisfeError("SESION_EXPIRADA", "Sesion SISFE expirada.", false);
-  if (!ready) throw new SisfeError("DOM_CHANGED", "No se encontro el formulario de busqueda SISFE.", false);
+  // Se espera el encabezado "Filtros de Búsqueda" (presente con el panel abierto o cerrado),
+  // no el botón, que puede no estar visible cuando SISFE muestra los resultados previos.
+  await verificarSesionTrasCarga(page, SEL.search.filtrosHeading, "el formulario de busqueda SISFE");
+  await asegurarFormularioBusqueda(page);
 
   const input = page.locator(SEL.search.cuijInput).first();
-  await input.click();
-  await input.fill("");
-  await input.fill(cuij).catch(async () => {
-    await input.click();
+  // `fill` espera a que el campo esté visible/editable pero no exige estabilidad de
+  // posición ni "recibe eventos" como `click`, así que es menos propenso a colgarse
+  // 30s si hay un overlay/re-render de Angular. Timeout acotado + fallback por teclado.
+  try {
+    await input.fill(cuij, { timeout: 15000 });
+  } catch {
+    // El campo no respondió: capturar evidencia (screenshot/HTML/estado) antes de reintentar.
+    await capturarDiagnostico(page, input, `cuij-${cuij}`);
+    await input.click({ timeout: 5000 });
+    await input.fill("");
     await page.keyboard.type(cuij);
-  });
-  await page.click(SEL.search.readyButton);
+  }
+  await page.click(SEL.search.readyButton, { timeout: 15000 });
 
   await page.waitForSelector(SEL.search.feedbackOrResult, { timeout: 15000 }).catch(() => {});
-  if (sesionExpirada(page.url())) throw new SisfeError("SESION_EXPIRADA", "Sesion SISFE expirada.", false);
+  if (sesionExpirada(page.url()) || sesionVencidaDetectada(page)) throw new SisfeError("SESION_EXPIRADA", "Sesion SISFE expirada.", false);
 
   const mensajeOk = await page.$(SEL.search.okMessage);
   if (!mensajeOk) return null;
@@ -274,13 +384,21 @@ export async function buscarExpedientePorCuij(page: Page, cuij: string): Promise
   return { sisfeId, nroCujEncontrado, caratula, fechaInicio, ultimaActualizacion, radicacion };
 }
 
-export async function fetchDetalleExpediente(page: Page, sisfeId: string, nroCuj: string): Promise<ExpedienteDetalleSisfe> {
+export interface OpcionesDetalleExpediente {
+  // Fecha de "última actualización del expte" registrada en el último sync exitoso.
+  fechaUltimaActualizacionPrevia?: Date | null;
+  // true si ya tenemos descargado el expediente digital (PDF) de un sync anterior.
+  expedienteDigitalDescargadoPreviamente?: boolean;
+}
+
+export async function fetchDetalleExpediente(
+  page: Page,
+  sisfeId: string,
+  nroCuj: string,
+  opciones: OpcionesDetalleExpediente = {},
+): Promise<ExpedienteDetalleSisfe> {
   await gotoSisfe(page, `${SISFE_BASE_URL}/detalle-expediente/${sisfeId}`);
-  const waitSelector = page.waitForSelector(SEL.detail.header, { timeout: 15000 }).catch(() => null);
-  const waitRedirect = page.waitForURL(/\/login/, { timeout: 15000 }).catch(() => null);
-  const ready = await Promise.race([waitSelector, waitRedirect]);
-  if (sesionExpirada(page.url())) throw new SisfeError("SESION_EXPIRADA", "Sesion SISFE expirada.", false);
-  if (!ready) throw new SisfeError("DOM_CHANGED", "No se encontro el encabezado del detalle SISFE.", false);
+  await verificarSesionTrasCarga(page, SEL.detail.header, "el encabezado del detalle SISFE");
 
   // Esperar 3 segundos para que los scripts en segundo plano (reCAPTCHA, etc.) se inicialicen por completo
   await page.waitForTimeout(3000);
@@ -301,10 +419,24 @@ export async function fetchDetalleExpediente(page: Page, sisfeId: string, nroCuj
   const ultimaActualizacion = await extraerCampoDetalle(page, "Ultima actualizacion del expte al:");
 
   // --- Descargar expediente digital completo de forma prioritaria ---
+  // Optimización: el PDF consolidado sólo cambia cuando hay un movimiento nuevo, lo que se
+  // refleja en "Última actualización del expte". Si esa fecha no cambió desde el último sync
+  // Y ya tenemos el PDF descargado, salteamos la descarga (la parte más cara y frágil del
+  // scraper). La segunda condición evita no reintentar nunca un PDF que falló antes.
+  const fechaActualUltimaActualizacion = parseFechaHoraSISFE(ultimaActualizacion);
+  const sinNovedades = Boolean(
+    opciones.fechaUltimaActualizacionPrevia &&
+    fechaActualUltimaActualizacion &&
+    fechaActualUltimaActualizacion.getTime() === opciones.fechaUltimaActualizacionPrevia.getTime(),
+  );
+  const omitirDescargaExpediente = sinNovedades && Boolean(opciones.expedienteDigitalDescargadoPreviamente);
+
   let expedienteDigital = null;
   let expedienteDigitalFallido = false;
   const btnDescargarExpediente = page.locator(SEL.detail.downloadButton).first();
-  if (await btnDescargarExpediente.count().catch(() => 0) > 0) {
+  if (omitirDescargaExpediente) {
+    log.info("[Scraper] Expediente sin novedades desde el ultimo sync; se omite la descarga del PDF consolidado.");
+  } else if (await btnDescargarExpediente.count().catch(() => 0) > 0) {
     try {
       log.info("[Scraper] Boton de descarga de expediente digital detectado.");
       await btnDescargarExpediente.scrollIntoViewIfNeeded().catch(() => {});

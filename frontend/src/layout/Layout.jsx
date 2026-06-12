@@ -6,7 +6,6 @@ import { alpha } from "@mui/material/styles";
 import {
   AppBar,
   Avatar,
-  Badge,
   Box,
   Chip,
   CircularProgress,
@@ -45,7 +44,6 @@ import {
   LightModeOutlined,
   Logout as LogoutIcon,
   Menu as MenuIcon,
-  NotificationsOutlined as NotificationsIcon,
   People as PeopleIcon,
   Search as SearchIcon,
   CalendarMonth as CalendarIcon,
@@ -58,26 +56,28 @@ import {
 import { useThemeMode } from "../theme/ThemeModeProvider";
 import { PaletteSelector } from "../theme/PaletteSelector";
 import { FinanzasModalsProvider } from "../components/finanzas/FinanzasModalsProvider";
-import { getNotificacionesPendientes } from "../api/notificaciones.api";
 import { globalSearch } from "../api/search.api";
 import BrandLogo from "../components/BrandLogo";
+import ErrorBoundary from "../components/ErrorBoundary";
 
 const drawerWidth = 240;
 const collapsedDrawerWidth = 72;
 
+// `modulo` => requiere ver ese modulo; `modulos` => requiere ver al menos uno (vistas
+// agregadas como Agenda/Finanzas/Reportes); `roles` => gateado por rol. Sin nada => libre.
 const allMenuItems = [
   { text: "Dashboard", icon: <DashboardIcon />, path: "/" },
-  { text: "Clientes", icon: <PeopleIcon />, path: "/clientes" },
-  { text: "Terceros", icon: <ContactMail />, path: "/contactos" },
-  { text: "Expedientes", icon: <FolderIcon />, path: "/expedientes" },
-  { text: "Agenda", icon: <CalendarIcon />, path: "/agenda" },
-  { text: "Tareas", icon: <TaskIcon />, path: "/tareas" },
-  { text: "Eventos", icon: <EventIcon />, path: "/eventos" },
-  { text: "Finanzas", icon: <PaidIcon />, path: "/finanzas" },
-  { text: "Reportes", icon: <BarChartIcon />, path: "/reportes" },
-  { text: "Mi Equipo", icon: <GroupIcon />, path: "/equipo", roles: ["DIRECTOR"] },
+  { text: "Clientes", icon: <PeopleIcon />, path: "/clientes", modulo: "CLIENTES" },
+  { text: "Terceros", icon: <ContactMail />, path: "/contactos", modulo: "TERCEROS" },
+  { text: "Expedientes", icon: <FolderIcon />, path: "/expedientes", modulo: "CASOS" },
+  { text: "Agenda", icon: <CalendarIcon />, path: "/agenda", modulos: ["EVENTOS", "TAREAS"] },
+  { text: "Tareas", icon: <TaskIcon />, path: "/tareas", modulo: "TAREAS" },
+  { text: "Eventos", icon: <EventIcon />, path: "/eventos", modulo: "EVENTOS" },
+  { text: "Finanzas", icon: <PaidIcon />, path: "/finanzas", modulos: ["HONORARIOS", "GASTOS", "INGRESOS", "PLANES"] },
+  { text: "Reportes", icon: <BarChartIcon />, path: "/reportes", modulos: ["HONORARIOS", "GASTOS", "INGRESOS"] },
+  { text: "Mi Equipo", icon: <GroupIcon />, path: "/equipo", modulo: "EQUIPO" },
   { text: "Auditoría", icon: <AuditoriaIcon />, path: "/auditoria", roles: ["DIRECTOR"] },
-  { text: "Plantillas", icon: <DescriptionIcon />, path: "/plantillas" },
+  { text: "Plantillas", icon: <DescriptionIcon />, path: "/plantillas", modulo: "PLANTILLAS" },
 ];
 
 const emptySearchResults = {
@@ -107,9 +107,6 @@ export default function Layout() {
   const location = useLocation();
   const [open, setOpen] = useState(!isMobile);
   const [anchorEl, setAnchorEl] = useState(null);
-  const [notifAnchorEl, setNotifAnchorEl] = useState(null);
-  const [notificaciones, setNotificaciones] = useState({ tareas: [], eventos: [], total: 0 });
-  const [notifLoading, setNotifLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState(emptySearchResults);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -120,11 +117,17 @@ export default function Layout() {
   const roles = Array.isArray(user?.roles) ? user.roles : [];
   const singleRole = user?.rol ? [user.rol] : [];
   const canManageValoresJus = roles.includes("DIRECTOR") || user?.rol === "DIRECTOR";
+  const puedeVerModulo = (modulo) =>
+    (user?.permisos ?? []).some((p) => p.modulo === modulo && p.ver === true);
   const menuItems = allMenuItems.filter((item) => {
-    if (!item.roles) return true;
-    const userRol = String(user?.rol ?? "").toUpperCase();
-    const userRoles = roles.map((role) => String(role).toUpperCase());
-    return item.roles.some((role) => role === userRol || userRoles.includes(role));
+    if (item.roles) {
+      const userRol = String(user?.rol ?? "").toUpperCase();
+      const userRoles = roles.map((role) => String(role).toUpperCase());
+      if (!item.roles.some((role) => role === userRol || userRoles.includes(role))) return false;
+    }
+    if (item.modulo && !puedeVerModulo(item.modulo)) return false;
+    if (item.modulos && !item.modulos.some(puedeVerModulo)) return false;
+    return true;
   });
   const isPlatformAdmin = Number(user?.estudioId) === 1 && [...roles, ...singleRole].some(
     (role) => ["SUPERADMIN", "ADMIN"].includes(String(role).toUpperCase())
@@ -188,37 +191,6 @@ export default function Layout() {
     };
   }, [searchQuery]);
 
-  useEffect(() => {
-    let active = true;
-
-    const loadNotificaciones = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-
-      setNotifLoading(true);
-      try {
-        const response = await getNotificacionesPendientes(token);
-        if (active) {
-          setNotificaciones(response.data ?? { tareas: [], eventos: [], total: 0 });
-        }
-      } catch {
-        if (active) {
-          setNotificaciones({ tareas: [], eventos: [], total: 0 });
-        }
-      } finally {
-        if (active) setNotifLoading(false);
-      }
-    };
-
-    loadNotificaciones();
-    const intervalId = window.setInterval(loadNotificaciones, 5 * 60 * 1000);
-
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-  }, [user?.id]);
-
   const toggleDrawer = () => {
     setOpen((current) => !current);
   };
@@ -229,28 +201,6 @@ export default function Layout() {
 
   const handleClose = () => {
     setAnchorEl(null);
-  };
-
-  const handleNotifClick = (event) => {
-    setNotifAnchorEl(event.currentTarget);
-  };
-
-  const handleNotifClose = () => {
-    setNotifAnchorEl(null);
-  };
-
-  const formatNotifDate = (value) => {
-    if (!value) return "Sin fecha";
-    return new Date(value).toLocaleString("es-AR", {
-      timeZone: "America/Argentina/Buenos_Aires",
-      dateStyle: "short",
-      timeStyle: "short",
-    });
-  };
-
-  const handleGoToTareas = () => {
-    handleNotifClose();
-    navigate("/tareas");
   };
 
   const closeSearch = () => {
@@ -689,99 +639,6 @@ export default function Layout() {
               </IconButton>
             </Tooltip>
 
-            <Tooltip title="Recordatorios próximos">
-              <IconButton onClick={handleNotifClick} size="small" sx={{ color: "text.secondary" }}>
-                <Badge badgeContent={notificaciones.total || 0} color="error">
-                  <NotificationsIcon fontSize="small" />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
-            <Popover
-              open={Boolean(notifAnchorEl)}
-              anchorEl={notifAnchorEl}
-              onClose={handleNotifClose}
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              transformOrigin={{ vertical: "top", horizontal: "right" }}
-              PaperProps={{
-                sx: {
-                  mt: 1,
-                  width: { xs: 320, sm: 380 },
-                  maxWidth: "calc(100vw - 24px)",
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: "12px",
-                  boxShadow: (appTheme) =>
-                    appTheme.palette.mode === "dark"
-                      ? "0 18px 48px rgba(0,0,0,0.45)"
-                      : "0 18px 48px rgba(15,23,42,0.12)",
-                },
-              }}
-            >
-              <Box sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
-                  Recordatorios próximos
-                </Typography>
-                <Chip size="small" color="primary" label={notificaciones.total || 0} />
-              </Box>
-              <Divider />
-              <Box sx={{ maxHeight: 360, overflowY: "auto" }}>
-                {notifLoading ? (
-                  <Box sx={{ py: 4, display: "flex", justifyContent: "center" }}>
-                    <CircularProgress size={24} />
-                  </Box>
-                ) : (notificaciones.total || 0) === 0 ? (
-                  <Typography variant="body2" sx={{ px: 2, py: 3, color: "text.secondary" }}>
-                    Sin recordatorios próximos
-                  </Typography>
-                ) : (
-                  <List dense sx={{ py: 0 }}>
-                    {notificaciones.tareas?.map((tarea) => (
-                      <ListItem key={`tarea-${tarea.id}`} divider alignItems="flex-start">
-                        <ListItemText
-                          primary={`📌 ${tarea.titulo}`}
-                          secondary={formatNotifDate(tarea.recordatorio)}
-                          primaryTypographyProps={{ fontWeight: 800, fontSize: "0.9rem" }}
-                          secondaryTypographyProps={{ color: "text.secondary" }}
-                        />
-                      </ListItem>
-                    ))}
-                    {notificaciones.eventos?.map((evento) => (
-                      <ListItem key={`evento-${evento.id}`} divider alignItems="flex-start">
-                        <ListItemText
-                          primary={`📅 ${evento.descripcion || "Evento sin descripción"}`}
-                          secondary={formatNotifDate(evento.recordatorio)}
-                          primaryTypographyProps={{ fontWeight: 800, fontSize: "0.9rem" }}
-                          secondaryTypographyProps={{ color: "text.secondary" }}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
-              </Box>
-              <Divider />
-              <Box
-                component="button"
-                type="button"
-                onClick={handleGoToTareas}
-                sx={{
-                  width: "100%",
-                  border: 0,
-                  bgcolor: "transparent",
-                  color: "primary.main",
-                  cursor: "pointer",
-                  px: 2,
-                  py: 1.5,
-                  font: "inherit",
-                  fontWeight: 800,
-                  textAlign: "left",
-                  "&:hover": { bgcolor: "action.hover" },
-                }}
-              >
-                Ver todas las tareas
-              </Box>
-            </Popover>
-
             <Divider orientation="vertical" flexItem sx={{ my: 1, display: { xs: "none", sm: "block" } }} />
 
             {/* Perfil de Usuario con Nombre y Rol en pantallas medianas/grandes */}
@@ -1053,7 +910,9 @@ export default function Layout() {
                 transition={{ duration: 0.18, ease: "easeOut" }}
                 style={{ width: "100%", minWidth: 0 }}
               >
-                <Outlet />
+                <ErrorBoundary resetKey={location.pathname}>
+                  <Outlet />
+                </ErrorBoundary>
               </motion.div>
             </AnimatePresence>
           </FinanzasModalsProvider>

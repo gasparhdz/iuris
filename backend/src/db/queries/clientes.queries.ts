@@ -1,7 +1,7 @@
 import { and, desc, eq, getTableColumns, ilike, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, clientes, contactosClientes, eventos, gastos, honorarios, ingresoAplicaciones, ingresos, notasCliente, parametros, tareas } from "../schema.js";
+import { casos, clientes, contactosClientes, eventos, gastos, honorarios, ingresoAplicaciones, ingresos, notasCliente, parametros, planesPago, tareas } from "../schema.js";
 
 type NewCliente = typeof clientes.$inferInsert;
 type NewContactoCliente = typeof contactosClientes.$inferInsert;
@@ -229,6 +229,24 @@ export class ClientesQueries {
         fechaVencimiento: honorarios.fechaVencimiento,
         tasaInteresMensual: honorarios.tasaInteresMensual,
         estadoId: honorarios.estadoId,
+        // Capital cobrado por cobro directo (aplicaciones activas con honorario_id) y si tiene
+        // plan activo. Necesarios para que el detalle del cliente calcule el saldo real del
+        // honorario (bruto - cobrado), igual que la grilla principal de honorarios.
+        montoCobrado: sql<string>`coalesce((
+          select sum(${ingresoAplicaciones.montoCapital})
+          from ${ingresoAplicaciones}
+          inner join ${ingresos} on ${ingresos.id} = ${ingresoAplicaciones.ingresoId}
+          where ${ingresoAplicaciones.honorarioId} = ${honorarios.id}
+            and ${ingresoAplicaciones.activo} = true
+            and ${ingresoAplicaciones.deletedAt} is null
+            and ${ingresos.deletedAt} is null
+        ), 0)`,
+        tienePlan: sql<boolean>`exists (
+          select 1 from ${planesPago}
+          where ${planesPago.honorarioId} = ${honorarios.id}
+            and ${planesPago.activo} = true
+            and ${planesPago.deletedAt} is null
+        )`,
         activo: honorarios.activo,
         createdAt: honorarios.createdAt,
         createdBy: honorarios.createdBy,

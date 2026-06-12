@@ -1,20 +1,14 @@
 import crypto from "node:crypto";
-import { asc } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "./index.js";
 import { securityAudit } from "./schema.js";
 import {
   computeSecurityAuditRowHash,
   SecurityAuditService,
+  verifyAuditChainRows,
   type SecurityAuditHashInput,
 } from "../services/security-audit.service.js";
 import { env } from "../env.js";
-
-type VerificationFailure = {
-  id: number;
-  reason: "previous_hash_mismatch" | "row_hash_mismatch";
-  expected: string | null;
-  actual: string | null;
-};
 
 function parseConcurrencyArg() {
   const arg = process.argv.find((value) => value.startsWith("--concurrency="));
@@ -46,33 +40,39 @@ function toHashInput(row: typeof securityAudit.$inferSelect): SecurityAuditHashI
 
 async function verifyChain() {
   const rows = await db.select().from(securityAudit).orderBy(asc(securityAudit.id));
-  const failures: VerificationFailure[] = [];
-  let previousHash: string | null = null;
+  return verifyAuditChainRows(rows);
+}
 
-  for (const row of rows) {
-    if (row.previousHash !== previousHash) {
-      failures.push({
-        id: row.id,
-        reason: "previous_hash_mismatch",
-        expected: previousHash,
-        actual: row.previousHash,
-      });
+/**
+ * Re-encadena todos los registros existentes con el algoritmo vigente (HMAC + serializacion
+ * canonica). Necesario una sola vez al migrar desde el SHA-256 plano: recomputa previousHash
+ * y rowHash en orden de id preservando los datos. Idempotente.
+ */
+async function rekeyChain() {
+  const rows = await db.select().from(securityAudit).orderBy(asc(securityAudit.id));
+  let updated = 0;
+
+  // La tabla es append-only por un trigger (security_audit_append_only). El re-encadenado es
+  // una migracion controlada: se deshabilita el trigger SOLO dentro de esta transaccion; si
+  // algo falla, el rollback revierte tambien el disable. Solo puede ejecutarlo quien posee la
+  // AUDIT_HMAC_KEY, asi que no debilita la garantia de la cadena.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`ALTER TABLE "security_audit" DISABLE TRIGGER "security_audit_append_only"`);
+
+    let previousHash: string | null = null;
+    for (const row of rows) {
+      const rowHash = computeSecurityAuditRowHash({ ...toHashInput(row), previousHash });
+      if (row.previousHash !== previousHash || row.rowHash !== rowHash) {
+        await tx.update(securityAudit).set({ previousHash, rowHash }).where(eq(securityAudit.id, row.id));
+        updated++;
+      }
+      previousHash = rowHash;
     }
 
-    const recomputedHash = computeSecurityAuditRowHash(toHashInput(row));
-    if (row.rowHash !== recomputedHash) {
-      failures.push({
-        id: row.id,
-        reason: "row_hash_mismatch",
-        expected: recomputedHash,
-        actual: row.rowHash,
-      });
-    }
+    await tx.execute(sql`ALTER TABLE "security_audit" ENABLE TRIGGER "security_audit_append_only"`);
+  });
 
-    previousHash = row.rowHash;
-  }
-
-  return { rowsChecked: rows.length, failures };
+  return { total: rows.length, updated };
 }
 
 async function runConcurrencySimulation(count: number) {
@@ -104,6 +104,11 @@ async function runConcurrencySimulation(count: number) {
 }
 
 async function main() {
+  if (process.argv.includes("--rekey")) {
+    const result = await rekeyChain();
+    console.log(`security_audit re-encadenado con HMAC: ${result.updated}/${result.total} filas actualizadas.`);
+  }
+
   const concurrency = parseConcurrencyArg();
   if (concurrency > 0) {
     const runId = await runConcurrencySimulation(concurrency);

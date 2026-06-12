@@ -6,7 +6,7 @@ import { estudios, roles, usuarioRoles, usuarios } from "../db/schema.js";
 import { AuthQueries } from "../db/queries/auth.queries.js";
 import { SecurityAuditService } from "../services/security-audit.service.js";
 
-type EquipoUsuarioBody = {
+export type EquipoUsuarioBody = {
   nombre?: string;
   apellido?: string;
   email?: string;
@@ -16,19 +16,9 @@ type EquipoUsuarioBody = {
   rol?: string;
 };
 
-type UsuarioParams = {
+export type UsuarioParams = {
   usuarioId: string;
 };
-
-function isDirector(request: FastifyRequest): boolean {
-  return String(request.authUser?.rol ?? "").toUpperCase() === "DIRECTOR";
-}
-
-function forbidden(reply: FastifyReply) {
-  return reply.status(403).send({
-    error: { code: "FORBIDDEN", message: "Solo el Director del estudio puede gestionar el equipo" },
-  });
-}
 
 function parseId(value: string) {
   const id = Number(value);
@@ -133,8 +123,6 @@ export async function listarMiembrosEstudio(request: FastifyRequest, reply: Fast
 }
 
 export async function listarEquipoUsuarios(request: FastifyRequest, reply: FastifyReply) {
-  if (!isDirector(request)) return forbidden(reply);
-
   const rows = await db
     .select()
     .from(usuarios)
@@ -148,8 +136,6 @@ export async function crearEquipoUsuario(
   request: FastifyRequest<{ Body: EquipoUsuarioBody }>,
   reply: FastifyReply
 ) {
-  if (!isDirector(request)) return forbidden(reply);
-
   const estudioId = request.authUser.estudioId;
   const body = request.body ?? {};
   const nombre = body.nombre?.trim();
@@ -216,8 +202,6 @@ export async function actualizarEquipoUsuario(
   request: FastifyRequest<{ Params: UsuarioParams; Body: EquipoUsuarioBody }>,
   reply: FastifyReply
 ) {
-  if (!isDirector(request)) return forbidden(reply);
-
   const estudioId = request.authUser.estudioId;
   const usuarioId = parseId(request.params.usuarioId);
   if (!usuarioId) return reply.status(400).send({ error: { code: "BAD_REQUEST", message: "ID invalido" } });
@@ -279,8 +263,6 @@ export async function toggleEquipoUsuario(
   request: FastifyRequest<{ Params: UsuarioParams }>,
   reply: FastifyReply
 ) {
-  if (!isDirector(request)) return forbidden(reply);
-
   const estudioId = request.authUser.estudioId;
   const usuarioId = parseId(request.params.usuarioId);
   if (!usuarioId) return reply.status(400).send({ error: { code: "BAD_REQUEST", message: "ID invalido" } });
@@ -314,8 +296,6 @@ export async function eliminarEquipoUsuario(
   request: FastifyRequest<{ Params: UsuarioParams }>,
   reply: FastifyReply
 ) {
-  if (!isDirector(request)) return forbidden(reply);
-
   const estudioId = request.authUser.estudioId;
   const usuarioId = parseId(request.params.usuarioId);
   if (!usuarioId) return reply.status(400).send({ error: { code: "BAD_REQUEST", message: "ID invalido" } });

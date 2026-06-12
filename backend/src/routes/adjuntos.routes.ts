@@ -16,10 +16,12 @@ import {
 
 export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("ADJUNTOS", accion)],
+  });
 
   server.post("/upload", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Subir adjunto",
@@ -30,7 +32,7 @@ export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   }, AdjuntosController.upload);
 
   server.post("/presign", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Crear URL firmada para subida directa",
@@ -41,7 +43,7 @@ export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   }, AdjuntosController.presign);
 
   server.post("/confirm", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Confirmar adjunto subido directo",
@@ -52,7 +54,7 @@ export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   }, AdjuntosController.confirm);
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Listar adjuntos",
@@ -63,7 +65,7 @@ export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   }, AdjuntosController.findAll);
 
   server.get("/indexar", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Indexar adjuntos desde Drive",
@@ -74,7 +76,7 @@ export const adjuntosRoutes: FastifyPluginAsync = async (fastify) => {
   }, AdjuntosController.indexar);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Adjuntos"],
       summary: "Eliminar adjunto",

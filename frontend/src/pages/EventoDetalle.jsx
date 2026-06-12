@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
+import { usePermisos } from "../auth/usePermissions";
 import {
   Avatar,
   Box,
@@ -53,7 +54,8 @@ export default function EventoDetalle() {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  
+  const { canEditar, canEliminar } = usePermisos("EVENTOS");
+
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const eventoQuery = useQuery({
@@ -173,12 +175,16 @@ export default function EventoDetalle() {
             </Typography>
           </Box>
           <Stack direction="row" spacing={1.5}>
-            <Button variant="outlined" startIcon={<Edit />} onClick={() => navigate(`/eventos/editar/${eventId}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-              Editar
-            </Button>
-            <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => setConfirmDeleteOpen(true)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-              Eliminar
-            </Button>
+            {canEditar && (
+              <Button variant="outlined" startIcon={<Edit />} onClick={() => navigate(`/eventos/editar/${eventId}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+                Editar
+              </Button>
+            )}
+            {canEliminar && (
+              <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => setConfirmDeleteOpen(true)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+                Eliminar
+              </Button>
+            )}
           </Stack>
         </Stack>
       </Paper>

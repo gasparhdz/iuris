@@ -6,7 +6,7 @@ type NewUsuario = typeof usuarios.$inferInsert;
 type NewEstudio = typeof estudios.$inferInsert;
 type NewRefreshToken = typeof refreshTokens.$inferInsert;
 type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
-type UserPermission = {
+export type UserPermission = {
   modulo: string;
   ver: boolean;
   crear: boolean;
@@ -106,6 +106,31 @@ export class AuthQueries {
       .where(eq(usuarioRoles.usuarioId, userId))
       .limit(1);
     return link ?? null;
+  }
+
+  /**
+   * Permisos efectivos del usuario (union de todos sus roles), sin traer los codigos de rol.
+   * Es la consulta liviana que usa el preHandler `authorize` para el enforcement de RBAC.
+   */
+  static async findUserPermisos(userId: number): Promise<UserPermission[]> {
+    const roleRows = await db
+      .select({ rolId: usuarioRoles.rolId })
+      .from(usuarioRoles)
+      .where(eq(usuarioRoles.usuarioId, userId));
+
+    const roleIds = roleRows.map((r) => r.rolId);
+    if (roleIds.length === 0) return [];
+
+    return db
+      .select({
+        modulo: permisos.modulo,
+        ver: permisos.ver,
+        crear: permisos.crear,
+        editar: permisos.editar,
+        eliminar: permisos.eliminar,
+      })
+      .from(permisos)
+      .where(inArray(permisos.rolId, roleIds));
   }
 
   static async findUserRolesAndPermissions(userId: number) {

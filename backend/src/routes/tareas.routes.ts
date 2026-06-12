@@ -14,9 +14,12 @@ import {
 export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
   const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("TAREAS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Tareas"],
       summary: "Listar tareas",
@@ -27,7 +30,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Tareas"],
       summary: "Obtener una tarea con su checklist",
@@ -38,7 +41,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.findById);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Tareas"],
       summary: "Crear una tarea (opcionalmente con checklist)",
@@ -53,7 +56,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   server.delete("/", { ...authConfig, schema: { hide: true } }, methodNotAllowed);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Tareas"],
       summary: "Actualizar una tarea",
@@ -65,7 +68,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Tareas"],
       summary: "Eliminar una tarea",
@@ -78,7 +81,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- Subtareas ---
 
   server.post("/:id/subtareas", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Tareas - Subtareas"],
       summary: "Agregar subtarea a una tarea existente",
@@ -90,7 +93,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.addSubtarea);
 
   server.patch("/:id/subtareas/:subtareaId/toggle", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Tareas - Subtareas"],
       summary: "Marcar/Desmarcar una subtarea",
@@ -101,7 +104,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.toggleSubtarea);
 
   server.put("/:id/subtareas/:subtareaId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Tareas - Subtareas"],
       summary: "Editar una subtarea",
@@ -113,7 +116,7 @@ export const tareasRoutes: FastifyPluginAsync = async (fastify) => {
   }, TareasController.updateSubtarea);
 
   server.delete("/:id/subtareas/:subtareaId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Tareas - Subtareas"],
       summary: "Eliminar una subtarea",

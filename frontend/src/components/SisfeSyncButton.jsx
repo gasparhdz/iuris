@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { Button, Tooltip, Typography, Box } from "@mui/material";
@@ -43,6 +44,9 @@ export default function SisfeSyncButton({
     queryKey: ["sisfe", "status"],
     queryFn: getSisfeStatus,
     staleTime: 15_000,
+    // Mientras el scraper corre, re-consultar el estado hasta que el backend pase a
+    // "done"/"error". Sin esto el botón se queda en "Sincronizando..." para siempre.
+    refetchInterval: (query) => (query.state.data?.syncStatus === "running" ? 2000 : false),
   });
 
   const syncMutation = useMutation({
@@ -75,6 +79,18 @@ export default function SisfeSyncButton({
       );
     },
   });
+
+  // Al detectar la transición running -> done/error, refrescar las listas para que
+  // aparezcan los movimientos y documentos recién sincronizados sin recargar la página.
+  const prevSyncStatus = useRef(statusQuery.data?.syncStatus);
+  useEffect(() => {
+    const current = statusQuery.data?.syncStatus;
+    if (prevSyncStatus.current === "running" && (current === "done" || current === "error")) {
+      queryClient.invalidateQueries({ queryKey: ["expedientes"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "expedientes"] });
+    }
+    prevSyncStatus.current = current;
+  }, [queryClient, statusQuery.data?.syncStatus]);
 
   const isRunning   = statusQuery.data?.syncStatus === "running" || syncMutation.isPending;
   const isConnecting = interactiveMutation.isPending;

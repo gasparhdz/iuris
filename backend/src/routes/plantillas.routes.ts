@@ -15,10 +15,12 @@ import {
 
 export const plantillasRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("PLANTILLAS", accion)],
+  });
 
   server.get("/plantillas", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Plantillas"],
       summary: "Listar plantillas",
@@ -28,7 +30,7 @@ export const plantillasRoutes: FastifyPluginAsync = async (fastify) => {
   }, PlantillasController.findAll);
 
   server.post("/plantillas", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Plantillas"],
       summary: "Crear plantilla",
@@ -39,7 +41,7 @@ export const plantillasRoutes: FastifyPluginAsync = async (fastify) => {
   }, PlantillasController.create);
 
   server.put("/plantillas/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Plantillas"],
       summary: "Actualizar plantilla",
@@ -51,7 +53,7 @@ export const plantillasRoutes: FastifyPluginAsync = async (fastify) => {
   }, PlantillasController.update);
 
   server.delete("/plantillas/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Plantillas"],
       summary: "Eliminar plantilla",
@@ -62,7 +64,7 @@ export const plantillasRoutes: FastifyPluginAsync = async (fastify) => {
   }, PlantillasController.delete);
 
   server.post("/expedientes/:casoId/generar", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Documentos"],
       summary: "Generar documento desde plantilla",

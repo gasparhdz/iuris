@@ -9,6 +9,7 @@ import { Decimal, jus, pesos } from "../utils/decimal.js";
 import { ValorJusService } from "./valorjus.service.js";
 import { calcularMora, moraAplica, normalizeRegimenMora } from "./mora.js";
 import { imputarIngreso, ordenarPrelacion, type DeudaImputable } from "./imputacion.js";
+import { assertMonedaSoportada } from "./moneda.validator.js";
 import type { CreateIngresoInput, CreatePlanPagoInput, PlanPagoQuery } from "../schemas/planes.schema.js";
 import { planCuotas, planesPago, gastos } from "../db/schema.js";
 import { and, eq, ne, isNull, sql } from "drizzle-orm";
@@ -205,8 +206,10 @@ export class PlanesService {
   }
 
   static async registrarIngreso(estudioId: number, userId: number, data: CreateIngresoInput) {
+    await assertMonedaSoportada(data.monedaId);
     let cuotaIds = [...(data.cuotaIds ?? [])];
     let gastoIds = [...(data.gastoIds ?? [])];
+    let honorarioIds = [...(data.honorarioIds ?? [])];
     if (cuotaIds.length === 0 && data.cuotaId) cuotaIds = [data.cuotaId];
 
     if (cuotaIds.length === 0 && data.planId) {
@@ -214,7 +217,7 @@ export class PlanesService {
       if (cuotasPendientes.length > 0) cuotaIds = [cuotasPendientes[0].id];
     }
 
-    if (cuotaIds.length === 0 && gastoIds.length === 0) {
+    if (cuotaIds.length === 0 && gastoIds.length === 0 && honorarioIds.length === 0) {
       if (!data.clienteId) {
         throw new Error("DEBES_SELECCIONAR_AL_MENOS_UNA_CUOTA_O_UN_GASTO");
       }
@@ -262,15 +265,20 @@ export class PlanesService {
           )
         );
 
-      // Sort both arrays by date to apply FIFO
+      // Honorarios que cobran de forma directa (sin plan) y siguen pendientes
+      const queryHonorarios = await PlanesQueries.findHonorariosSinPlanCobrables(estudioId, data.clienteId, data.casoId ?? undefined);
+
+      // Sort by date to apply FIFO
       queryCuotas.sort((a, b) => new Date(a.vencimiento).getTime() - new Date(b.vencimiento).getTime());
       queryGastos.sort((a, b) => new Date(a.vencimiento).getTime() - new Date(b.vencimiento).getTime());
+      queryHonorarios.sort((a, b) => new Date(a.vencimiento).getTime() - new Date(b.vencimiento).getTime());
 
-      // Map back to cuotaIds and gastoIds
+      // Map back to cuotaIds, gastoIds y honorarioIds
       cuotaIds = queryCuotas.map(c => c.id);
       gastoIds = queryGastos.map(g => g.id);
+      honorarioIds = queryHonorarios.map(h => h.id);
 
-      if (cuotaIds.length === 0 && gastoIds.length === 0) {
+      if (cuotaIds.length === 0 && gastoIds.length === 0 && honorarioIds.length === 0) {
         throw new Error("NO_HAY_DEUDAS_PENDIENTES_PARA_APLICAR_FIFO");
       }
     }
@@ -295,6 +303,25 @@ export class PlanesService {
       ? await PlanesQueries.findParametroByCodigo("ESTADO_GASTO", "PAGADO")
       : null;
     if (gastosDetalle.length > 0 && !estadoGastoPagado) throw new Error("PARAMETRO_PAGADO_NOT_FOUND");
+
+    // Honorarios de cobro directo (sin plan). Un honorario con plan activo se cobra por sus cuotas.
+    type HonorarioCobrable = NonNullable<Awaited<ReturnType<typeof HonorariosQueries.findHonorarioById>>> & { politicaCodigo: string | null };
+    const honorariosDetalle: HonorarioCobrable[] = [];
+    for (const honorarioId of honorarioIds) {
+      const honorario = await HonorariosQueries.findHonorarioById(honorarioId, estudioId);
+      if (!honorario) throw new Error("HONORARIO_NOT_FOUND");
+
+      const planActivo = await PlanesQueries.findPlanActivoByHonorarioId(honorarioId, estudioId);
+      if (planActivo) throw new Error("HONORARIO_CON_PLAN_NO_COBRABLE_DIRECTO");
+
+      const estadoCodigo = honorario.estado?.codigo ?? null;
+      if (estadoCodigo === "COBRADO" || estadoCodigo === "ANULADO" || estadoCodigo === "INCOBRABLE") {
+        throw new Error("HONORARIO_NO_COBRABLE");
+      }
+
+      const politica = honorario.politicaJusId ? await PlanesQueries.findParametroById(honorario.politicaJusId) : null;
+      honorariosDetalle.push({ ...honorario, politicaCodigo: politica?.codigo ?? null });
+    }
 
     const fechaIngreso = new Date(data.fechaIngreso);
     const valorJusSnapshotCache = new Map<string, number>();
@@ -337,6 +364,7 @@ export class PlanesService {
       const deudas: DeudaImputable[] = [];
       const cuotaMeta = new Map<string, { cuota: PlanCuotaDetalle; valorJusAlCobro: string | null }>();
       const gastoMeta = new Map<string, { gasto: GastoDetalle; saldoPesos: Decimal }>();
+      const honorarioMeta = new Map<string, { honorario: HonorarioCobrable; valorJusAlCobro: string | null }>();
 
       for (const gasto of gastosDetalle) {
         const totalAplicado = pesos(String(await PlanesQueries.sumAplicacionesByGasto(gasto.id, tx)));
@@ -398,6 +426,62 @@ export class PlanesService {
         cuotaMeta.set(deudaId, { cuota, valorJusAlCobro: saldo.valorJusAlCobro?.toPg() ?? null });
       }
 
+      for (const honorario of honorariosDetalle) {
+        const aplicaciones = await PlanesQueries.findAplicacionesByHonorarioActivas(honorario.id, tx);
+        const saldo = await calcularSaldoCuota(
+          {
+            montoJus: honorario.jus,
+            montoPesos: honorario.montoPesos,
+            valorJusRef: honorario.valorJusRef,
+            politicaCodigo: honorario.politicaCodigo,
+          },
+          aplicaciones,
+          fechaIngreso,
+          getJusSnapshot,
+        );
+        if (saldo.saldoPesos.isZeroOrLess()) continue;
+
+        const vencimiento = honorario.fechaVencimiento ?? honorario.fechaRegulacion;
+        const tasaMensual = honorario.tasaInteresMensual !== null ? Decimal.of(honorario.tasaInteresMensual, 6) : Decimal.zero(6);
+        const vencida = vencimiento < fechaIngreso;
+        const monedaCodigo = String(honorario.moneda?.codigo ?? "").toUpperCase();
+        const esUsd = monedaCodigo === "USD" || monedaCodigo === "DOLAR" || monedaCodigo === "DÓLAR" || monedaCodigo === "DÃ“LAR";
+        const interes = moraAplica({
+          politicaCodigo: honorario.politicaCodigo,
+          esJus: saldo.esJus,
+          esUsd,
+          tieneMontoPesos: honorario.montoPesos !== null,
+          tasaMensual,
+          vencida,
+          saldoPositivo: saldo.saldoPesos.isPositive(),
+        })
+          ? calcularMora({
+              capital: saldo.capitalNativo,
+              moneda: saldo.esJus ? "JUS" : "PESOS",
+              vencimiento,
+              fechaCorte: fechaIngreso,
+              tasaMensual,
+              regimen: normalizeRegimenMora(null),
+              baseDias: 30,
+              pagos: aplicaciones.map((app) => ({
+                fecha: app.fechaIngreso,
+                montoPesos: pesos(app.montoCapital),
+                valorJusAlCobro: app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : saldo.valorJusRef,
+              })),
+              valorJusAlCorte: saldo.valorJusAlCobro ?? saldo.valorJusRef,
+            }).interesPesos
+          : Decimal.zero(2);
+        const deudaId = `honorario:${honorario.id}`;
+        deudas.push({
+          id: deudaId,
+          tipo: "HONORARIO",
+          vencimiento,
+          saldoPesos: saldo.saldoPesos,
+          interesPesos: interes,
+        });
+        honorarioMeta.set(deudaId, { honorario, valorJusAlCobro: saldo.valorJusAlCobro?.toPg() ?? null });
+      }
+
       const { movimientos } = imputarIngreso(pesos(String(data.monto)), ordenarPrelacion(deudas, fechaIngreso));
       for (const movimiento of movimientos) {
         const cuota = cuotaMeta.get(movimiento.deudaId);
@@ -437,6 +521,23 @@ export class PlanesService {
               updatedBy: userId,
             }, tx);
           }
+          continue;
+        }
+
+        const honorario = honorarioMeta.get(movimiento.deudaId);
+        if (honorario) {
+          await PlanesQueries.insertIngresoAplicacion(tx, {
+            estudioId,
+            ingresoId: nuevo.id,
+            cuotaId: null,
+            honorarioId: honorario.honorario.id,
+            monto: movimiento.total.toPg(),
+            montoCapital: movimiento.aCapital.toPg(),
+            montoInteres: movimiento.aInteres.toPg(),
+            valorJusAlCobro: honorario.valorJusAlCobro,
+            createdBy: userId,
+          });
+          await PlanesService.recomputeHonorarioEstado(honorario.honorario.id, estudioId, tx);
         }
       }
 
@@ -489,6 +590,46 @@ export class PlanesService {
     const estadoId = await PlanesService.getEstadoCuotaId(nuevoEstadoCodigo);
     if (!estadoId) return;
     await PlanesQueries.updatePlanCuota(cuotaId, estudioId, { estadoId, updatedAt: new Date() }, tx);
+  }
+
+  static async recomputeHonorarioEstado(honorarioId: number, estudioId: number, tx?: DbTransaction) {
+    const honorario = await HonorariosQueries.findHonorarioById(honorarioId, estudioId);
+    if (!honorario) throw new Error("HONORARIO_NOT_FOUND");
+
+    const estadoCodigo = honorario.estado?.codigo ?? null;
+    // No tocamos honorarios fuera del ciclo de cobro directo (anulados/incobrables).
+    if (estadoCodigo === "ANULADO" || estadoCodigo === "INCOBRABLE") return;
+
+    const politica = honorario.politicaJusId ? await PlanesQueries.findParametroById(honorario.politicaJusId) : null;
+    const aplicaciones = await PlanesQueries.findAplicacionesByHonorarioActivas(honorarioId, tx ?? db);
+    const saldo = await calcularSaldoCuota(
+      {
+        montoJus: honorario.jus,
+        montoPesos: honorario.montoPesos,
+        valorJusRef: honorario.valorJusRef,
+        politicaCodigo: politica?.codigo ?? null,
+      },
+      aplicaciones,
+      new Date(),
+      async () => {
+        const snapshot = await ValorJusService.getValorJusSnapshot(new Date(), estudioId);
+        if (snapshot === null) throw new Error("VALOR_JUS_NOT_FOUND");
+        return Number(snapshot);
+      },
+    );
+
+    let nuevoEstadoCodigo: "PENDIENTE" | "PARCIAL" | "COBRADO";
+    if (saldo.capitalNativo.isZeroOrLess()) {
+      nuevoEstadoCodigo = "COBRADO";
+    } else if (aplicaciones.length > 0) {
+      nuevoEstadoCodigo = "PARCIAL";
+    } else {
+      nuevoEstadoCodigo = "PENDIENTE";
+    }
+
+    const estado = await HonorariosQueries.findParametroByCodigo("ESTADO_HONORARIO", nuevoEstadoCodigo);
+    if (!estado) return;
+    await PlanesQueries.updateHonorarioEstado(honorarioId, estudioId, estado.id, tx ?? db);
   }
 
   private static async ensureRelatedEntities(estudioId: number, clienteId?: number, casoId?: number) {

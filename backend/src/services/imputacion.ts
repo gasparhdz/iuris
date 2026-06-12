@@ -1,6 +1,6 @@
 import { Decimal } from "../utils/decimal.js";
 
-export type TipoDeudaImputable = "GASTO" | "CUOTA";
+export type TipoDeudaImputable = "GASTO" | "CUOTA" | "HONORARIO";
 
 export type DeudaImputable = {
   id: string;

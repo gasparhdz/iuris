@@ -13,10 +13,14 @@ import {
 
 export const movimientosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  // Los movimientos son sub-recurso del expediente (modulo CASOS): mutarlos requiere
+  // editar el expediente, no la accion destructiva eliminar-expediente.
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", accion)],
+  });
 
   server.get("/expedientes/:casoId/movimientos", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Movimientos Judiciales"],
       summary: "Listar movimientos judiciales de un expediente",
@@ -27,7 +31,7 @@ export const movimientosRoutes: FastifyPluginAsync = async (fastify) => {
   }, MovimientosController.findByCaso);
 
   server.post("/expedientes/:casoId/movimientos", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Movimientos Judiciales"],
       summary: "Agregar movimiento judicial a un expediente",
@@ -39,7 +43,7 @@ export const movimientosRoutes: FastifyPluginAsync = async (fastify) => {
   }, MovimientosController.create);
 
   server.put("/movimientos/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Movimientos Judiciales"],
       summary: "Editar movimiento judicial",
@@ -51,7 +55,7 @@ export const movimientosRoutes: FastifyPluginAsync = async (fastify) => {
   }, MovimientosController.update);
 
   server.delete("/movimientos/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Movimientos Judiciales"],
       summary: "Eliminar movimiento judicial",

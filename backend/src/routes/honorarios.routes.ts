@@ -13,10 +13,12 @@ import {
 
 export const honorariosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("HONORARIOS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Honorarios"],
       summary: "Listar honorarios",
@@ -27,7 +29,7 @@ export const honorariosRoutes: FastifyPluginAsync = async (fastify) => {
   }, HonorariosController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Honorarios"],
       summary: "Obtener honorario",
@@ -38,7 +40,7 @@ export const honorariosRoutes: FastifyPluginAsync = async (fastify) => {
   }, HonorariosController.findById);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Honorarios"],
       summary: "Crear honorario",
@@ -49,7 +51,7 @@ export const honorariosRoutes: FastifyPluginAsync = async (fastify) => {
   }, HonorariosController.create);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Honorarios"],
       summary: "Actualizar honorario",
@@ -61,7 +63,7 @@ export const honorariosRoutes: FastifyPluginAsync = async (fastify) => {
   }, HonorariosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Honorarios"],
       summary: "Eliminar honorario",

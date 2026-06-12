@@ -2,6 +2,10 @@ export const SEL = {
   search: {
     readyButton: "#efectuarBusqueda",
     cuijInput: 'input[formcontrolname="cuij"]',
+    // Encabezado clickeable del panel colapsable "Filtros de Búsqueda". SISFE recuerda la
+    // última consulta y al reingresar muestra los resultados con el panel plegado, por lo que
+    // el campo CUIJ no está en el DOM hasta expandirlo. Se filtra por texto en el código.
+    filtrosHeading: ".card-header h2",
     feedbackOrResult: "#mensajeOk, #mensajeError, .alert-danger, table tbody tr",
     okMessage: "#mensajeOk",
     resultRows: "table tbody tr",

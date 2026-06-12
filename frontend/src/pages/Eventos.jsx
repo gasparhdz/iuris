@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
@@ -73,7 +74,8 @@ export default function Eventos() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  
+  const { canCrear, canEditar, canEliminar } = usePermisos("EVENTOS");
+
   const [search, setSearch] = useState("");
   const [timeFilter, setTimeFilter] = useState("proximos"); // proximos, pasados, todos
   const [tipoFilter, setTipoFilter] = useState("all");
@@ -259,9 +261,11 @@ export default function Eventos() {
           <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0 }}>Eventos</Typography>
           <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>Gestión, audiencias, reuniones y cronogramas de tu estudio.</Typography>
         </Box>
-        <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/eventos/nuevo", { state: { from: currentPath } })} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-          Nuevo Evento
-        </Button>
+        {canCrear && (
+          <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/eventos/nuevo", { state: { from: currentPath } })} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+            Nuevo Evento
+          </Button>
+        )}
       </Stack>
 
       <Paper elevation={0} sx={{ p: 2, mb: 2.5, borderRadius: "16px", border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
@@ -340,6 +344,8 @@ export default function Eventos() {
                   onOpen={() => navigate(`/eventos/${event.id}`, { state: { from: currentPath } })}
                   onEdit={(e) => { e.stopPropagation(); navigate(`/eventos/editar/${event.id}`, { state: { from: currentPath } }); }}
                   onDelete={(e) => { e.stopPropagation(); setDeleteTarget(event); }}
+                  canEditar={canEditar}
+                  canEliminar={canEliminar}
                 />
               </Grid>
             ))}
@@ -380,6 +386,8 @@ export default function Eventos() {
           onOpen={(event) => navigate(`/eventos/${event.id}`, { state: { from: currentPath } })}
           onEdit={(e, event) => { e.stopPropagation(); navigate(`/eventos/editar/${event.id}`, { state: { from: currentPath } }); }}
           onDelete={(e, event) => { e.stopPropagation(); setDeleteTarget(event); }}
+          canEditar={canEditar}
+          canEliminar={canEliminar}
         />
       )}
 
@@ -431,7 +439,7 @@ function formatEventDates(inicioStr, finStr) {
   return `${friendlyStart} al ${friendlyEnd}`;
 }
 
-function EventCard({ event, theme, tipo, estado, cliente, caso, currentPath, onOpen, onEdit, onDelete }) {
+function EventCard({ event, theme, tipo, estado, cliente, caso, currentPath, onOpen, onEdit, onDelete, canEditar = true, canEliminar = true }) {
   return (
     <Card elevation={0} sx={{ height: "100%", border: "1px solid", borderColor: "divider", borderRadius: "16px", cursor: "pointer", transition: "transform 0.16s ease, border-color 0.16s ease", "&:hover": { transform: "translateY(-3px)", borderColor: "primary.main" } }} onClick={onOpen}>
       <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
@@ -455,10 +463,12 @@ function EventCard({ event, theme, tipo, estado, cliente, caso, currentPath, onO
             {cliente && <Link component={RouterLink} to={`/clientes/${cliente.id}`} state={{ from: currentPath }} variant="caption" sx={{ fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{clienteLabel(cliente)}</Link>}
             {caso && <Link component={RouterLink} to={`/expedientes/${caso.id}`} state={{ from: currentPath }} variant="caption" sx={{ display: "inline-flex", alignItems: "center", gap: 0.35, fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{casoLabel(caso)}</Link>}
           </Stack>
-          <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
-            <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>
-            <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={onDelete}><Delete fontSize="small" /></IconButton></Tooltip>
-          </Stack>
+          {(canEditar || canEliminar) && (
+            <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
+              {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>}
+              {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={onDelete}><Delete fontSize="small" /></IconButton></Tooltip>}
+            </Stack>
+          )}
         </Stack>
       </CardContent>
     </Card>
@@ -483,7 +493,9 @@ function EventTable({
   currentPath,
   onOpen,
   onEdit,
-  onDelete
+  onDelete,
+  canEditar = true,
+  canEliminar = true
 }) {
   const columns = [
     { id: "evento", label: "Evento" },
@@ -652,8 +664,8 @@ function EventTable({
                     )}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
-                    <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={(e) => onEdit(e, event)}><Edit fontSize="small" /></IconButton></Tooltip>
-                    <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={(e) => onDelete(e, event)}><Delete fontSize="small" /></IconButton></Tooltip>
+                    {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={(e) => onEdit(e, event)}><Edit fontSize="small" /></IconButton></Tooltip>}
+                    {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={(e) => onDelete(e, event)}><Delete fontSize="small" /></IconButton></Tooltip>}
                   </TableCell>
                 </TableRow>
               );

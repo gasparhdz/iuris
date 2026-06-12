@@ -10,7 +10,10 @@ import { documentedResponses } from "../schemas/common.schema.js";
 
 export const liquidacionRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  // La liquidación consolida honorarios + gastos + ingresos: es un reporte financiero.
+  // Se exige `ver` sobre HONORARIOS para no exponer el panorama financiero a roles que
+  // solo pueden ver expedientes/clientes (OWASP A01). Antes solo pedía estar autenticado.
+  const authConfig = { preHandler: [fastify.authenticate, fastify.authorize("HONORARIOS", "ver")] };
 
   server.get("/expedientes/:casoId/liquidacion", {
     ...authConfig,

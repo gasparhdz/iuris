@@ -37,4 +37,42 @@ describe("imputacion", () => {
     expect(resultado.movimientos[2].aCapital.toPg()).toBe("5000.00");
     expect(resultado.remanente.toPg()).toBe("0.00");
   });
+
+  it("honorario sin plan prelaciona como cuota (gasto primero, luego por vencimiento)", () => {
+    const deudas: DeudaImputable[] = [
+      {
+        id: "honorario:futuro",
+        tipo: "HONORARIO",
+        vencimiento: new Date("2026-08-01T00:00:00.000Z"),
+        interesPesos: pesos("0"),
+        saldoPesos: pesos("20000"),
+      },
+      {
+        id: "honorario:vencido",
+        tipo: "HONORARIO",
+        vencimiento: new Date("2026-04-01T00:00:00.000Z"),
+        interesPesos: pesos("3000"),
+        saldoPesos: pesos("20000"),
+      },
+      {
+        id: "gasto:1",
+        tipo: "GASTO",
+        vencimiento: new Date("2026-09-01T00:00:00.000Z"),
+        interesPesos: pesos("0"),
+        saldoPesos: pesos("5000"),
+      },
+    ];
+
+    const ordenadas = ordenarPrelacion(deudas, new Date("2026-06-15T00:00:00.000Z"));
+    // Gasto siempre primero; entre honorarios, primero el vencido (interes antes que capital).
+    expect(ordenadas.map((d) => d.id)).toEqual(["gasto:1", "honorario:vencido", "honorario:futuro"]);
+
+    const resultado = imputarIngreso(pesos("10000"), ordenadas);
+    expect(resultado.movimientos[0].deudaId).toBe("gasto:1");
+    expect(resultado.movimientos[0].aCapital.toPg()).toBe("5000.00");
+    expect(resultado.movimientos[1].deudaId).toBe("honorario:vencido");
+    expect(resultado.movimientos[1].aInteres.toPg()).toBe("3000.00");
+    expect(resultado.movimientos[1].aCapital.toPg()).toBe("2000.00");
+    expect(resultado.remanente.toPg()).toBe("0.00");
+  });
 });

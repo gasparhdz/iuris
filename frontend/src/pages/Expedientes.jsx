@@ -3,6 +3,7 @@ import { useNavigate, Link as RouterLink } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
@@ -80,7 +81,8 @@ export default function Expedientes() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  
+  const { canCrear, canEditar, canEliminar } = usePermisos("CASOS");
+
   const [search, setSearch] = useState("");
   const [ramaFilter, setRamaFilter] = useState("all");
   const [estadoFilter, setEstadoFilter] = useState("all");
@@ -257,9 +259,11 @@ export default function Expedientes() {
           <Button variant="outlined" startIcon={<Download />} onClick={handleExportExcel} sx={{ borderRadius: "10px", fontWeight: 900 }}>
             Exportar
           </Button>
-          <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/expedientes/nuevo")} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-            Nuevo Expediente
-          </Button>
+          {canCrear && (
+            <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/expedientes/nuevo")} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+              Nuevo Expediente
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -443,8 +447,8 @@ export default function Expedientes() {
                       <TableCell>{radicacion?.nombre || "Sin radicación"}</TableCell>
                       <TableCell>{estado ? <Chip size="small" color={estadoColor(estado.nombre)} label={estado.nombre} sx={{ fontWeight: 800 }} /> : "Sin estado"}</TableCell>
                       <TableCell onClick={(event) => event.stopPropagation()}>
-                        <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={() => navigate(`/expedientes/editar/${caso.id}`)}><Edit fontSize="small" /></IconButton></Tooltip>
-                        <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(caso)}><Delete fontSize="small" /></IconButton></Tooltip>
+                        {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={() => navigate(`/expedientes/editar/${caso.id}`)}><Edit fontSize="small" /></IconButton></Tooltip>}
+                        {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(caso)}><Delete fontSize="small" /></IconButton></Tooltip>}
                       </TableCell>
                     </TableRow>
                   );

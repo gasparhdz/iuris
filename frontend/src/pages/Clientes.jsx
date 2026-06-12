@@ -6,6 +6,7 @@ import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import * as XLSX from "xlsx";
 import api from "../api/axios";
+import { usePermisos } from "../auth/usePermissions";
 import {
   Avatar,
   Box,
@@ -168,6 +169,7 @@ export default function Clientes() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const { canCrear, canEditar, canEliminar } = usePermisos("CLIENTES");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -343,14 +345,16 @@ export default function Clientes() {
           >
             Exportar
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => navigate("/clientes/nuevo")}
-            sx={{ borderRadius: "10px", fontWeight: 800 }}
-          >
-            Nuevo Cliente
-          </Button>
+          {canCrear && (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => navigate("/clientes/nuevo")}
+              sx={{ borderRadius: "10px", fontWeight: 800 }}
+            >
+              Nuevo Cliente
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -446,12 +450,16 @@ export default function Clientes() {
                 <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 2 }} onClick={(e) => e.stopPropagation()}>
                   <Chip icon={<FolderOpen />} size="small" label={`${cliente.casosActivos} expedientes`} sx={{ fontWeight: 800 }} />
                   <Box>
-                    <IconButton color="primary" onClick={() => goToEdit(cliente.id)}>
-                      <Edit fontSize="small" />
-                    </IconButton>
-                    <IconButton color="error" onClick={() => setDeleteTarget(cliente)}>
-                      <Delete fontSize="small" />
-                    </IconButton>
+                    {canEditar && (
+                      <IconButton color="primary" onClick={() => goToEdit(cliente.id)}>
+                        <Edit fontSize="small" />
+                      </IconButton>
+                    )}
+                    {canEliminar && (
+                      <IconButton color="error" onClick={() => setDeleteTarget(cliente)}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    )}
                   </Box>
                 </Stack>
               </CardContent>
@@ -597,16 +605,20 @@ export default function Clientes() {
                       <Chip size="small" label={cliente.activo ? "Activo" : "Inactivo"} color={cliente.activo ? "success" : "default"} sx={{ fontWeight: 900 }} />
                     </TableCell>
                     <TableCell onClick={(event) => event.stopPropagation()}>
-                      <Tooltip title="Editar">
-                        <IconButton size="small" color="primary" onClick={() => goToEdit(cliente.id)}>
-                          <Edit fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Eliminar">
-                        <IconButton size="small" color="error" onClick={() => setDeleteTarget(cliente)}>
-                          <Delete fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {canEditar && (
+                        <Tooltip title="Editar">
+                          <IconButton size="small" color="primary" onClick={() => goToEdit(cliente.id)}>
+                            <Edit fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {canEliminar && (
+                        <Tooltip title="Eliminar">
+                          <IconButton size="small" color="error" onClick={() => setDeleteTarget(cliente)}>
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -12,9 +12,12 @@ import {
 export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
   const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("TERCEROS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Terceros"],
       summary: "Listar terceros del estudio (Paginado)",
@@ -25,7 +28,7 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   }, TercerosController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Terceros"],
       summary: "Obtener un tercero por ID",
@@ -36,7 +39,7 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   }, TercerosController.findById);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Terceros"],
       summary: "Crear un nuevo tercero",
@@ -51,7 +54,7 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   server.delete("/", { ...authConfig, schema: { hide: true } }, methodNotAllowed);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Terceros"],
       summary: "Actualizar un tercero existente",
@@ -63,7 +66,7 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   }, TercerosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Terceros"],
       summary: "Eliminar un tercero (Físico)",

@@ -1,7 +1,7 @@
 import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, categorias, clientes, honorarios, parametros } from "../schema.js";
+import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago } from "../schema.js";
 
 type NewHonorario = typeof honorarios.$inferInsert;
 
@@ -144,6 +144,23 @@ function baseHonorariosSelect() {
       fechaVencimiento: honorarios.fechaVencimiento,
       tasaInteresMensual: honorarios.tasaInteresMensual,
       estadoId: honorarios.estadoId,
+      // Capital cobrado por cobro directo (aplicaciones activas con honorario_id).
+      montoCobrado: sql<string>`coalesce((
+        select sum(${ingresoAplicaciones.montoCapital})
+        from ${ingresoAplicaciones}
+        inner join ${ingresos} on ${ingresos.id} = ${ingresoAplicaciones.ingresoId}
+        where ${ingresoAplicaciones.honorarioId} = ${honorarios.id}
+          and ${ingresoAplicaciones.activo} = true
+          and ${ingresoAplicaciones.deletedAt} is null
+          and ${ingresos.deletedAt} is null
+      ), 0)`,
+      // Indica si el honorario tiene un plan de pago activo (se cobra por cuotas, no directo).
+      tienePlan: sql<boolean>`exists (
+        select 1 from ${planesPago}
+        where ${planesPago.honorarioId} = ${honorarios.id}
+          and ${planesPago.activo} = true
+          and ${planesPago.deletedAt} is null
+      )`,
       activo: honorarios.activo,
       createdBy: honorarios.createdBy,
       createdAt: honorarios.createdAt,

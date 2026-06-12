@@ -6,10 +6,13 @@ import { driveFolderResponseSchema, driveIdParamSchema, vincularCarpetaSchema } 
 
 export const driveRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  // Las carpetas de Drive son parte de la gestion documental (modulo ADJUNTOS).
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("ADJUNTOS", accion)],
+  });
 
   server.post("/clientes/:id/create", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Drive"],
       summary: "Crear carpeta Drive de cliente",
@@ -20,7 +23,7 @@ export const driveRoutes: FastifyPluginAsync = async (fastify) => {
   }, DriveController.crearCarpetaCliente);
 
   server.post("/expedientes/:id/create", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Drive"],
       summary: "Crear carpeta Drive de expediente",
@@ -31,7 +34,7 @@ export const driveRoutes: FastifyPluginAsync = async (fastify) => {
   }, DriveController.crearCarpetaCaso);
 
   server.put("/clientes/:id/vincular", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Drive"],
       summary: "Vincular carpeta Drive de cliente",
@@ -43,7 +46,7 @@ export const driveRoutes: FastifyPluginAsync = async (fastify) => {
   }, DriveController.vincularCarpetaCliente);
 
   server.put("/expedientes/:id/vincular", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Drive"],
       summary: "Vincular carpeta Drive de expediente",

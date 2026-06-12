@@ -179,6 +179,10 @@ export const sisfeSessions = pgTable("sisfe_sessions", {
   estudioId: integer("estudio_id").references(() => estudios.id, { onDelete: "cascade" }).notNull(),
   sessionCookieEncriptada: text("session_cookie_encriptada").notNull(),
   cookieName: varchar("cookie_name", { length: 100 }).notNull(),
+  // Matrícula SISFE del usuario logueado (ej: "LIII043"), leída de la barra superior
+  // al iniciar sesión. Sirve para descartar de las novedades los movimientos que el
+  // propio usuario presentó (la observación incluye "Presentante: ... - <matrícula>").
+  sisfeMatricula: varchar("sisfe_matricula", { length: 50 }),
   lastVerifiedAt: timestamp("last_verified_at"),
   lastSyncAt: timestamp("last_sync_at"),
   syncStatus: varchar("sync_status", { length: 20 }).default("idle").notNull(),
@@ -298,6 +302,10 @@ export const casos = pgTable("casos", {
   sisfeFechaUbicacionActual: timestamp("sisfe_fecha_ubicacion_actual"),
   sisfeSoloDigital: boolean("sisfe_solo_digital"),
   sisfeFechaUltimaActualizacion: timestamp("sisfe_fecha_ultima_actualizacion"),
+  // Fecha del último expediente digital (PDF consolidado) descargado con éxito.
+  // Junto con sisfeFechaUltimaActualizacion permite saltear la descarga del PDF
+  // cuando el expediente no tuvo novedades desde el último sync.
+  sisfeExpedienteDigitalAt: timestamp("sisfe_expediente_digital_at"),
   caratula: varchar("caratula", { length: 500 }),
   tipoId: integer("tipo_id").references(() => parametros.id).notNull(),
   descripcion: text("descripcion"),
@@ -403,6 +411,27 @@ export const movimientosJudiciales = pgTable("movimientos_judiciales", {
   }).onDelete("cascade"),
   index("movimientos_judiciales_estudio_created_idx").on(table.estudioId, table.createdAt),
   index("movimientos_judiciales_estudio_caso_idx").on(table.estudioId, table.casoId),
+  // Dedup de movimientos SISFE acotado al expediente: sisfe_mov_id es un id global del
+  // portal, por lo que la unicidad debe ser por (caso_id, sisfe_mov_id) y no global, para
+  // no cruzar movimientos entre estudios que sigan el mismo expediente publico. Los NULL
+  // (movimientos manuales) son distintos entre si en Postgres, asi que no se ven afectados.
+  uniqueIndex("movimientos_judiciales_caso_sisfe_mov_unique").on(table.casoId, table.sisfeMovId),
+]);
+
+// Estado "visto/leído" de un movimiento judicial por usuario.
+// La ausencia de fila = no leído. Permite que cada integrante del estudio
+// tenga su propio control de novedades sobre el mismo expediente.
+export const movimientosVistos = pgTable("movimientos_vistos", {
+  id: serial("id").primaryKey(),
+  estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
+  movimientoId: integer("movimiento_id")
+    .references(() => movimientosJudiciales.id, { onDelete: "cascade" })
+    .notNull(),
+  usuarioId: integer("usuario_id").references(() => usuarios.id).notNull(),
+  vistoAt: timestamp("visto_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("movimientos_vistos_usuario_mov_unico").on(table.usuarioId, table.movimientoId),
+  index("movimientos_vistos_estudio_usuario_idx").on(table.estudioId, table.usuarioId),
 ]);
 
 export const notasCaso = pgTable("notas_caso", {
@@ -675,6 +704,9 @@ export const ingresoAplicaciones = pgTable("ingreso_aplicaciones", {
   ingresoId: integer("ingreso_id").references(() => ingresos.id, { onDelete: "cascade" }).notNull(),
   cuotaId: integer("cuota_id").references(() => planCuotas.id, { onDelete: "cascade" }),
   gastoId: integer("gasto_id").references(() => gastos.id, { onDelete: "cascade" }),
+  // Cobro aplicado directamente a un honorario sin plan de pago (parcial o total). Un
+  // aplicacion apunta a exactamente uno: cuota, gasto u honorario.
+  honorarioId: integer("honorario_id").references(() => honorarios.id, { onDelete: "cascade" }),
   monto: decimal("monto", { precision: 14, scale: 2 }).notNull(),
   montoCapital: decimal("monto_capital", { precision: 14, scale: 2 }).default("0").notNull(),
   montoInteres: decimal("monto_interes", { precision: 14, scale: 2 }).default("0").notNull(),
@@ -697,6 +729,9 @@ export const ingresoAplicaciones = pgTable("ingreso_aplicaciones", {
     .on(table.estudioId, table.cuotaId)
     .where(sql`${table.deletedAt} IS NULL`),
   index("ingreso_aplicaciones_cuota_id_idx").on(table.cuotaId),
+  index("ingreso_aplicaciones_estudio_honorario_idx")
+    .on(table.estudioId, table.honorarioId)
+    .where(sql`${table.deletedAt} IS NULL`),
   check(
     "ingreso_aplicaciones_monto_partes_check",
     sql`${table.monto} = ${table.montoCapital} + ${table.montoInteres}`

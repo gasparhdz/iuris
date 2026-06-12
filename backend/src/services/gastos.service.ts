@@ -4,6 +4,7 @@ import { GastosQueries } from "../db/queries/gastos.queries.js";
 import { serializeDates } from "../utils/serialize.js";
 import type { CreateGastoInput, GastoQueryInput, UpdateGastoInput } from "../schemas/gastos.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
+import { assertMonedaSoportada } from "./moneda.validator.js";
 
 export class GastosService {
   static async findAll(estudioId: number, query: GastoQueryInput) {
@@ -31,6 +32,7 @@ export class GastosService {
   }
 
   static async create(estudioId: number, userId: number, data: CreateGastoInput) {
+    await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId, data.casoId ?? undefined);
 
     const gasto = await GastosQueries.insertGasto({
@@ -62,6 +64,7 @@ export class GastosService {
     const current = await GastosQueries.findGastoById(id, estudioId);
     if (!current) throw new Error("GASTO_NOT_FOUND");
 
+    if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
     const updateData: Parameters<typeof GastosQueries.updateGasto>[2] = { updatedAt: new Date(), updatedBy: userId };

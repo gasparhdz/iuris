@@ -25,9 +25,13 @@ import {
   Box,
   Button,
   Chip,
+  FormControl,
   GlobalStyles,
   InputAdornment,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Skeleton,
   Stack,
   Tab,
@@ -72,7 +76,6 @@ import {
   formatMoneyAr,
   isHonorarioPendiente,
   movementAmountPesos,
-  simulateCuentaCorriente,
   unwrapPaged,
 } from "./finanzasUtils";
 
@@ -84,6 +87,16 @@ const CARD_TONES = {
   violet: "#8B5CF6",
   cyan: "#29B6F6",
 };
+
+// Paleta rotativa para las barras del Top deudores (una por cliente).
+const DEUDOR_BAR_COLORS = [
+  CARD_TONES.orange,
+  CARD_TONES.blue,
+  CARD_TONES.violet,
+  CARD_TONES.green,
+  CARD_TONES.cyan,
+  CARD_TONES.red,
+];
 
 const PIE_COLORS = [
   CARD_TONES.blue,
@@ -252,15 +265,6 @@ function daysUntil(date) {
   const d = toDate(date);
   if (!d) return null;
   return Math.ceil((startOfDay(d).getTime() - startOfDay(new Date()).getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function agingBucket(days) {
-  if (days === null) return "Sin fecha";
-  if (days < 0) return "Por vencer";
-  if (days <= 30) return "0-30 días";
-  if (days <= 60) return "31-60 días";
-  if (days <= 90) return "61-90 días";
-  return "+90 días";
 }
 
 function isTaskAssignedTo(task, userId) {
@@ -468,7 +472,6 @@ export default function Reportes() {
   const availableTabs = useMemo(
     () => [
       { key: "financiero", label: "Resumen Financiero" },
-      { key: "cobranzas", label: "Cobranzas y Deuda" },
       { key: "clientes", label: "Cartera de Clientes" },
       { key: "expedientes", label: "Estado de Expedientes" },
       { key: "vencimientos", label: "Vencimientos" },
@@ -547,14 +550,21 @@ export default function Reportes() {
     staleTime: 60_000,
   });
 
-  const valorJusHistorialQuery = useQuery({
-    queryKey: ["valorjus", "historial-ledger"],
+  // Resumen de cuenta corriente por cliente calculado en el backend (motor Decimal).
+  const ccResumenQuery = useQuery({
+    queryKey: ["clientes", "cuentas-corrientes"],
     queryFn: async () => {
-      const { data } = await api.get("/valorjus", { params: { page: 1, limit: 200 } });
-      return data?.data?.items ?? data?.items ?? [];
+      const { data } = await api.get("/clientes/cuentas-corrientes");
+      return data?.data ?? [];
     },
     staleTime: 60_000,
   });
+
+  const ccTotalesByCliente = useMemo(() => {
+    const map = new Map();
+    (ccResumenQuery.data ?? []).forEach(({ clienteId, totales }) => map.set(Number(clienteId), totales));
+    return map;
+  }, [ccResumenQuery.data]);
 
   const catalogQuery = useQuery({
     queryKey: ["reportes", "catalogos", "finanzas"],
@@ -672,25 +682,14 @@ export default function Reportes() {
   const cartera = useMemo(() => {
     const rows = clientes.map((cliente) => {
       const clienteId = Number(cliente.id);
-      const clienteHonorarios = honorarios.filter((item) => getClienteId(item) === clienteId);
-      const clienteGastos = gastos.filter((item) => getClienteId(item) === clienteId);
-      const clienteIngresos = ingresos.filter((item) => getClienteId(item) === clienteId);
-      const cuenta = simulateCuentaCorriente({
-        honorarios: clienteHonorarios,
-        gastos: clienteGastos,
-        ingresos: clienteIngresos,
-        valorJusActual,
-        valorJusHistorial: valorJusHistorialQuery.data ?? [],
-        catalogMonedas,
-        catalogPoliticas,
-      });
-      const saldo = Number(cuenta.saldoPendientePesos || 0);
+      const totales = ccTotalesByCliente.get(clienteId);
+      const saldo = Number(totales?.saldoPesos || 0);
       const estado = saldo > 50_000 ? "Moroso" : saldo > 0 ? "Deudor" : "Al día";
       return {
         id: cliente.id,
         cliente: getPersonaName(cliente),
         expedientesActivos: expedientes.filter((expediente) => getExpedienteClienteId(expediente) === clienteId && isExpedienteActivo(expediente)).length,
-        honorariosPendientes: cuenta.pendingHonorariosPesos,
+        honorariosPendientes: Number(totales?.honorariosPendientesPesos || 0),
         saldo,
         estado,
       };
@@ -703,7 +702,7 @@ export default function Reportes() {
         const direction = clientOrder === "asc" ? 1 : -1;
         return compareValues(a[clientOrderBy], b[clientOrderBy]) * direction;
       });
-  }, [clientes, honorarios, gastos, ingresos, expedientes, valorJusActual, valorJusHistorialQuery.data, catalogMonedas, catalogPoliticas, clientSearch, clientOrderBy, clientOrder]);
+  }, [clientes, expedientes, ccTotalesByCliente, clientSearch, clientOrderBy, clientOrder]);
 
   const clientesEstadoPie = useMemo(() => {
     const counts = new Map([
@@ -722,17 +721,9 @@ export default function Reportes() {
     const deudores = [];
     clientes.forEach((cliente) => {
       const clienteId = Number(cliente.id);
-      const cuenta = simulateCuentaCorriente({
-        honorarios: honorarios.filter((item) => getClienteId(item) === clienteId),
-        gastos: gastos.filter((item) => getClienteId(item) === clienteId),
-        ingresos: ingresos.filter((item) => getClienteId(item) === clienteId),
-        valorJusActual,
-        valorJusHistorial: valorJusHistorialQuery.data ?? [],
-        catalogMonedas,
-        catalogPoliticas,
-      });
-      const saldo = Math.max(0, Number(cuenta.saldoPendientePesos || 0));
-      totalHonorariosPendientes += Number(cuenta.pendingHonorariosPesos || 0);
+      const totales = ccTotalesByCliente.get(clienteId);
+      const saldo = Math.max(0, Number(totales?.saldoPesos || 0));
+      totalHonorariosPendientes += Number(totales?.honorariosPendientesPesos || 0);
       totalACobrar += saldo;
       if (saldo > 0) deudores.push({ name: compactLabel(getPersonaName(cliente), 22), saldo });
     });
@@ -743,7 +734,8 @@ export default function Reportes() {
     const totalCobrado = periodIngresos.reduce((sum, item) => sum + movementAmountPesos(item, "ingreso", valorJusActual, catalogMonedas), 0);
     const totalGastos = periodGastos.reduce((sum, item) => sum + movementAmountPesos(item, "gasto", valorJusActual, catalogMonedas), 0);
 
-    // Evolución mensual: cobrado real (ingresos) vs programado (cuotas de planes por vencer)
+    // Evolución mensual: cobrado real (ingresos, por fecha de cobro) vs pendiente (saldo de
+    // cuotas por fecha de vencimiento; incluye cuotas vencidas e impagas).
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 6, 1);
@@ -751,7 +743,7 @@ export default function Reportes() {
     const byKey = new Map();
     const cursor = new Date(start);
     while (cursor <= end) {
-      const bucket = { key: monthKey(cursor), mes: `${monthLabel(cursor)} ${String(cursor.getFullYear()).slice(2)}`, cobrado: 0, programado: 0 };
+      const bucket = { key: monthKey(cursor), mes: `${monthLabel(cursor)} ${String(cursor.getFullYear()).slice(2)}`, cobrado: 0, pendiente: 0 };
       buckets.push(bucket);
       byKey.set(bucket.key, bucket);
       cursor.setMonth(cursor.getMonth() + 1);
@@ -763,7 +755,7 @@ export default function Reportes() {
     proyeccionCuotas.forEach((cuota) => {
       const date = toDate(cuota.vencimiento);
       const saldo = Number(cuota.saldoPesos || 0);
-      if (date && saldo > 0 && byKey.has(monthKey(date))) byKey.get(monthKey(date)).programado += saldo;
+      if (date && saldo > 0 && byKey.has(monthKey(date))) byKey.get(monthKey(date)).pendiente += saldo;
     });
 
     return {
@@ -774,7 +766,7 @@ export default function Reportes() {
       mensual: buckets,
       topDeudores: deudores.sort((a, b) => b.saldo - a.saldo).slice(0, 8),
     };
-  }, [clientes, honorarios, gastos, ingresos, proyeccionCuotas, from, to, valorJusActual, valorJusHistorialQuery.data, catalogMonedas, catalogPoliticas]);
+  }, [clientes, ingresos, gastos, proyeccionCuotas, from, to, valorJusActual, catalogMonedas, ccTotalesByCliente]);
 
   const SIN_MOVIMIENTO_DIAS = 90;
 
@@ -827,70 +819,6 @@ export default function Reportes() {
     };
   }, [expedientes, clientesById, tipoCasoById]);
 
-  const aging = useMemo(() => {
-    const buckets = ["Por vencer", "0-30 días", "31-60 días", "61-90 días", "+90 días"];
-    const totals = new Map(buckets.map((b) => [b, 0]));
-    const byCliente = new Map();
-    let totalPendiente = 0;
-
-    honorarios.filter(isHonorarioPendiente).forEach((item) => {
-      const amount = computeHonorarioAmounts(item, valorJusActual, catalogMonedas, catalogPoliticas).updatedVal;
-      if (!(amount > 0)) return;
-      const dias = daysSince(item.fechaVencimiento || item.fechaRegulacion || item.fecha);
-      let bucket = agingBucket(dias);
-      if (bucket === "Sin fecha") bucket = "+90 días";
-      totals.set(bucket, (totals.get(bucket) ?? 0) + amount);
-      totalPendiente += amount;
-
-      const cid = getClienteId(item);
-      const cliente = item.cliente || clientesById.get(cid);
-      if (!byCliente.has(cid)) {
-        byCliente.set(cid, { id: cid || `s-${byCliente.size}`, cliente: clienteLabel(cliente) || getPersonaName(cliente) || "Sin cliente", "Por vencer": 0, "0-30 días": 0, "31-60 días": 0, "61-90 días": 0, "+90 días": 0, total: 0 });
-      }
-      const row = byCliente.get(cid);
-      row[bucket] += amount;
-      row.total += amount;
-    });
-
-    return {
-      buckets,
-      chart: buckets.map((b) => ({ name: b, value: totals.get(b) ?? 0 })),
-      totalPendiente,
-      totalVencido: totalPendiente - (totals.get("Por vencer") ?? 0),
-      rows: Array.from(byCliente.values()).sort((a, b) => b.total - a.total),
-    };
-  }, [honorarios, valorJusActual, catalogMonedas, catalogPoliticas, clientesById]);
-
-  const proyeccion = useMemo(() => {
-    const buckets = ["Vencidas", "0-30 días", "31-60 días", "61-90 días", "+90 días"];
-    const totals = new Map(buckets.map((b) => [b, 0]));
-    const rows = [];
-
-    proyeccionCuotas.forEach((cuota) => {
-      const saldo = Number(cuota.saldoPesos || 0);
-      if (!(saldo > 0)) return;
-      const dias = daysUntil(cuota.vencimiento);
-      let bucket;
-      if (dias === null) bucket = "+90 días";
-      else if (dias < 0) bucket = "Vencidas";
-      else if (dias <= 30) bucket = "0-30 días";
-      else if (dias <= 60) bucket = "31-60 días";
-      else if (dias <= 90) bucket = "61-90 días";
-      else bucket = "+90 días";
-      totals.set(bucket, (totals.get(bucket) ?? 0) + saldo);
-      rows.push({ ...cuota, saldo, dias, bucket });
-    });
-
-    return {
-      buckets,
-      chart: buckets.map((b) => ({ name: b, value: totals.get(b) ?? 0 })),
-      total: rows.reduce((sum, row) => sum + row.saldo, 0),
-      totalVencidas: totals.get("Vencidas") ?? 0,
-      total90: (totals.get("0-30 días") ?? 0) + (totals.get("31-60 días") ?? 0) + (totals.get("61-90 días") ?? 0),
-      rows: rows.sort((a, b) => (a.dias ?? 1e9) - (b.dias ?? 1e9)),
-    };
-  }, [proyeccionCuotas]);
-
   const vencimientos = useMemo(() => {
     const items = [];
     tareas.forEach((tarea) => {
@@ -919,7 +847,6 @@ export default function Reportes() {
   const loadingProductividad = isDirector && [equipoQuery, tareasQuery, expedientesQuery].some((query) => query.isLoading);
   const loadingCartera = [clientesQuery, honorariosQuery, gastosQuery, ingresosQuery, expedientesQuery, valorJusQuery, catalogQuery].some((query) => query.isLoading);
   const loadingExpedientes = [expedientesQuery, catalogQuery].some((query) => query.isLoading);
-  const loadingCobranzas = [honorariosQuery, proyeccionQuery, valorJusQuery, catalogQuery, clientesQuery].some((query) => query.isLoading);
   const loadingVencimientos = [tareasQuery, eventosQuery].some((query) => query.isLoading);
 
   const handleClientSort = (field) => {
@@ -955,18 +882,6 @@ export default function Reportes() {
         })),
       },
       expedientes: { name: "Expedientes", rows: estadoExpedientes.exportRows },
-      cobranzas: {
-        name: "Aging deuda",
-        rows: aging.rows.map((row) => ({
-          Cliente: row.cliente,
-          "Por vencer": row["Por vencer"],
-          "0-30 días": row["0-30 días"],
-          "31-60 días": row["31-60 días"],
-          "61-90 días": row["61-90 días"],
-          "+90 días": row["+90 días"],
-          Total: row.total,
-        })),
-      },
       vencimientos: {
         name: "Vencimientos",
         rows: vencimientos.rows.map((row) => ({
@@ -1047,16 +962,20 @@ export default function Reportes() {
           {tab === "financiero" && (
             <Box component={motion.div} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
               <Paper elevation={0} className="reportes-no-print" sx={{ ...panelSx, p: 1.5, mb: 2 }}>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
-                  {PERIODS.map((item) => (
-                    <Chip
-                      key={item.key}
-                      label={item.label}
-                      color={period === item.key ? "primary" : "default"}
-                      onClick={() => setPeriod(item.key)}
-                      sx={{ fontWeight: period === item.key ? 900 : 700, cursor: "pointer" }}
-                    />
-                  ))}
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} useFlexGap alignItems={{ xs: "stretch", sm: "center" }}>
+                  <FormControl size="small" sx={{ minWidth: 220 }}>
+                    <InputLabel id="reportes-periodo-label">Período</InputLabel>
+                    <Select
+                      labelId="reportes-periodo-label"
+                      label="Período"
+                      value={period}
+                      onChange={(event) => setPeriod(event.target.value)}
+                    >
+                      {PERIODS.map((item) => (
+                        <MenuItem key={item.key} value={item.key}>{item.label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                   {period === "custom" && (
                     <>
                       <TextField size="small" type="date" label="Desde" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} InputLabelProps={{ shrink: true }} sx={{ width: 160 }} />
@@ -1081,7 +1000,7 @@ export default function Reportes() {
 
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, lg: 7 }}>
-                  <ChartPanel title="Cobranzas por mes" subtitle="Cobrado real vs cuotas programadas de planes" loading={loadingFinancial}>
+                  <ChartPanel title="Cobranzas por mes" subtitle="Cobrado del mes vs saldo pendiente (por vencimiento)" loading={loadingFinancial}>
                     <ResponsiveContainer width="100%" height={280}>
                       <RBarChart data={resumenFinanciero.mensual}>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
@@ -1090,7 +1009,7 @@ export default function Reportes() {
                         <RechartsTooltip content={<ChartTooltip money />} />
                         <Legend />
                         <Bar dataKey="cobrado" name="Cobrado" fill={CARD_TONES.green} radius={[6, 6, 0, 0]} />
-                        <Bar dataKey="programado" name="Programado (cuotas)" fill={CARD_TONES.blue} radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="pendiente" name="Pendiente" fill={CARD_TONES.orange} radius={[6, 6, 0, 0]} />
                       </RBarChart>
                     </ResponsiveContainer>
                   </ChartPanel>
@@ -1104,7 +1023,11 @@ export default function Reportes() {
                           <XAxis type="number" tickFormatter={(value) => `$${Math.round(value / 1000)}k`} />
                           <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
                           <RechartsTooltip content={<ChartTooltip money />} />
-                          <Bar dataKey="saldo" name="Saldo" fill={CARD_TONES.orange} radius={[0, 8, 8, 0]} />
+                          <Bar dataKey="saldo" name="Saldo" radius={[0, 8, 8, 0]}>
+                            {resumenFinanciero.topDeudores.map((entry, index) => (
+                              <Cell key={entry.name ?? index} fill={DEUDOR_BAR_COLORS[index % DEUDOR_BAR_COLORS.length]} />
+                            ))}
+                          </Bar>
                         </RBarChart>
                       </ResponsiveContainer>
                     ) : (
@@ -1308,78 +1231,6 @@ export default function Reportes() {
                   </Table>
                 </TableShell>
               </Box>
-            </Box>
-          )}
-
-          {tab === "cobranzas" && (
-            <Box component={motion.div} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                {[
-                  { title: "Deuda total pendiente", value: formatMoneyAr(aging.totalPendiente), caption: "Honorarios sin cobrar (actualizados)", icon: <AccountBalanceWallet />, tone: CARD_TONES.orange },
-                  { title: "Deuda vencida", value: formatMoneyAr(aging.totalVencido), caption: "Honorarios con vencimiento pasado", icon: <WarningAmber />, tone: CARD_TONES.red },
-                  { title: "A cobrar 90 días", value: formatMoneyAr(proyeccion.total90), caption: "Cuotas de planes por vencer", icon: <Schedule />, tone: CARD_TONES.blue },
-                  { title: "Cuotas vencidas", value: formatMoneyAr(proyeccion.totalVencidas), caption: "Cuotas de planes impagas", icon: <TrendingDown />, tone: CARD_TONES.red },
-                ].map((item) => (
-                  <Grid key={item.title} size={{ xs: 12, sm: 6, md: 3 }}>
-                    <KpiCard {...item} loading={loadingCobranzas} />
-                  </Grid>
-                ))}
-              </Grid>
-
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid size={{ xs: 12, lg: 6 }}>
-                  <ChartPanel title="Antigüedad de la deuda" subtitle="Honorarios pendientes por tramo" loading={loadingCobranzas}>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <RBarChart data={aging.chart}>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
-                        <XAxis dataKey="name" />
-                        <YAxis tickFormatter={(value) => `$${Math.round(value / 1000)}k`} />
-                        <RechartsTooltip content={<ChartTooltip money />} />
-                        <Bar dataKey="value" name="Monto" fill={CARD_TONES.orange} radius={[8, 8, 0, 0]} />
-                      </RBarChart>
-                    </ResponsiveContainer>
-                  </ChartPanel>
-                </Grid>
-                <Grid size={{ xs: 12, lg: 6 }}>
-                  <ChartPanel title="Proyección de cobranzas" subtitle="Cuotas de planes por tramo de vencimiento" loading={loadingCobranzas}>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <RBarChart data={proyeccion.chart}>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
-                        <XAxis dataKey="name" />
-                        <YAxis tickFormatter={(value) => `$${Math.round(value / 1000)}k`} />
-                        <RechartsTooltip content={<ChartTooltip money />} />
-                        <Bar dataKey="value" name="Monto" fill={CARD_TONES.blue} radius={[8, 8, 0, 0]} />
-                      </RBarChart>
-                    </ResponsiveContainer>
-                  </ChartPanel>
-                </Grid>
-              </Grid>
-
-              <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>Antigüedad de deuda por cliente</Typography>
-              <TableShell loading={loadingCobranzas} isEmpty={!aging.rows.length} emptyTitle="Sin honorarios pendientes">
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Cliente</TableCell>
-                      {aging.buckets.map((bucket) => <TableCell key={bucket} align="right">{bucket}</TableCell>)}
-                      <TableCell align="right">Total</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {aging.rows.map((row) => (
-                      <TableRow key={row.id} hover>
-                        <TableCell sx={{ fontWeight: 900 }}>{row.cliente}</TableCell>
-                        {aging.buckets.map((bucket) => (
-                          <TableCell key={bucket} align="right" sx={{ color: bucket === "+90 días" && row[bucket] > 0 ? CARD_TONES.red : "inherit" }}>
-                            {row[bucket] > 0 ? formatMoneyAr(row[bucket]) : "—"}
-                          </TableCell>
-                        ))}
-                        <TableCell align="right" sx={{ fontWeight: 900 }}>{formatMoneyAr(row.total)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableShell>
             </Box>
           )}
 

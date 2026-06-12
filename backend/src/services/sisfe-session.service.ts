@@ -17,9 +17,18 @@ export type SisfeSyncStats = {
   pdfsNoDescargados: number;
 };
 
-export async function saveSession(usuarioId: number, estudioId: number, cookieName: string, cookieValue: string) {
+export async function saveSession(
+  usuarioId: number,
+  estudioId: number,
+  cookieName: string,
+  cookieValue: string,
+  sisfeMatricula?: string | null,
+) {
   const encrypted = encrypt(cookieValue, { usuarioId, estudioId });
   const now = new Date();
+  // Solo sobrescribimos la matrícula si esta corrida logró leerla; si vino vacía,
+  // conservamos la previa para no perder el filtro de novedades.
+  const matriculaSet = sisfeMatricula ? { sisfeMatricula } : {};
   const [row] = await db
     .insert(sisfeSessions)
     .values({
@@ -27,6 +36,7 @@ export async function saveSession(usuarioId: number, estudioId: number, cookieNa
       estudioId,
       cookieName,
       sessionCookieEncriptada: encrypted,
+      sisfeMatricula: sisfeMatricula ?? null,
       lastVerifiedAt: now,
       syncStatus: "idle",
       syncProgress: 0,
@@ -39,6 +49,7 @@ export async function saveSession(usuarioId: number, estudioId: number, cookieNa
         estudioId,
         cookieName,
         sessionCookieEncriptada: encrypted,
+        ...matriculaSet,
         lastVerifiedAt: now,
         syncStatus: "idle",
         syncProgress: 0,
@@ -180,6 +191,23 @@ export async function iniciarLoginInteractivo(usuarioId: number, estudioId: numb
     // Esperar un momento para asegurar que las cookies estén completamente escritas en el contexto
     await page.waitForTimeout(2000);
 
+    // Leer la matrícula del usuario de la barra superior ("LIII043 - MEOTTO, NADIR").
+    // Tomamos solo el código anterior al " - ". Si no se puede leer, queda null (no rompe el login).
+    const matricula = await page
+      .locator("label.text-matriculado")
+      .first()
+      .textContent({ timeout: 5000 })
+      .then((texto) => {
+        const codigo = (texto ?? "").trim().split(/\s*-\s*/)[0]?.trim();
+        return codigo || null;
+      })
+      .catch(() => null);
+    if (matricula) {
+      log.info({ matricula }, "[SISFE Login] Matricula del usuario capturada");
+    } else {
+      log.warn("[SISFE Login] No se pudo leer la matricula de la barra superior");
+    }
+
     // Extraer las cookies del contexto autenticado
     const cookies = await context.cookies();
 
@@ -223,7 +251,7 @@ export async function iniciarLoginInteractivo(usuarioId: number, estudioId: numb
         _grecaptcha: localStorageData._grecaptcha || "",
         cookies: cookies
       };
-      await saveSession(usuarioId, estudioId, "currentUser", JSON.stringify(payload));
+      await saveSession(usuarioId, estudioId, "currentUser", JSON.stringify(payload), matricula);
       return;
     }
 
@@ -242,7 +270,7 @@ export async function iniciarLoginInteractivo(usuarioId: number, estudioId: numb
     const payload = {
       cookies: cookies
     };
-    await saveSession(usuarioId, estudioId, sessionCookie.name, JSON.stringify(payload));
+    await saveSession(usuarioId, estudioId, sessionCookie.name, JSON.stringify(payload), matricula);
   } finally {
     await browser.close();
   }

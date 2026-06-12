@@ -56,6 +56,9 @@ export class AuthController {
       });
     } catch (error: unknown) {
       await auditLoginFail(request);
+      if (error instanceof Error && error.message === "ACCOUNT_LOCKED") {
+        return reply.status(429).send({ error: { code: "ACCOUNT_LOCKED", message: "Demasiados intentos fallidos. Probá de nuevo en unos minutos." } });
+      }
       if (error instanceof Error && (error.message === "INVALID_CREDENTIALS" || error.message === "USER_DISABLED" || error.message === "STUDY_DISABLED")) {
         return reply.status(401).send({ error: { code: error.message, message: "Credenciales invalidas o usuario deshabilitado" } });
       }

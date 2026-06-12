@@ -1,10 +1,35 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
-import { and, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, ilike, inArray, isNull, lte, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { eventos, tareas } from "../db/schema.js";
+import { casos, eventos, movimientosJudiciales, movimientosVistos, sisfeSessions, tareas } from "../db/schema.js";
 import { documentedResponses } from "../schemas/common.schema.js";
+import { AuthQueries } from "../db/queries/auth.queries.js";
+
+const NOVEDADES_LIMIT = 50;
+
+const novedadesResponseSchema = z.object({
+  data: z.object({
+    novedades: z.array(z.object({
+      id: z.number(),
+      casoId: z.number(),
+      caratula: z.string().nullable(),
+      nroExpte: z.string().nullable(),
+      descripcion: z.string().nullable(),
+      tipo: z.string(),
+      novedad: z.string().nullable(),
+      fecha: z.string(),
+      createdAt: z.string(),
+    })),
+    total: z.number(),
+  }),
+});
+
+const marcarLeidoBodySchema = z.object({
+  // Si se omite, marca como leídas TODAS las novedades SISFE no vistas del usuario.
+  movimientoIds: z.array(z.number().int().positive()).optional(),
+});
 
 const notificacionesPendientesResponseSchema = z.object({
   data: z.object({
@@ -41,6 +66,11 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
     const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const estudioId = request.authUser.estudioId;
 
+    // Cada recordatorio se incluye solo si el usuario tiene lectura del modulo respectivo.
+    const permisos = await AuthQueries.findUserPermisos(request.authUser.id);
+    const verTareas = permisos.some((p) => p.modulo === "TAREAS" && p.ver);
+    const verEventos = permisos.some((p) => p.modulo === "EVENTOS" && p.ver);
+
     const [tareasPendientes, eventosPendientes] = await Promise.all([
       db
         .select({
@@ -58,7 +88,8 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
             eq(tareas.recordatorioEnviado, false),
             eq(tareas.completada, false),
             eq(tareas.activo, true),
-            isNull(tareas.deletedAt)
+            isNull(tareas.deletedAt),
+            verTareas ? undefined : sql`false`
           )
         ),
       db
@@ -76,7 +107,8 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
             lte(eventos.recordatorio, next24Hours),
             eq(eventos.recordatorioEnviado, false),
             eq(eventos.activo, true),
-            isNull(eventos.deletedAt)
+            isNull(eventos.deletedAt),
+            verEventos ? undefined : sql`false`
           )
         ),
     ]);
@@ -96,5 +128,137 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
         total: tareasPendientes.length + eventosPendientes.length,
       },
     };
+  });
+
+  // Movimientos judiciales de origen SISFE que el usuario todavía no marcó como vistos.
+  server.get("/novedades", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Listar novedades de expedientes (movimientos SISFE no leidos)",
+      security: [{ bearerAuth: [] }],
+      response: documentedResponses(200, novedadesResponseSchema),
+    },
+  }, async (request) => {
+    const estudioId = request.authUser.estudioId;
+    const usuarioId = request.authUser.id;
+
+    // Matrícula SISFE del usuario: si la tenemos, descartamos las novedades que el propio
+    // usuario presentó (la observación del movimiento incluye "Presentante: ... - <matrícula>").
+    const [sesion] = await db
+      .select({ sisfeMatricula: sisfeSessions.sisfeMatricula })
+      .from(sisfeSessions)
+      .where(eq(sisfeSessions.usuarioId, usuarioId))
+      .limit(1);
+    const matricula = sesion?.sisfeMatricula?.trim();
+
+    const noVistoCondition = and(
+      eq(movimientosJudiciales.estudioId, estudioId),
+      eq(movimientosJudiciales.origenSisfe, true),
+      isNull(movimientosVistos.id),
+      ...(matricula
+        ? [or(
+            isNull(movimientosJudiciales.descripcion),
+            not(ilike(movimientosJudiciales.descripcion, `%${matricula}%`)),
+          )]
+        : []),
+    );
+
+    const novedades = await db
+      .select({
+        id: movimientosJudiciales.id,
+        casoId: movimientosJudiciales.casoId,
+        caratula: casos.caratula,
+        nroExpte: casos.nroExpte,
+        descripcion: casos.descripcion,
+        tipo: movimientosJudiciales.tipo,
+        novedad: movimientosJudiciales.novedad,
+        fecha: movimientosJudiciales.fecha,
+        createdAt: movimientosJudiciales.createdAt,
+      })
+      .from(movimientosJudiciales)
+      .leftJoin(casos, eq(movimientosJudiciales.casoId, casos.id))
+      .leftJoin(
+        movimientosVistos,
+        and(
+          eq(movimientosVistos.movimientoId, movimientosJudiciales.id),
+          eq(movimientosVistos.usuarioId, usuarioId),
+        ),
+      )
+      .where(noVistoCondition)
+      .orderBy(asc(movimientosJudiciales.fecha))
+      .limit(NOVEDADES_LIMIT);
+
+    const [{ total }] = await db
+      .select({ total: sql<number>`cast(count(*) as int)` })
+      .from(movimientosJudiciales)
+      .leftJoin(
+        movimientosVistos,
+        and(
+          eq(movimientosVistos.movimientoId, movimientosJudiciales.id),
+          eq(movimientosVistos.usuarioId, usuarioId),
+        ),
+      )
+      .where(noVistoCondition);
+
+    return {
+      data: {
+        novedades: novedades.map((n) => ({
+          ...n,
+          fecha: n.fecha.toISOString(),
+          createdAt: n.createdAt.toISOString(),
+        })),
+        total,
+      },
+    };
+  });
+
+  // Marca novedades como leídas (idempotente). Sin body => marca todas.
+  server.post("/novedades/marcar-leido", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Marcar novedades de expedientes como leidas",
+      security: [{ bearerAuth: [] }],
+      body: marcarLeidoBodySchema,
+      response: documentedResponses(200, z.object({ data: z.object({ marcados: z.number() }) })),
+    },
+  }, async (request) => {
+    const estudioId = request.authUser.estudioId;
+    const usuarioId = request.authUser.id;
+    const { movimientoIds } = request.body as z.infer<typeof marcarLeidoBodySchema>;
+
+    // Resolver qué movimientos marcar: los pedidos (validados por estudio) o todos los no vistos.
+    const filtros = [
+      eq(movimientosJudiciales.estudioId, estudioId),
+      eq(movimientosJudiciales.origenSisfe, true),
+      isNull(movimientosVistos.id),
+    ];
+    if (movimientoIds && movimientoIds.length > 0) {
+      filtros.push(inArray(movimientosJudiciales.id, movimientoIds));
+    }
+
+    const objetivo = await db
+      .select({ id: movimientosJudiciales.id })
+      .from(movimientosJudiciales)
+      .leftJoin(
+        movimientosVistos,
+        and(
+          eq(movimientosVistos.movimientoId, movimientosJudiciales.id),
+          eq(movimientosVistos.usuarioId, usuarioId),
+        ),
+      )
+      .where(and(...filtros));
+
+    if (objetivo.length === 0) {
+      return { data: { marcados: 0 } };
+    }
+
+    await db
+      .insert(movimientosVistos)
+      .values(objetivo.map((m) => ({ estudioId, movimientoId: m.id, usuarioId })))
+      .onConflictDoNothing();
+
+    return { data: { marcados: objetivo.length } };
   });
 };

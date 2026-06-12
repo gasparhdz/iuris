@@ -73,6 +73,8 @@ export const honorarioItemSchema = z.object({
   fechaVencimiento: z.string().nullable(),
   tasaInteresMensual: z.number().nullable(),
   estadoId: z.number().nullable(),
+  montoCobrado: z.number().optional(),
+  tienePlan: z.boolean().optional(),
   activo: z.boolean(),
   createdBy: z.number().nullable(),
   createdAt: z.string(),

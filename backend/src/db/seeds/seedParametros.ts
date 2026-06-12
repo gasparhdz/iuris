@@ -398,7 +398,17 @@ async function main() {
   await ensureParam(catMoneda.id, 'EUR', 'Euro', 3);
   await ensureParam(catMoneda.id, 'JUS', 'JUS', 4);
 
-  console.log(`✅ 4 parámetros de MONEDA creados`);
+  // USD y EUR NO son monedas reales en el sistema: hoy un honorario guarda un único
+  // montoPesos + monedaId (sin principal en divisa ni cotización), así que cargar "USD"
+  // produce pesos congelados con etiqueta engañosa. Se desactivan para que no aparezcan
+  // en los selectores (el catálogo filtra por activo=true). Se mantiene el parámetro
+  // (no se borra) para no romper datos legacy. Reactivar SOLO cuando exista contabilidad
+  // multimoneda real (principal en divisa + snapshot FX + revaluación, como JUS AL_COBRO).
+  await db.update(parametros)
+    .set({ activo: false })
+    .where(and(eq(parametros.categoriaId, catMoneda.id), sql`${parametros.codigo} in ('USD', 'EUR')`));
+
+  console.log(`✅ MONEDA: ARS y JUS activos; USD y EUR desactivados (no soportados aún)`);
 
   // ========== CATEGORÍA 15: ESTADO_INGRESO ==========
   const catEstadoIngreso = (await db.select().from(categorias).where(eq(categorias.codigo, 'ESTADO_INGRESO')).limit(1))[0];
@@ -429,8 +439,10 @@ async function main() {
   await ensureParam(catEstadoHonorario.id, 'PENDIENTE', 'Pendiente', 1);
   await ensureParam(catEstadoHonorario.id, 'ANULADO', 'Anulado', 2);
   await ensureParam(catEstadoHonorario.id, 'INCOBRABLE', 'Incobrable', 3);
+  await ensureParam(catEstadoHonorario.id, 'PARCIAL', 'Parcial', 4);
+  await ensureParam(catEstadoHonorario.id, 'COBRADO', 'Cobrado', 5);
 
-  console.log(`✅ 3 parámetros de ESTADO_HONORARIO creados`);
+  console.log(`✅ 5 parámetros de ESTADO_HONORARIO creados`);
 
   // ========== CATEGORÍA 17: TIPO_PERSONA ==========
   const catTipoPersona = (await db.select().from(categorias).where(eq(categorias.codigo, 'TIPO_PERSONA')).limit(1))[0];

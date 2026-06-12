@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
@@ -82,6 +83,7 @@ export default function Tareas() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const { canCrear, canEditar, canEliminar } = usePermisos("TAREAS");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("pendientes");
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -274,9 +276,11 @@ export default function Tareas() {
           <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0 }}>Tareas</Typography>
           <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>Gestión operativa de pendientes, vencimientos y subtareas del estudio.</Typography>
         </Box>
-        <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/tareas/nuevo", { state: { from: currentPath } })} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-          Nueva Tarea
-        </Button>
+        {canCrear && (
+          <Button variant="contained" startIcon={<Add />} onClick={() => navigate("/tareas/nuevo", { state: { from: currentPath } })} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+            Nueva Tarea
+          </Button>
+        )}
       </Stack>
 
       <Paper elevation={0} sx={{ p: 2, mb: 2.5, borderRadius: "16px", border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
@@ -348,6 +352,8 @@ export default function Tareas() {
                   onToggle={(event) => { event.stopPropagation(); handleToggleTask(task); }}
                   onEdit={(event) => { event.stopPropagation(); navigate(`/tareas/editar/${task.id}`, { state: { from: currentPath } }); }}
                   onDelete={(event) => { event.stopPropagation(); setDeleteTarget(task); }}
+                  canEditar={canEditar}
+                  canEliminar={canEliminar}
                   disabled={toggleMutation.isPending}
                 />
               </Grid>
@@ -389,6 +395,8 @@ export default function Tareas() {
           onToggle={(event, task) => { event.stopPropagation(); handleToggleTask(task); }}
           onEdit={(event, task) => { event.stopPropagation(); navigate(`/tareas/editar/${task.id}`, { state: { from: currentPath } }); }}
           onDelete={(event, task) => { event.stopPropagation(); setDeleteTarget(task); }}
+          canEditar={canEditar}
+          canEliminar={canEliminar}
           disabled={toggleMutation.isPending}
         />
       )}
@@ -550,7 +558,7 @@ function ChecklistProgress({ task, compact = false }) {
   );
 }
 
-function TaskCard({ task, theme, priority, cliente, caso, currentPath, onOpen, onToggle, onEdit, onDelete, disabled }) {
+function TaskCard({ task, theme, priority, cliente, caso, currentPath, onOpen, onToggle, onEdit, onDelete, canEditar = true, canEliminar = true, disabled }) {
   return (
     <Card elevation={0} sx={{ height: "100%", border: "1px solid", borderColor: isOverdue(task) ? alpha(theme.palette.error.main, 0.45) : "divider", borderRadius: "16px", cursor: "pointer", transition: "transform 0.16s ease, border-color 0.16s ease", "&:hover": { transform: "translateY(-3px)", borderColor: "primary.main" } }} onClick={onOpen}>
       <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>
@@ -567,10 +575,12 @@ function TaskCard({ task, theme, priority, cliente, caso, currentPath, onOpen, o
             <ChecklistProgress task={task} />
           </Stack>
           <TaskMeta task={task} cliente={cliente} caso={caso} currentPath={currentPath} />
-          <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
-            <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>
-            <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={onDelete}><Delete fontSize="small" /></IconButton></Tooltip>
-          </Stack>
+          {(canEditar || canEliminar) && (
+            <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
+              {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>}
+              {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={onDelete}><Delete fontSize="small" /></IconButton></Tooltip>}
+            </Stack>
+          )}
         </Stack>
       </CardContent>
     </Card>
@@ -596,6 +606,8 @@ function TaskTable({
   onToggle,
   onEdit,
   onDelete,
+  canEditar = true,
+  canEliminar = true,
   disabled
 }) {
   const columns = [
@@ -708,16 +720,20 @@ function TaskTable({
                     <ChecklistProgress task={task} compact />
                   </TableCell>
                   <TableCell onClick={(event) => event.stopPropagation()}>
-                    <Tooltip title="Editar">
-                      <IconButton size="small" color="primary" onClick={(event) => onEdit(event, task)}>
-                        <Edit fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Eliminar">
-                      <IconButton size="small" color="error" onClick={(event) => onDelete(event, task)}>
-                        <Delete fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
+                    {canEditar && (
+                      <Tooltip title="Editar">
+                        <IconButton size="small" color="primary" onClick={(event) => onEdit(event, task)}>
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {canEliminar && (
+                      <Tooltip title="Eliminar">
+                        <IconButton size="small" color="error" onClick={(event) => onDelete(event, task)}>
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
               );

@@ -26,9 +26,9 @@ async function main() {
 
   // 2. MODULOS
   const modulos = [
-    "CLIENTES", "CASOS", "TAREAS", "EVENTOS", "HONORARIOS", 
-    "GASTOS", "INGRESOS", "PLANTILLAS", "NOTAS", "VALORJUS", 
-    "TERCEROS", "PLANES", "ADJUNTOS"
+    "CLIENTES", "CASOS", "TAREAS", "EVENTOS", "HONORARIOS",
+    "GASTOS", "INGRESOS", "PLANTILLAS", "NOTAS", "VALORJUS",
+    "TERCEROS", "PLANES", "ADJUNTOS", "EQUIPO"
   ];
 
   // 3. PERMISOS (13 modulos * 4 roles = 52 permisos estáticos)
@@ -44,11 +44,15 @@ async function main() {
       // ASISTENTE puede ver, crear y editar, pero no eliminar.
       const isFullAccessRole = rol.codigo === "SUPERADMIN" || rol.codigo === "ADMIN" || rol.codigo === "DIRECTOR";
       const isAbogado = rol.codigo === "ABOGADO";
-      
-      const canVer = true;
-      const canCrear = true;
-      const canEditar = true;
-      const canEliminar = isFullAccessRole || isAbogado; // Asistente no puede eliminar
+
+      // EQUIPO (gestion de usuarios del estudio) es sensible: por defecto solo los roles de
+      // acceso total lo reciben. El resto queda sin permiso, configurable desde la matriz.
+      const esModuloRestringido = modulo === "EQUIPO";
+
+      const canVer = esModuloRestringido ? isFullAccessRole : true;
+      const canCrear = esModuloRestringido ? isFullAccessRole : true;
+      const canEditar = esModuloRestringido ? isFullAccessRole : true;
+      const canEliminar = esModuloRestringido ? isFullAccessRole : (isFullAccessRole || isAbogado); // Asistente no puede eliminar
 
       const [existing] = await db.select().from(permisosDb).where(eq(permisosDb.id, currentId)).limit(1);
       

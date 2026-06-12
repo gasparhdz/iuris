@@ -100,6 +100,36 @@ export const errorHandlerPlugin = fp(async (fastify) => {
       });
     }
 
+    if (error.message === "MONEDA_NO_SOPORTADA") {
+      logSystemError(request, {
+        nivel: "WARN",
+        statusCode: 422,
+        errorCode: error.message,
+        mensaje: "Moneda no soportada",
+      });
+      return reply.status(422).send({
+        error: {
+          code: error.message,
+          message: "La moneda seleccionada no está habilitada.",
+        },
+      });
+    }
+
+    if (error.message === "INGRESO_IMPUTADO_NO_EDITABLE") {
+      logSystemError(request, {
+        nivel: "WARN",
+        statusCode: 409,
+        errorCode: error.message,
+        mensaje: "No se puede editar un cobro ya imputado",
+      });
+      return reply.status(409).send({
+        error: {
+          code: error.message,
+          message: "No se puede editar el monto, la fecha ni la cotización de un cobro ya imputado. Eliminá el cobro y registralo de nuevo.",
+        },
+      });
+    }
+
     if (conflictCodes.has(error.message)) {
       logSystemError(request, {
         nivel: "WARN",

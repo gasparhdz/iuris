@@ -1,24 +1,37 @@
-import { and, eq, ilike, isNull, or } from "drizzle-orm";
+import { and, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { casos, clientes, eventos, tareas, terceros } from "../db/schema.js";
 
+// Cada sección del buscador se gatea por el permiso `ver` del módulo correspondiente:
+// un usuario sin `ver` sobre CLIENTES no debe recibir clientes en los resultados (OWASP A01).
+// El gate evita además correr la query cuyos datos se descartarían.
+export type SearchModulos = {
+  casos: boolean;
+  clientes: boolean;
+  terceros: boolean;
+  tareas: boolean;
+  eventos: boolean;
+};
+
 export class SearchService {
-  static async globalSearch(estudioId: number, query: string) {
+  static async globalSearch(estudioId: number, query: string, permitido: SearchModulos) {
     const trimmedQuery = query.trim();
-    const cleanQuery = `%${trimmedQuery}%`;
+    const cleanQuery = `%${escapeLike(trimmedQuery)}%`;
+
+    const empty = {
+      expedientes: [],
+      clientes: [],
+      terceros: [],
+      tareas: [],
+      eventos: [],
+    };
 
     if (trimmedQuery.length < 2) {
-      return {
-        expedientes: [],
-        clientes: [],
-        terceros: [],
-        tareas: [],
-        eventos: [],
-      };
+      return empty;
     }
 
     const [expedientesData, clientesData, tercerosData, tareasData, eventosData] = await Promise.all([
-      db
+      !permitido.casos ? Promise.resolve([]) : db
         .select({
           id: casos.id,
           nroExpte: casos.nroExpte,
@@ -41,7 +54,7 @@ export class SearchService {
           )
         )
         .limit(10),
-      db
+      !permitido.clientes ? Promise.resolve([]) : db
         .select({
           id: clientes.id,
           nombre: clientes.nombre,
@@ -59,16 +72,17 @@ export class SearchService {
             eq(clientes.activo, true),
             isNull(clientes.deletedAt),
             or(
-              ilike(clientes.nombre, cleanQuery),
-              ilike(clientes.apellido, cleanQuery),
-              ilike(clientes.razonSocial, cleanQuery),
+              // ILIKE sobre la MISMA expresión concatenada que indexa
+              // `clientes_nombre_completo_trgm_idx` (migración 0026), para que el GIN trigram
+              // se use. Antes el OR por columna no podía aprovechar ese índice.
+              sql`(coalesce(${clientes.nombre}, '') || ' ' || coalesce(${clientes.apellido}, '') || ' ' || coalesce(${clientes.razonSocial}, '')) ILIKE ${cleanQuery}`,
               ilike(clientes.dni, cleanQuery),
               ilike(clientes.cuit, cleanQuery)
             )
           )
         )
         .limit(10),
-      db
+      !permitido.terceros ? Promise.resolve([]) : db
         .select({
           id: terceros.id,
           nombre: terceros.nombre,
@@ -86,16 +100,15 @@ export class SearchService {
             eq(terceros.activo, true),
             isNull(terceros.deletedAt),
             or(
-              ilike(terceros.nombre, cleanQuery),
-              ilike(terceros.apellido, cleanQuery),
-              ilike(terceros.razonSocial, cleanQuery),
+              // Misma expresión que indexa `terceros_nombre_completo_trgm_idx` (migración 0026).
+              sql`(coalesce(${terceros.nombre}, '') || ' ' || coalesce(${terceros.apellido}, '') || ' ' || coalesce(${terceros.razonSocial}, '')) ILIKE ${cleanQuery}`,
               ilike(terceros.dni, cleanQuery),
               ilike(terceros.cuit, cleanQuery)
             )
           )
         )
         .limit(10),
-      db
+      !permitido.tareas ? Promise.resolve([]) : db
         .select({
           id: tareas.id,
           titulo: tareas.titulo,
@@ -118,7 +131,7 @@ export class SearchService {
           )
         )
         .limit(10),
-      db
+      !permitido.eventos ? Promise.resolve([]) : db
         .select({
           id: eventos.id,
           descripcion: eventos.descripcion,
@@ -150,4 +163,10 @@ export class SearchService {
       eventos: eventosData,
     };
   }
+}
+
+// Escapa los comodines de LIKE/ILIKE (\, %, _) para que el texto del usuario se
+// trate como literal y no como patrón (evita que "100%" o "a_b" matcheen de más).
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }

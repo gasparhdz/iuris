@@ -12,10 +12,12 @@ import {
 
 export const ingresosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("INGRESOS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Ingresos"],
       summary: "Listar ingresos",
@@ -26,7 +28,7 @@ export const ingresosRoutes: FastifyPluginAsync = async (fastify) => {
   }, IngresosController.findAll);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Ingresos"],
       summary: "Modificar ingreso",
@@ -38,7 +40,7 @@ export const ingresosRoutes: FastifyPluginAsync = async (fastify) => {
   }, IngresosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Ingresos"],
       summary: "Eliminar ingreso",

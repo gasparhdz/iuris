@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import {
   format,
@@ -132,6 +133,8 @@ export default function Agenda() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const { canCrear: canCrearEventos } = usePermisos("EVENTOS");
+  const { canCrear: canCrearTareas } = usePermisos("TAREAS");
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -532,59 +535,51 @@ export default function Agenda() {
           </Typography>
         </Box>
 
-        {/* Filtros de Tipos (Switches en un card premium) */}
-        <Paper
-          elevation={0}
-          sx={{
-            p: 1,
-            px: 2,
-            border: "1px solid",
-            borderColor: "divider",
-            borderRadius: "12px",
-            display: "flex",
-            alignItems: "center",
-            gap: 2.5,
-            alignSelf: { xs: "stretch", md: "auto" },
-          }}
-        >
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showEventos}
-                onChange={(e) => setShowEventos(e.target.checked)}
-                size="small"
-                color="primary"
-              />
-            }
-            label={
-              <Stack direction="row" spacing={0.5} alignItems="center">
-                <EventIcon fontSize="inherit" sx={{ color: "primary.light" }} />
-                <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                  Eventos
-                </Typography>
-              </Stack>
-            }
-          />
-          <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showTareas}
-                onChange={(e) => setShowTareas(e.target.checked)}
-                size="small"
-                color="success"
-              />
-            }
-            label={
-              <Stack direction="row" spacing={0.5} alignItems="center">
-                <TaskIcon fontSize="inherit" sx={{ color: "success.light" }} />
-                <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                  Tareas
-                </Typography>
-              </Stack>
-            }
-          />
-        </Paper>
+        {/* Botones de creación (arriba a la derecha, como en el resto de los módulos) */}
+        {(canCrearEventos || canCrearTareas) && (
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            alignItems="center"
+            justifyContent="center"
+            sx={{ width: { xs: "100%", md: "auto" } }}
+          >
+            {canCrearEventos && (
+              <Button
+                variant="contained"
+                size="medium"
+                startIcon={<AddIcon />}
+                onClick={() => navigate("/eventos/nuevo?from=agenda", { state: { from: location.pathname + location.search } })}
+                sx={{
+                  fontWeight: 800,
+                  borderRadius: "8px",
+                  textTransform: "none",
+                  width: { xs: "100%", sm: "auto" },
+                  py: { xs: 1, sm: 0.75 },
+                }}
+              >
+                Nuevo Evento
+              </Button>
+            )}
+            {canCrearTareas && (
+              <Button
+                variant="outlined"
+                size="medium"
+                startIcon={<AddIcon />}
+                onClick={() => navigate("/tareas/nuevo?from=agenda", { state: { from: location.pathname + location.search } })}
+                sx={{
+                  fontWeight: 800,
+                  borderRadius: "8px",
+                  textTransform: "none",
+                  width: { xs: "100%", sm: "auto" },
+                  py: { xs: 1, sm: 0.75 },
+                }}
+              >
+                Nueva Tarea
+              </Button>
+            )}
+          </Stack>
+        )}
       </Stack>
 
       {/* ── Custom Toolbar Premium (Navegación del Calendario) ── */}
@@ -599,121 +594,129 @@ export default function Agenda() {
           bgcolor: "background.paper",
         }}
       >
-        <Stack spacing={2.5}>
-          {/* Action Buttons Section */}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          {/* Switches de visibilidad — izquierda en desktop, arriba (más grandes) en mobile */}
           <Stack
-            direction={{ xs: "column", sm: "row" }}
-            spacing={1.5}
-            width="100%"
+            direction="row"
+            spacing={{ xs: 3, md: 1.5 }}
+            alignItems="center"
+            justifyContent="center"
+            sx={{
+              order: { xs: 0, md: 0 },
+              transform: { xs: "scale(1.2)", md: "none" },
+              transformOrigin: { xs: "center", md: "left" },
+              py: { xs: 0.5, md: 0 },
+            }}
           >
-            <Button
-              variant="contained"
-              size="medium"
-              startIcon={<AddIcon />}
-              onClick={() => navigate("/eventos/nuevo?from=agenda", { state: { from: location.pathname + location.search } })}
-              sx={{
-                fontWeight: 800,
-                borderRadius: "8px",
-                textTransform: "none",
-                width: { xs: "100%", sm: "auto" },
-                py: { xs: 1, sm: 0.75 }
-              }}
-            >
-              Nuevo Evento
-            </Button>
-            <Button
-              variant="outlined"
-              size="medium"
-              startIcon={<AddIcon />}
-              onClick={() => navigate("/tareas/nuevo?from=agenda", { state: { from: location.pathname + location.search } })}
-              sx={{
-                fontWeight: 800,
-                borderRadius: "8px",
-                textTransform: "none",
-                width: { xs: "100%", sm: "auto" },
-                py: { xs: 1, sm: 0.75 }
-              }}
-            >
-              Nueva Tarea
-            </Button>
+            <FormControlLabel
+              sx={{ mr: 0 }}
+              control={
+                <Switch
+                  checked={showEventos}
+                  onChange={(e) => setShowEventos(e.target.checked)}
+                  size="small"
+                  color="primary"
+                />
+              }
+              label={
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <EventIcon fontSize="inherit" sx={{ color: "primary.light" }} />
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                    Eventos
+                  </Typography>
+                </Stack>
+              }
+            />
+            <FormControlLabel
+              sx={{ mr: 0 }}
+              control={
+                <Switch
+                  checked={showTareas}
+                  onChange={(e) => setShowTareas(e.target.checked)}
+                  size="small"
+                  color="success"
+                />
+              }
+              label={
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <TaskIcon fontSize="inherit" sx={{ color: "success.light" }} />
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                    Tareas
+                  </Typography>
+                </Stack>
+              }
+            />
           </Stack>
 
-          <Divider sx={{ display: { xs: "block", sm: "none" } }} />
+          {/* Título Mes/Año — centro en desktop, debajo de Hoy/flechas en mobile */}
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 950, letterSpacing: "-0.02em", fontSize: "1.25rem", textAlign: "center", order: { xs: 2, md: 1 } }}
+          >
+            {calendarHeaderTitle}
+          </Typography>
 
-          {/* Calendar Navigation & Title Section */}
-          <Grid container spacing={2.5} alignItems="center" justifyContent="space-between">
-            {/* Navigation controls */}
-            <Grid item xs={12} sm={4}>
-              <Stack direction="row" spacing={1.5} alignItems="center" justifyContent={{ xs: "center", sm: "flex-start" }}>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<TodayIcon />}
-                  onClick={() => handleNavigate("TODAY")}
-                  sx={{
-                    fontWeight: 700,
-                    borderRadius: "8px",
-                    textTransform: "none",
-                    height: 36,
-                  }}
-                >
-                  Hoy
-                </Button>
-                <ButtonGroup size="small" variant="outlined" sx={{ height: 36, borderRadius: "8px", display: "inline-flex" }}>
-                  <IconButton onClick={() => handleNavigate("PREV")} sx={{ px: 1.5, borderRight: "1px solid", borderColor: "divider" }}>
-                    <ChevronLeftIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton onClick={() => handleNavigate("NEXT")} sx={{ px: 1.5 }}>
-                    <ChevronRightIcon fontSize="small" />
-                  </IconButton>
-                </ButtonGroup>
-                {agendaQuery.isFetching && <CircularProgress size={16} sx={{ ml: 1, color: "primary.light" }} />}
-              </Stack>
-            </Grid>
-
-            {/* Current Month/Year */}
-            <Grid item xs={12} sm={4} sx={{ textAlign: "center", order: { xs: -1, sm: 0 } }}>
-              <Typography variant="h6" sx={{ fontWeight: 950, letterSpacing: "-0.02em", fontSize: { xs: "1.25rem", sm: "1.25rem" } }}>
-                {calendarHeaderTitle}
-              </Typography>
-            </Grid>
-
-            {/* View selectors */}
-            <Grid item xs={12} sm={4}>
-              <Stack direction="row" justifyContent={{ xs: "center", sm: "flex-end" }}>
-                <ButtonGroup
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    width: { xs: "100%", sm: "auto" },
-                    display: { xs: "none", sm: "flex" }
-                  }}
-                >
-                  <Button
-                    onClick={() => handleViewChange("month")}
-                    variant={currentView === "month" ? "contained" : "outlined"}
-                    sx={{ fontWeight: 700, textTransform: "none", flexGrow: { xs: 1, sm: 0 }, borderRadius: "8px 0 0 8px" }}
-                  >
-                    Mes
-                  </Button>
-                  <Button
-                    onClick={() => handleViewChange("week")}
-                    variant={currentView === "week" ? "contained" : "outlined"}
-                    sx={{ fontWeight: 700, textTransform: "none", flexGrow: { xs: 1, sm: 0 }, borderRadius: "0" }}
-                  >
-                    Semana
-                  </Button>
-                  <Button
-                    onClick={() => handleViewChange("day")}
-                    variant={currentView === "day" ? "contained" : "outlined"}
-                    sx={{ fontWeight: 700, textTransform: "none", flexGrow: { xs: 1, sm: 0 }, borderRadius: "0 8px 8px 0" }}
-                  >
-                    Día
-                  </Button>
-                </ButtonGroup>
-              </Stack>
-            </Grid>
-          </Grid>
+          {/* Navegación (Hoy + flechas) + selector de vista */}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            justifyContent="center"
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ order: { xs: 1, md: 2 } }}
+          >
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<TodayIcon />}
+              onClick={() => handleNavigate("TODAY")}
+              sx={{ fontWeight: 700, borderRadius: "8px", textTransform: "none", height: 36 }}
+            >
+              Hoy
+            </Button>
+            <ButtonGroup size="small" variant="outlined" sx={{ height: 36, borderRadius: "8px", display: "inline-flex" }}>
+              <IconButton onClick={() => handleNavigate("PREV")} sx={{ px: 1.5, borderRight: "1px solid", borderColor: "divider" }}>
+                <ChevronLeftIcon fontSize="small" />
+              </IconButton>
+              <IconButton onClick={() => handleNavigate("NEXT")} sx={{ px: 1.5 }}>
+                <ChevronRightIcon fontSize="small" />
+              </IconButton>
+            </ButtonGroup>
+            {agendaQuery.isFetching && <CircularProgress size={16} sx={{ color: "primary.light" }} />}
+            <ButtonGroup
+              size="small"
+              variant="outlined"
+              sx={{ display: { xs: "none", sm: "flex" }, ml: { sm: 0.5 } }}
+            >
+              <Button
+                onClick={() => handleViewChange("month")}
+                variant={currentView === "month" ? "contained" : "outlined"}
+                sx={{ fontWeight: 700, textTransform: "none", borderRadius: "8px 0 0 8px" }}
+              >
+                Mes
+              </Button>
+              <Button
+                onClick={() => handleViewChange("week")}
+                variant={currentView === "week" ? "contained" : "outlined"}
+                sx={{ fontWeight: 700, textTransform: "none", borderRadius: "0" }}
+              >
+                Semana
+              </Button>
+              <Button
+                onClick={() => handleViewChange("day")}
+                variant={currentView === "day" ? "contained" : "outlined"}
+                sx={{ fontWeight: 700, textTransform: "none", borderRadius: "0 8px 8px 0" }}
+              >
+                Día
+              </Button>
+            </ButtonGroup>
+          </Stack>
         </Stack>
       </Paper>
 
@@ -986,28 +989,32 @@ export default function Agenda() {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5, gap: 1, flexWrap: "wrap" }}>
           <Button variant="outlined" onClick={() => setNewSlot(null)} sx={{ borderRadius: "10px", fontWeight: 800 }}>Cancelar</Button>
-          <Button
-            variant="outlined"
-            onClick={() => {
-              const iso = newSlot.toISOString();
-              setNewSlot(null);
-              navigate(`/tareas/nuevo?fechaLimite=${encodeURIComponent(iso)}`, { state: { from: location.pathname + location.search } });
-            }}
-            sx={{ borderRadius: "10px", fontWeight: 900 }}
-          >
-            Nueva Tarea
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              const iso = newSlot.toISOString();
-              setNewSlot(null);
-              navigate(`/eventos/nuevo?from=agenda&fechaInicio=${encodeURIComponent(iso)}`, { state: { from: location.pathname + location.search } });
-            }}
-            sx={{ borderRadius: "10px", fontWeight: 900 }}
-          >
-            Nuevo Evento
-          </Button>
+          {canCrearTareas && (
+            <Button
+              variant="outlined"
+              onClick={() => {
+                const iso = newSlot.toISOString();
+                setNewSlot(null);
+                navigate(`/tareas/nuevo?fechaLimite=${encodeURIComponent(iso)}`, { state: { from: location.pathname + location.search } });
+              }}
+              sx={{ borderRadius: "10px", fontWeight: 900 }}
+            >
+              Nueva Tarea
+            </Button>
+          )}
+          {canCrearEventos && (
+            <Button
+              variant="contained"
+              onClick={() => {
+                const iso = newSlot.toISOString();
+                setNewSlot(null);
+                navigate(`/eventos/nuevo?from=agenda&fechaInicio=${encodeURIComponent(iso)}`, { state: { from: location.pathname + location.search } });
+              }}
+              sx={{ borderRadius: "10px", fontWeight: 900 }}
+            >
+              Nuevo Evento
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

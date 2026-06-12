@@ -12,6 +12,7 @@ import Grid from "@mui/material/Grid";
 import { Add, ArrowBack, Business, Delete, Edit, Person, Save, Search } from "@mui/icons-material";
 import api from "../api/axios";
 import { createTercero, deleteTercero, fetchTerceros, updateTercero } from "../api/terceros";
+import { usePermisos } from "../auth/usePermissions";
 
 const EMPTY = {
   tipo: "fisica",
@@ -64,6 +65,7 @@ export default function Terceros() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const { canCrear, canEditar, canEliminar } = usePermisos("TERCEROS");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -243,7 +245,7 @@ export default function Terceros() {
             <Typography variant="h4" sx={{ fontWeight: 800 }}>Directorio de Terceros</Typography>
             <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>Terceros del estudio: jueces, peritos, mediadores, letrados y entidades vinculadas.</Typography>
           </Box>
-          <Button variant="contained" startIcon={<Add />} onClick={() => { setEditing(null); setOpen(true); }} sx={{ borderRadius: "10px", fontWeight: 800 }}>Registrar Tercero</Button>
+          {canCrear && <Button variant="contained" startIcon={<Add />} onClick={() => { setEditing(null); setOpen(true); }} sx={{ borderRadius: "10px", fontWeight: 800 }}>Registrar Tercero</Button>}
         </Stack>
       )}
 
@@ -410,10 +412,12 @@ export default function Terceros() {
                     </Typography>
                   </Box>
 
-                  <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
-                    <Tooltip title="Editar"><IconButton onClick={() => { setEditing(t); setOpen(true); }}><Edit /></IconButton></Tooltip>
-                    <Tooltip title="Eliminar"><IconButton color="error" onClick={() => setDeleteTarget(t)}><Delete /></IconButton></Tooltip>
-                  </Stack>
+                  {(canEditar || canEliminar) && (
+                    <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
+                      {canEditar && <Tooltip title="Editar"><IconButton onClick={() => { setEditing(t); setOpen(true); }}><Edit /></IconButton></Tooltip>}
+                      {canEliminar && <Tooltip title="Eliminar"><IconButton color="error" onClick={() => setDeleteTarget(t)}><Delete /></IconButton></Tooltip>}
+                    </Stack>
+                  )}
                 </Stack>
               </Paper>
             );
@@ -510,8 +514,8 @@ export default function Terceros() {
                       </TableCell>
                       <TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" noWrap>{t.observaciones || "—"}</Typography></TableCell>
                       <TableCell align="right">
-                        <Tooltip title="Editar"><IconButton size="small" onClick={() => { setEditing(t); setOpen(true); }}><Edit fontSize="small" /></IconButton></Tooltip>
-                        <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(t)}><Delete fontSize="small" /></IconButton></Tooltip>
+                        {canEditar && <Tooltip title="Editar"><IconButton size="small" onClick={() => { setEditing(t); setOpen(true); }}><Edit fontSize="small" /></IconButton></Tooltip>}
+                        {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(t)}><Delete fontSize="small" /></IconButton></Tooltip>}
                       </TableCell>
                     </TableRow>
                   );

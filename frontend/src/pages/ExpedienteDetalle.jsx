@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
+import { usePermisos } from "../auth/usePermissions";
 import { addParticipanteCaso, createTercero, fetchParticipantesCaso, fetchTerceros, removeParticipanteCaso } from "../api/terceros";
 import { getAuditoriaExpediente } from "../api/auditoria.api";
 import SisfeSyncButton from "../components/SisfeSyncButton";
@@ -241,6 +242,11 @@ export default function ExpedienteDetalle() {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const casosPerm = usePermisos("CASOS");
+  const tareasPerm = usePermisos("TAREAS");
+  const eventosPerm = usePermisos("EVENTOS");
+  const notasPerm = usePermisos("NOTAS");
+  const adjuntosPerm = usePermisos("ADJUNTOS");
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tabIndex = TAB_MAP.indexOf(tabParam);
@@ -974,9 +980,11 @@ export default function ExpedienteDetalle() {
 
       {tab === 1 && (
         <Stack spacing={2}>
+          {casosPerm.canEditar && (
           <Button startIcon={<Add />} variant="contained" onClick={() => setParticipantOpen(true)} sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 800, width: { xs: "100%", sm: "auto" } }}>
             Sumar Participante
           </Button>
+          )}
           <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, md: 3 } }}>
           {/* Sección: Participantes del Expediente */}
           <Box>
@@ -1053,14 +1061,16 @@ export default function ExpedienteDetalle() {
 
       {tab === 2 && (
         <Stack spacing={2}>
-          <Button
-            startIcon={<Add />}
-            variant="contained"
-            onClick={() => navigate(`/tareas/nuevo?casoId=${casoId}&clienteId=${caso?.clienteId ?? ""}`, { state: { from: location.pathname + location.search } })}
-            sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
-          >
-            Nueva Tarea
-          </Button>
+          {tareasPerm.canCrear && (
+            <Button
+              startIcon={<Add />}
+              variant="contained"
+              onClick={() => navigate(`/tareas/nuevo?casoId=${casoId}&clienteId=${caso?.clienteId ?? ""}`, { state: { from: location.pathname + location.search } })}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
+            >
+              Nueva Tarea
+            </Button>
+          )}
           <DataTable
             title="Tareas asociadas"
             empty="No hay tareas para este expediente."
@@ -1076,14 +1086,16 @@ export default function ExpedienteDetalle() {
 
       {tab === 3 && (
         <Stack spacing={2}>
-          <Button
-            startIcon={<Add />}
-            variant="contained"
-            onClick={() => navigate(`/eventos/nuevo?casoId=${casoId}&clienteId=${caso?.clienteId ?? ""}`, { state: { from: location.pathname + location.search } })}
-            sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
-          >
-            Nuevo Evento
-          </Button>
+          {eventosPerm.canCrear && (
+            <Button
+              startIcon={<Add />}
+              variant="contained"
+              onClick={() => navigate(`/eventos/nuevo?casoId=${casoId}&clienteId=${caso?.clienteId ?? ""}`, { state: { from: location.pathname + location.search } })}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
+            >
+              Nuevo Evento
+            </Button>
+          )}
           <DataTable
             title="Eventos"
             empty="No hay eventos asociados a este expediente."
@@ -1093,12 +1105,16 @@ export default function ExpedienteDetalle() {
               formatDate(evento.fechaInicio),
               evento.ubicacion || "Sin ubicación",
               <Stack key="acciones" direction="row" spacing={0.5}>
-                <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(`/eventos/editar/${evento.id}`, { state: { from: location.pathname + location.search } })} aria-label={`Editar evento ${evento.descripcion || "agendado"}`}>
-                  <Edit fontSize="small" />
-                </IconButton>
-                <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => setDeleteEventoTarget(evento)} aria-label={`Eliminar evento ${evento.descripcion || "agendado"}`}>
-                  <Delete fontSize="small" />
-                </IconButton>
+                {eventosPerm.canEditar && (
+                  <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(`/eventos/editar/${evento.id}`, { state: { from: location.pathname + location.search } })} aria-label={`Editar evento ${evento.descripcion || "agendado"}`}>
+                    <Edit fontSize="small" />
+                  </IconButton>
+                )}
+                {eventosPerm.canEliminar && (
+                  <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => setDeleteEventoTarget(evento)} aria-label={`Eliminar evento ${evento.descripcion || "agendado"}`}>
+                    <Delete fontSize="small" />
+                  </IconButton>
+                )}
               </Stack>,
             ])}
           />
@@ -1113,10 +1129,12 @@ export default function ExpedienteDetalle() {
                 <Button startIcon={<CloudSync />} variant="contained" disabled={syncMutation.isPending} onClick={() => syncMutation.mutate()} sx={{ borderRadius: "10px", fontWeight: 900, minWidth: 180 }}>
                   {syncMutation.isPending ? "Sincronizando..." : "Sincronizar Drive"}
                 </Button>
-                <Button component="label" startIcon={<UploadFile />} variant="outlined" disabled={uploadMutation.isPending} sx={{ borderRadius: "10px", fontWeight: 900, minWidth: 180 }}>
-                  {uploadMutation.isPending ? "Subiendo..." : "Subir Archivo"}
-                  <input hidden type="file" onChange={(event) => event.target.files?.[0] && uploadMutation.mutate(event.target.files[0])} />
-                </Button>
+                {adjuntosPerm.canCrear && (
+                  <Button component="label" startIcon={<UploadFile />} variant="outlined" disabled={uploadMutation.isPending} sx={{ borderRadius: "10px", fontWeight: 900, minWidth: 180 }}>
+                    {uploadMutation.isPending ? "Subiendo..." : "Subir Archivo"}
+                    <input hidden type="file" onChange={(event) => event.target.files?.[0] && uploadMutation.mutate(event.target.files[0])} />
+                  </Button>
+                )}
                 <Link href={`https://drive.google.com/drive/folders/${caso.driveFolderId}`} target="_blank" rel="noreferrer" sx={{ textDecoration: "none", display: { xs: "flex", sm: "inline-flex" } }}>
                   <Button variant="text" startIcon={<Folder />} sx={{ borderRadius: "10px", fontWeight: 900, minWidth: 180, width: "100%" }}>
                     Ver Carpeta en Drive
@@ -1211,19 +1229,21 @@ export default function ExpedienteDetalle() {
                                 >
                                   <Visibility />
                                 </IconButton>
-                                <IconButton
-                                  color="error"
-                                  disabled={deleteAdjuntoMutation.isPending}
-                                  onClick={() => {
-                                    if (window.confirm(`¿Estás seguro de que deseas eliminar el archivo "${file.nombre}"?`)) {
-                                      deleteAdjuntoMutation.mutate(file.id);
-                                    }
-                                  }}
-                                  title="Eliminar archivo"
-                                  aria-label={`Eliminar archivo ${file.nombre}`}
-                                >
-                                  <Delete />
-                                </IconButton>
+                                {adjuntosPerm.canEliminar && (
+                                  <IconButton
+                                    color="error"
+                                    disabled={deleteAdjuntoMutation.isPending}
+                                    onClick={() => {
+                                      if (window.confirm(`¿Estás seguro de que deseas eliminar el archivo "${file.nombre}"?`)) {
+                                        deleteAdjuntoMutation.mutate(file.id);
+                                      }
+                                    }}
+                                    title="Eliminar archivo"
+                                    aria-label={`Eliminar archivo ${file.nombre}`}
+                                  >
+                                    <Delete />
+                                  </IconButton>
+                                )}
                               </Stack>
                             </TableCell>
                           </TableRow>
@@ -1273,20 +1293,22 @@ export default function ExpedienteDetalle() {
                             >
                               <Visibility fontSize="small" />
                             </IconButton>
-                            <IconButton
-                              size="small"
-                              color="error"
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              disabled={deleteAdjuntoMutation.isPending}
-                              onClick={() => {
-                                if (window.confirm(`¿Estás seguro de que deseas eliminar el archivo "${file.nombre}"?`)) {
-                                  deleteAdjuntoMutation.mutate(file.id);
-                                }
-                              }}
-                              aria-label={`Eliminar archivo ${file.nombre}`}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
+                            {adjuntosPerm.canEliminar && (
+                              <IconButton
+                                size="small"
+                                color="error"
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                disabled={deleteAdjuntoMutation.isPending}
+                                onClick={() => {
+                                  if (window.confirm(`¿Estás seguro de que deseas eliminar el archivo "${file.nombre}"?`)) {
+                                    deleteAdjuntoMutation.mutate(file.id);
+                                  }
+                                }}
+                                aria-label={`Eliminar archivo ${file.nombre}`}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            )}
                           </Stack>
                         </Stack>
                       </Paper>
@@ -1304,7 +1326,9 @@ export default function ExpedienteDetalle() {
         <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, md: 3 } }}>
           <Stack spacing={2}>
             <TextField multiline minRows={3} fullWidth label="Nueva nota" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
-            <Button variant="contained" disabled={!newNote.trim() || addNoteMutation.isPending} onClick={() => addNoteMutation.mutate()} sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}>Agregar Nota</Button>
+            {notasPerm.canCrear && (
+              <Button variant="contained" disabled={!newNote.trim() || addNoteMutation.isPending} onClick={() => addNoteMutation.mutate()} sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}>Agregar Nota</Button>
+            )}
             {(notasQuery.data ?? []).map((nota) => (
               <Paper key={nota.id} elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: "12px" }}>
                 <Typography variant="caption" color="text.secondary">{formatDate(nota.createdAt)}</Typography>

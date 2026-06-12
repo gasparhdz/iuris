@@ -14,9 +14,12 @@ import {
 export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
   const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Expedientes"],
       summary: "Listar expedientes",
@@ -27,7 +30,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Expedientes"],
       summary: "Obtener un expediente",
@@ -38,7 +41,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.findById);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Expedientes"],
       summary: "Crear un nuevo expediente",
@@ -53,7 +56,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   server.delete("/", { ...authConfig, schema: { hide: true } }, methodNotAllowed);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Expedientes"],
       summary: "Actualizar un expediente",
@@ -65,7 +68,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Expedientes"],
       summary: "Eliminar un expediente",
@@ -78,7 +81,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   // --- Participantes ---
 
   server.post("/:id/participantes", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Expedientes - Participantes"],
       summary: "Sumar participante al expediente",
@@ -90,7 +93,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.addParticipante);
 
   server.get("/:id/participantes", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Expedientes - Participantes"],
       summary: "Ver participantes del expediente",
@@ -101,7 +104,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.getParticipantes);
 
   server.delete("/:id/participantes/:participanteId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Expedientes - Participantes"],
       summary: "Quitar participante",
@@ -112,7 +115,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.removeParticipante);
 
   server.put("/:id/participantes/:participanteId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Expedientes - Participantes"],
       summary: "Actualizar participante",
@@ -124,7 +127,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.updateParticipante);
 
   server.get("/:id/tareas", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Expedientes - Tareas"],
       summary: "Ver tareas del expediente",
@@ -135,7 +138,7 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, CasosController.getTareas);
 
   server.get("/:id/eventos", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Expedientes - Eventos"],
       summary: "Ver eventos del expediente",

@@ -87,8 +87,8 @@ export class IngresosQueries {
     return row ?? null;
   }
 
-  static async updateIngreso(id: number, estudioId: number, data: Partial<NewIngreso>) {
-    const [row] = await db
+  static async updateIngreso(id: number, estudioId: number, data: Partial<NewIngreso>, tx: DbExecutor = db) {
+    const [row] = await tx
       .update(ingresos)
       .set(data)
       .where(and(eq(ingresos.id, id), eq(ingresos.estudioId, estudioId), eq(ingresos.activo, true), isNull(ingresos.deletedAt)))

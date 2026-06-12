@@ -229,6 +229,20 @@ const honorarioResumenSchema = z.object({
   fechaVencimiento: z.string().nullable(),
   tasaInteresMensual: z.string().nullable(),
   estadoId: z.number().nullable(),
+  // Capital cobrado por cobro directo + si tiene plan activo. Sin estos campos en el schema,
+  // Fastify los descartaba de la respuesta y el detalle calculaba el saldo sobre el bruto.
+  montoCobrado: z.union([z.string(), z.number()]).nullable().optional(),
+  tienePlan: z.boolean().optional(),
+  estado: z.object({
+    id: z.number().nullable(),
+    codigo: z.string().nullable(),
+    nombre: z.string().nullable(),
+  }).nullable().optional(),
+  concepto: z.object({
+    id: z.number().nullable(),
+    codigo: z.string().nullable(),
+    nombre: z.string().nullable(),
+  }).nullable().optional(),
   activo: z.boolean(),
   createdBy: z.number().nullable(),
   createdAt: z.string(),
@@ -310,6 +324,46 @@ export const clienteDetalleResponseSchema = z.object({
 
 export const clienteResponseSchema = z.object({
   data: clienteItemSchema,
+});
+
+const cuentaCorrienteRowSchema = z.object({
+  tipo: z.enum(["HONORARIO", "GASTO", "INGRESO", "INTERES", "AJUSTE"]),
+  refId: z.number().nullable(),
+  fecha: z.string(),
+  descripcion: z.string(),
+  moneda: z.enum(["ARS", "JUS"]),
+  cantidadJus: z.number().nullable(),
+  esEstimado: z.boolean(),
+  debe: z.number(),
+  haber: z.number(),
+  saldo: z.number(),
+});
+
+const cuentaCorrienteTotalesSchema = z.object({
+  capitalPesos: z.number(),
+  interesPesos: z.number(),
+  saldoPesos: z.number(),
+  saldoJus: z.number(),
+  honorariosPesos: z.number(),
+  gastosPesos: z.number(),
+  ingresosPesos: z.number(),
+  honorariosPendientesPesos: z.number(),
+});
+
+export const cuentaCorrienteResponseSchema = z.object({
+  data: z.object({
+    rows: z.array(cuentaCorrienteRowSchema),
+    totales: cuentaCorrienteTotalesSchema,
+    fechaCorte: z.string(),
+    valorJusActual: z.number(),
+  }),
+});
+
+export const cuentaCorrienteResumenResponseSchema = z.object({
+  data: z.array(z.object({
+    clienteId: z.number(),
+    totales: cuentaCorrienteTotalesSchema,
+  })),
 });
 
 export const clienteListResponseSchema = z.object({

@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ClientesService } from "../services/clientes.service.js";
+import { CuentaCorrienteService } from "../services/cuenta-corriente.service.js";
 import type { CreateClienteInput, CreateContactoClienteInput, UpdateClienteInput, UpdateContactoClienteInput } from "../schemas/clientes.schema.js";
 
 export class ClientesController {
@@ -39,6 +40,23 @@ export class ClientesController {
       }
       throw error;
     }
+  }
+
+  static async findCuentaCorriente(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    try {
+      const cuenta = await CuentaCorrienteService.getCuentaCorrienteCliente(request.params.id, request.authUser.estudioId);
+      return reply.send({ data: cuenta });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "CLIENTE_NOT_FOUND") {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Cliente no encontrado" } });
+      }
+      throw error;
+    }
+  }
+
+  static async findCuentasCorrientesResumen(request: FastifyRequest, reply: FastifyReply) {
+    const resumen = await CuentaCorrienteService.getResumenPorCliente(request.authUser.estudioId);
+    return reply.send({ data: resumen });
   }
 
   static async create(request: FastifyRequest<{ Body: CreateClienteInput }>, reply: FastifyReply) {

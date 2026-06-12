@@ -5,6 +5,7 @@ import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { useAuth } from "../auth/AuthContext";
+import { usePermisos } from "../auth/usePermissions";
 import {
   Avatar,
   Box,
@@ -61,6 +62,7 @@ export default function TareaDetalle() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
+  const { canEditar } = usePermisos("TAREAS");
   const [newSubtask, setNewSubtask] = useState("");
   const [confirmCascadeOpen, setConfirmCascadeOpen] = useState(false);
 
@@ -234,9 +236,11 @@ export default function TareaDetalle() {
               {tarea.titulo}
             </Typography>
           </Box>
-          <Button variant="outlined" startIcon={<Edit />} onClick={() => navigate(`/tareas/editar/${taskId}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-            Editar Tarea
-          </Button>
+          {canEditar && (
+            <Button variant="outlined" startIcon={<Edit />} onClick={() => navigate(`/tareas/editar/${taskId}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+              Editar Tarea
+            </Button>
+          )}
         </Stack>
       </Paper>
 
@@ -317,24 +321,26 @@ export default function TareaDetalle() {
                   />
                 ))
               )}
-              <Stack direction="row" spacing={1} sx={{ px: 1, pt: 1.5 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  placeholder="Añadir un elemento..."
-                  value={newSubtask}
-                  onChange={(event) => setNewSubtask(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      submitNewSubtask();
-                    }
-                  }}
-                />
-                <IconButton color="primary" disabled={addSubtaskMutation.isPending || !newSubtask.trim()} onClick={submitNewSubtask} sx={{ border: "1px solid", borderColor: "divider" }}>
-                  <Add />
-                </IconButton>
-              </Stack>
+              {canEditar && (
+                <Stack direction="row" spacing={1} sx={{ px: 1, pt: 1.5 }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    placeholder="Añadir un elemento..."
+                    value={newSubtask}
+                    onChange={(event) => setNewSubtask(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        submitNewSubtask();
+                      }
+                    }}
+                  />
+                  <IconButton color="primary" disabled={addSubtaskMutation.isPending || !newSubtask.trim()} onClick={submitNewSubtask} sx={{ border: "1px solid", borderColor: "divider" }}>
+                    <Add />
+                  </IconButton>
+                </Stack>
+              )}
             </Stack>
           </Paper>
         </Grid>

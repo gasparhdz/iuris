@@ -62,6 +62,7 @@ import {
   estadoUiFromHonorario,
   findParamByCodigo,
   formatMoneyAr,
+  honorarioEstadoChip,
   honorarioMontoBase,
   invalidateFinanzasQueries,
   isHonorarioPendiente,
@@ -166,6 +167,7 @@ const EMPTY_FORM = {
   cuotaVinculoId: "",
   selectedCuotaIds: [],
   selectedGastoIds: [],
+  selectedHonorarioIds: [],
   planVinculoId: "",
   gastoVinculoId: "",
   convenioHonorarioId: "",
@@ -374,6 +376,7 @@ export default function FinanzasForm() {
       descripcion: z.string().optional(),
       selectedCuotaIds: z.array(z.number()).optional(),
       selectedGastoIds: z.array(z.number()).optional(),
+      selectedHonorarioIds: z.array(z.number()).optional(),
     }).superRefine((data, ctx) => {
       const montoNum = Number(data.monto);
       const isJus = data.monedaCodigo === "JUS";
@@ -448,6 +451,7 @@ export default function FinanzasForm() {
       cuotaVinculoId: queryCuotaId ?? "",
       selectedCuotaIds: queryCuotaId ? [Number(queryCuotaId)] : [],
       selectedGastoIds: queryGastoId ? [Number(queryGastoId)] : [],
+      selectedHonorarioIds: [],
       planVinculoId: queryPlanId ?? "",
       gastoVinculoId: queryGastoId ?? "",
       convenioHonorarioId: queryHonorarioId ?? "",
@@ -477,6 +481,7 @@ export default function FinanzasForm() {
   }, [getValues, setValue]);
   const [honorariosIngresoExpanded, setHonorariosIngresoExpanded] = useState(true);
   const [gastosIngresoExpanded, setGastosIngresoExpanded] = useState(true);
+  const [honorariosDirectosExpanded, setHonorariosDirectosExpanded] = useState(true);
 
   const catalogQuery = useQuery({
     queryKey: ["catalogos", "finanzas-form"],
@@ -755,7 +760,31 @@ export default function FinanzasForm() {
     () => selectedGastos.reduce((acc, gasto) => acc + Number(gasto.monto ?? 0), 0),
     [selectedGastos],
   );
-  const totalSeleccionadoIngreso = totalCuotasSeleccionadas + totalGastosSeleccionados;
+  // Honorarios que cobran de forma directa (sin plan de pago activo). Un honorario con plan
+  // se cobra por sus cuotas (seccion "Honorarios" de arriba), nunca por las dos vias.
+  const honorarioIdsConPlan = useMemo(
+    () => new Set((planesIngresoQuery.data ?? []).map((plan) => Number(plan.honorarioId))),
+    [planesIngresoQuery.data],
+  );
+  const honorariosSinPlanIngreso = useMemo(() => {
+    const rows = honorariosPendientesQuery.data ?? [];
+    return rows
+      .filter((h) => !honorarioIdsConPlan.has(Number(h.id)) || form.selectedHonorarioIds.includes(Number(h.id)))
+      .sort((a, b) => {
+        const va = new Date(a.fechaVencimiento ?? a.fechaRegulacion).getTime();
+        const vb = new Date(b.fechaVencimiento ?? b.fechaRegulacion).getTime();
+        return va - vb;
+      });
+  }, [honorariosPendientesQuery.data, honorarioIdsConPlan, form.selectedHonorarioIds]);
+  const selectedHonorariosDirectos = useMemo(
+    () => honorariosSinPlanIngreso.filter((h) => form.selectedHonorarioIds.includes(Number(h.id))),
+    [honorariosSinPlanIngreso, form.selectedHonorarioIds],
+  );
+  const totalHonorariosDirectosSeleccionados = useMemo(
+    () => selectedHonorariosDirectos.reduce((acc, h) => acc + Number(honorarioMontoBase(h) ?? 0), 0),
+    [selectedHonorariosDirectos],
+  );
+  const totalSeleccionadoIngreso = totalCuotasSeleccionadas + totalGastosSeleccionados + totalHonorariosDirectosSeleccionados;
   const disponibleIngreso = Math.max(0, importeIngresoArs - totalSeleccionadoIngreso);
 
   useEffect(() => {
@@ -778,6 +807,16 @@ export default function FinanzasForm() {
       return { ...f, selectedGastoIds: nextSelected, gastoVinculoId: nextSelected[0] ? String(nextSelected[0]) : "" };
     });
   }, [gastosIngresoQuery.isLoading, gastosPendientesIngreso, tipoMovimiento, setForm]);
+
+  useEffect(() => {
+    if (tipoMovimiento !== "ingreso" || honorariosPendientesQuery.isLoading) return;
+    const visibleIds = new Set(honorariosSinPlanIngreso.map((h) => Number(h.id)));
+    setForm((f) => {
+      const nextSelected = f.selectedHonorarioIds.filter((id) => visibleIds.has(Number(id)));
+      if (nextSelected.length === f.selectedHonorarioIds.length) return f;
+      return { ...f, selectedHonorarioIds: nextSelected };
+    });
+  }, [honorariosPendientesQuery.isLoading, honorariosSinPlanIngreso, tipoMovimiento, setForm]);
 
   const selectedConvenioHonorario = (honorariosPendientesQuery.data ?? []).find(
     (h) => String(h.id) === String(form.convenioHonorarioId),
@@ -975,6 +1014,17 @@ export default function FinanzasForm() {
     }
   }, [isEdit, tipoMovimiento, queryHonorarioId, setForm]);
 
+  // Cobro lanzado desde Planes/Honorarios (honorarioId/planId/cuotaId): precargar el
+  // concepto "Pago de honorarios". El reintegro de gasto (queryGastoId) tiene su propio concepto.
+  useEffect(() => {
+    if (isEdit || tipoMovimiento !== "ingreso") return;
+    if (queryGastoId) return;
+    if (!(queryHonorarioId || queryPlanId || queryCuotaId)) return;
+    const concepto = findParamByCodigo(catalog.CONCEPTO_INGRESO, ["PAGO_DE_HONORARIOS"]);
+    if (!concepto?.id) return;
+    setForm((f) => (f.conceptoIngresoId ? f : { ...f, conceptoIngresoId: String(concepto.id) }));
+  }, [isEdit, tipoMovimiento, queryGastoId, queryHonorarioId, queryPlanId, queryCuotaId, catalog.CONCEPTO_INGRESO, setForm]);
+
   function navigateBack() {
     if (location.state?.from) {
       navigate(location.state.from);
@@ -1124,6 +1174,7 @@ export default function FinanzasForm() {
         cotizacionArs: finalCotizacion ? String(finalCotizacion) : null,
         ...(form.selectedCuotaIds.length > 0 ? { cuotaIds: form.selectedCuotaIds.map(Number) } : {}),
         ...(form.selectedGastoIds.length > 0 ? { gastoIds: form.selectedGastoIds.map(Number) } : {}),
+        ...(form.selectedHonorarioIds.length > 0 ? { honorarioIds: form.selectedHonorarioIds.map(Number) } : {}),
         ...(form.planVinculoId && form.selectedCuotaIds.length === 0 ? { planId: Number(form.planVinculoId) } : {}),
       };
       if (isEdit) {
@@ -1423,7 +1474,6 @@ export default function FinanzasForm() {
                     >
                       <ToggleButton value="JUS" sx={{ fontWeight: 900 }}>JUS</ToggleButton>
                       <ToggleButton value="ARS" sx={{ fontWeight: 900 }}>ARS</ToggleButton>
-                      <ToggleButton value="USD" sx={{ fontWeight: 900 }}>USD</ToggleButton>
                     </ToggleButtonGroup>
                   )}
                 />
@@ -2029,7 +2079,6 @@ export default function FinanzasForm() {
                   >
                     <ToggleButton value="JUS" sx={{ fontWeight: 900 }}>JUS</ToggleButton>
                     <ToggleButton value="ARS" sx={{ fontWeight: 900 }}>ARS</ToggleButton>
-                    <ToggleButton value="USD" sx={{ fontWeight: 900 }}>USD</ToggleButton>
                   </ToggleButtonGroup>
                 )}
               />
@@ -2181,7 +2230,6 @@ export default function FinanzasForm() {
                   >
                     <ToggleButton value="JUS" sx={{ fontWeight: 900 }}>JUS</ToggleButton>
                     <ToggleButton value="ARS" sx={{ fontWeight: 900 }}>ARS</ToggleButton>
-                    <ToggleButton value="USD" sx={{ fontWeight: 900 }}>USD</ToggleButton>
                   </ToggleButtonGroup>
                 )}
               />
@@ -2291,10 +2339,10 @@ export default function FinanzasForm() {
             )}
             {tipoMovimiento === "ingreso" && (
               <>
-                {form.selectedCuotaIds.length === 0 && form.selectedGastoIds.length === 0 && (
+                {form.selectedCuotaIds.length === 0 && form.selectedGastoIds.length === 0 && form.selectedHonorarioIds.length === 0 && (
                   <Grid size={{ xs: 12 }} sx={{ mb: 1 }}>
                     <Alert severity="info" sx={{ borderRadius: "12px", "& .MuiAlert-message": { fontWeight: 700 } }}>
-                      Si no seleccionás ninguna cuota o gasto, el ingreso se aplicará automáticamente al primer movimiento en vencer.
+                      Si no seleccionás ninguna cuota, gasto u honorario, el ingreso se aplicará automáticamente al primer movimiento en vencer.
                     </Alert>
                   </Grid>
                 )}
@@ -2586,6 +2634,127 @@ export default function FinanzasForm() {
                       {errors.selectedGastoIds.message}
                     </Typography>
                   )}
+                </Paper>
+              </Grid>
+            )}
+            {tipoMovimiento === "ingreso" && honorariosSinPlanIngreso.length > 0 && (
+              <Grid size={{ xs: 12 }}>
+                <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, overflow: "hidden" }}>
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    alignItems={{ xs: "flex-start", md: "center" }}
+                    justifyContent="space-between"
+                    spacing={1}
+                    sx={{ px: 2, py: 1.5 }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <Checkbox
+                        size="small"
+                        checked={honorariosSinPlanIngreso.length > 0 && honorariosSinPlanIngreso.every((h) => form.selectedHonorarioIds.includes(Number(h.id)))}
+                        indeterminate={honorariosSinPlanIngreso.some((h) => form.selectedHonorarioIds.includes(Number(h.id))) && !honorariosSinPlanIngreso.every((h) => form.selectedHonorarioIds.includes(Number(h.id)))}
+                        onChange={(event) => {
+                          const ids = honorariosSinPlanIngreso.map((h) => Number(h.id));
+                          setForm((f) => {
+                            const current = new Set(f.selectedHonorarioIds);
+                            ids.forEach((id) => {
+                              if (event.target.checked) current.add(id);
+                              else current.delete(id);
+                            });
+                            return { ...f, selectedHonorarioIds: [...current] };
+                          });
+                        }}
+                      />
+                      <Box>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 950 }}>Honorarios sin plan</Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>
+                          Cobro directo (parcial o total){selectedCaso ? ` · ${casoLabel(selectedCaso)}` : ""}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <Chip size="small" label={`${form.selectedHonorarioIds.length} honorarios seleccionados`} sx={{ fontWeight: 800 }} />
+                      <Typography variant="body2" sx={{ fontWeight: 950 }}>
+                        {formatMoneyAr(totalHonorariosDirectosSeleccionados)}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={() => setHonorariosDirectosExpanded((value) => !value)}
+                        aria-label={honorariosDirectosExpanded ? "Colapsar honorarios sin plan" : "Expandir honorarios sin plan"}
+                      >
+                        {honorariosDirectosExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+                      </IconButton>
+                    </Stack>
+                  </Stack>
+                  <Collapse in={honorariosDirectosExpanded}>
+                    <Divider />
+                    {honorariosSinPlanIngreso.length === 0 ? (
+                      <Box sx={{ px: 2, py: 3, color: "text.secondary" }}>
+                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                          {!form.clienteId ? "Seleccioná un cliente para ver honorarios sin plan." : honorariosPendientesQuery.isLoading ? "Cargando honorarios..." : "No hay honorarios sin plan pendientes para este filtro."}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <>
+                        {/* Desktop */}
+                        <TableContainer sx={{ display: { xs: "none", md: "block" } }}>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell padding="checkbox" />
+                                <TableCell sx={{ fontWeight: 900 }}>Concepto</TableCell>
+                                <TableCell sx={{ fontWeight: 900 }}>Vencimiento</TableCell>
+                                <TableCell sx={{ fontWeight: 900 }}>Monto</TableCell>
+                                <TableCell sx={{ fontWeight: 900 }}>Estado</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {honorariosSinPlanIngreso.map((h) => {
+                                const checked = form.selectedHonorarioIds.includes(Number(h.id));
+                                const chip = honorarioEstadoChip(h);
+                                const label = h.concepto?.nombre || `Honorario #${h.id}`;
+                                return (
+                                  <TableRow key={h.id} hover>
+                                    <TableCell padding="checkbox">
+                                      <Checkbox size="small" checked={checked} onChange={(e) => setForm((f) => { const s = new Set(f.selectedHonorarioIds); if (e.target.checked) s.add(Number(h.id)); else s.delete(Number(h.id)); return { ...f, selectedHonorarioIds: [...s] }; })} />
+                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 800 }}>{label}</TableCell>
+                                    <TableCell sx={{ whiteSpace: "nowrap" }}>{formatIsoDateShort(h.fechaVencimiento ?? h.fechaRegulacion)}</TableCell>
+                                    <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>{formatMoneyAr(honorarioMontoBase(h))}</TableCell>
+                                    <TableCell><Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} /></TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                        {/* Mobile */}
+                        <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" }, p: 1 }}>
+                          {honorariosSinPlanIngreso.map((h) => {
+                            const checked = form.selectedHonorarioIds.includes(Number(h.id));
+                            const chip = honorarioEstadoChip(h);
+                            const label = h.concepto?.nombre || `Honorario #${h.id}`;
+                            return (
+                              <Paper key={h.id} elevation={0} sx={{ p: 1.5, border: "1px solid", borderColor: checked ? "primary.main" : "divider", borderRadius: "10px" }}>
+                                <Stack direction="row" alignItems="flex-start" spacing={1}>
+                                  <Checkbox size="small" checked={checked} onChange={(e) => setForm((f) => { const s = new Set(f.selectedHonorarioIds); if (e.target.checked) s.add(Number(h.id)); else s.delete(Number(h.id)); return { ...f, selectedHonorarioIds: [...s] }; })} sx={{ p: 0.5, mt: 0.25 }} />
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                      <Typography variant="body2" sx={{ fontWeight: 900 }}>{label}</Typography>
+                                      <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} />
+                                    </Stack>
+                                    <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: "wrap", gap: 0.5 }}>
+                                      <Typography variant="caption">{formatIsoDateShort(h.fechaVencimiento ?? h.fechaRegulacion)}</Typography>
+                                      <Typography variant="caption" sx={{ fontWeight: 900 }}>{formatMoneyAr(honorarioMontoBase(h))}</Typography>
+                                    </Stack>
+                                  </Box>
+                                </Stack>
+                              </Paper>
+                            );
+                          })}
+                        </Stack>
+                      </>
+                    )}
+                  </Collapse>
                 </Paper>
               </Grid>
             )}

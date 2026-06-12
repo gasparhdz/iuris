@@ -8,15 +8,19 @@ import {
   clienteQuerySchema, idParamSchema, contactoClienteParamsSchema,
   clienteResponseSchema, clienteListResponseSchema,
   clienteDetalleResponseSchema, contactoClienteResponseSchema,
+  cuentaCorrienteResponseSchema, cuentaCorrienteResumenResponseSchema,
   createContactoClienteSchema, updateContactoClienteSchema,
 } from "../schemas/clientes.schema.js";
 
 export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
   const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("CLIENTES", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Clientes"],
       summary: "Listar clientes del estudio (Paginado)",
@@ -27,7 +31,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Clientes"],
       summary: "Obtener un cliente por ID",
@@ -38,7 +42,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.findById);
 
   server.get("/:id/detalle", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Clientes"],
       summary: "Obtener workspace consolidado de un cliente",
@@ -48,8 +52,29 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, ClientesController.findDetalle);
 
+  server.get("/:id/cuenta-corriente", {
+    ...can("ver"),
+    schema: {
+      tags: ["Clientes"],
+      summary: "Cuenta corriente del cliente (libro mayor calculado en backend)",
+      security: [{ bearerAuth: [] }],
+      params: idParamSchema,
+      response: documentedResponses(200, cuentaCorrienteResponseSchema),
+    },
+  }, ClientesController.findCuentaCorriente);
+
+  server.get("/cuentas-corrientes", {
+    ...can("ver"),
+    schema: {
+      tags: ["Clientes"],
+      summary: "Resumen de cuenta corriente por cliente (todo el estudio)",
+      security: [{ bearerAuth: [] }],
+      response: documentedResponses(200, cuentaCorrienteResumenResponseSchema),
+    },
+  }, ClientesController.findCuentasCorrientesResumen);
+
   server.post("/:id/contactos", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Clientes"],
       summary: "Crear contacto secundario de un cliente",
@@ -61,7 +86,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.createContacto);
 
   server.put("/:id/contactos/:contactoId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Clientes"],
       summary: "Actualizar contacto secundario de un cliente",
@@ -73,7 +98,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.updateContacto);
 
   server.delete("/:id/contactos/:contactoId", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Clientes"],
       summary: "Eliminar contacto secundario de un cliente",
@@ -84,7 +109,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.deleteContacto);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Clientes"],
       summary: "Crear un nuevo cliente",
@@ -99,7 +124,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   server.delete("/", { ...authConfig, schema: { hide: true } }, methodNotAllowed);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Clientes"],
       summary: "Actualizar un cliente existente",
@@ -111,7 +136,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Clientes"],
       summary: "Eliminar un cliente (soft delete)",

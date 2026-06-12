@@ -9,6 +9,7 @@ import RequireAuth from "./auth/RequireAuth";
 import RequireSuperAuth from "./auth/RequireSuperAuth";
 import Layout from "./layout/Layout";
 import SaaSLayout from "./layout/SaaSLayout";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // Estilos globales
 import "./index.css";
@@ -51,7 +52,25 @@ import SaaSParametros from "./pages/admin/SaaSParametros";
 import SaaSSystemLogs from "./pages/admin/SaaSSystemLogs";
 import SaaSPlanesSuscripcion from "./pages/admin/SaaSPlanesSuscripcion";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      // No reintentar errores 4xx (401/403/404): no se resuelven solos y reintentar
+      // 3 veces con backoff es lo que dejaba la UI ~10s "cargando" antes de fallar.
+      retry: (failureCount, error) => {
+        const status = error?.response?.status;
+        if (typeof status === "number" && status >= 400 && status < 500) return false;
+        return failureCount < 2;
+      },
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});
 
 function ScrollToTop() {
   const { pathname, search } = useLocation();
@@ -130,6 +149,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           >
             <BrowserRouter basename="/lex">
               <ScrollToTop />
+              <ErrorBoundary>
               <Routes>
                 {/* Rutas Públicas */}
                 <Route path="/login" element={<Login />} />
@@ -199,6 +219,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                 {/* Redirección por defecto */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </ErrorBoundary>
             </BrowserRouter>
           </SnackbarProvider>
         </ThemeModeProvider>

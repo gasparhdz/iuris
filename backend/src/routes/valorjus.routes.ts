@@ -16,10 +16,12 @@ import {
 
 export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("VALORJUS", accion)],
+  });
 
   server.get("/actual", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Obtener valor JUS actual",
@@ -30,7 +32,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findActual);
 
   server.get("/historico", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Obtener valor JUS historico por fecha",
@@ -41,7 +43,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findActual);
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Listar historico de valores JUS",
@@ -52,7 +54,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findAll);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Crear valor JUS",
@@ -63,7 +65,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.create);
 
   server.post("/sync", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Sincronizar valores JUS desde el portal oficial",
@@ -73,7 +75,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.sync);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Actualizar valor JUS",
@@ -85,7 +87,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Valor JUS"],
       summary: "Eliminar valor JUS",

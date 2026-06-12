@@ -33,6 +33,7 @@ import {
   cuotaMontoDisplay,
   cuotaTotalAPagar,
   denseTableSx,
+  findParamByCodigo,
   formatDateShort,
   formatMoneyAr,
   invalidateFinanzasQueries,
@@ -60,14 +61,26 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
     staleTime: 60_000,
   });
 
+  const conceptoIngresoQuery = useQuery({
+    queryKey: ["catalogos", "parametros", "CONCEPTO_INGRESO"],
+    queryFn: async () => {
+      const { data } = await api.get("/catalogos/parametros", { params: { categoria: "CONCEPTO_INGRESO" } });
+      const raw = data?.data ?? data;
+      return Array.isArray(raw) ? raw : [];
+    },
+    staleTime: 300_000,
+  });
+
   const cobrarMutation = useMutation({
     mutationFn: async (cuota) => {
+      const conceptoPagoHonorarios = findParamByCodigo(conceptoIngresoQuery.data ?? [], ["PAGO_DE_HONORARIOS"]);
       const payload = {
         cuotaIds: [cuota.id],
         monto: cuota.totalAPagarPesos ?? cuota.saldoPesos,
         clienteId: plan.clienteId,
         casoId: plan.casoId,
         descripcion: `Pago cuota ${cuota.numero}`,
+        tipoId: conceptoPagoHonorarios?.id ?? null,
         fechaIngreso: new Date().toISOString(),
       };
       if (cuota.valorJusAlCobro != null) payload.valorJusAlCobro = cuota.valorJusAlCobro;

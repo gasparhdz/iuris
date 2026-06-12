@@ -19,6 +19,9 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().refine(isBase64Encoded32Bytes, {
     message: "ENCRYPTION_KEY debe ser una clave aleatoria de 32 bytes codificada en base64",
   }),
+  AUDIT_HMAC_KEY: z.string().refine(isBase64Encoded32Bytes, {
+    message: "AUDIT_HMAC_KEY debe ser una clave aleatoria de 32 bytes codificada en base64",
+  }),
   ENCRYPTION_KEY_LEGACY: z.string().optional(),
   COOKIE_DOMAIN: z.string().optional(),
   CORS_ORIGIN: z.string().optional(),

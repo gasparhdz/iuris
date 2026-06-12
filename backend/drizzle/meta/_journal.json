@@ -239,6 +239,55 @@
       "when": 1780589100000,
       "tag": "0033_storage_watches",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1780589200000,
+      "tag": "0034_movimientos_vistos",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1780589300000,
+      "tag": "0035_sisfe_expediente_digital_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1780589400000,
+      "tag": "0036_sisfe_matricula",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780589500000,
+      "tag": "0037_movimientos_sisfe_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780589600000,
+      "tag": "0038_permiso_equipo",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780589700000,
+      "tag": "0039_aplicacion_honorario",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780589800000,
+      "tag": "0040_estado_honorario_cobro",
+      "breakpoints": true
     }
   ]
 }

@@ -1,70 +1,45 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import api, { loginPersist, logoutClear } from "../api/axios";
+import api, { setAccessToken, refreshAccessToken } from "../api/axios";
 
 const AuthContext = createContext(null);
 
-function isTokenExpired(token) {
-  try {
-    const parts = String(token).split(".");
-    if (parts.length !== 3) return true;
-    const payload = JSON.parse(atob(parts[1]));
-    if (!payload?.exp) return true;
-    return payload.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
-
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  // El perfil cacheado NO es una credencial (no permite autenticarse); se guarda solo para
+  // evitar parpadeo en el primer render y se revalida contra el backend al montar.
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [ready, setReady] = useState(false);
 
-  // Verificamos si hay un token válido guardado
-  const hasToken = (() => {
-    const token = localStorage.getItem("token");
-    return !!token && !isTokenExpired(token);
-  })();
-
+  // Bootstrap de sesión: el access token se perdió al recargar (vive en memoria), así que se
+  // re-obtiene con la cookie HttpOnly del refresh. Si no hay sesión válida, queda deslogueado.
   useEffect(() => {
-    const token = localStorage.getItem("token");
-
-    // Limpiar si el token expiró
-    if (token && isTokenExpired(token)) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      setUser(null);
-      setReady(true);
-      return;
-    }
-
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
+    let active = true;
+    (async () => {
       try {
-        setUser(JSON.parse(savedUser));
+        const token = await refreshAccessToken();
+        if (!token) throw new Error("NO_SESSION");
+        const me = (await api.get("/auth/me")).data;
+        if (!active) return;
+        setUser(me);
+        localStorage.setItem("user", JSON.stringify(me));
       } catch {
+        if (!active) return;
+        setAccessToken(null);
+        setUser(null);
         localStorage.removeItem("user");
+      } finally {
+        if (active) setReady(true);
       }
-    }
-
-    // Refrescar el perfil en background si el token es válido
-    if (token) {
-      (async () => {
-        try {
-          const { data } = await api.get("/auth/me");
-          setUser(data);
-          localStorage.setItem("user", JSON.stringify(data));
-        } catch (e) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          setUser(null);
-        } finally {
-          setReady(true);
-        }
-      })();
-      return;
-    }
-
-    setReady(true);
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = async (email, password) => {
@@ -72,21 +47,26 @@ export function AuthProvider({ children }) {
     const token = data.token || data.accessToken || data?.data?.token || data?.data?.accessToken;
     if (!token) throw new Error("El backend no devolvió token");
 
-    loginPersist(token);
-    
-    // Obtener los datos del perfil actualizados
+    setAccessToken(token);
     const me = (await api.get("/auth/me")).data;
     setUser(me);
     localStorage.setItem("user", JSON.stringify(me));
-    if (!ready) setReady(true);
+    setReady(true);
     return me;
   };
 
-  const logout = () => {
-    logoutClear();
-    localStorage.removeItem("user");
+  const logout = async () => {
+    // Se llama al backend ANTES de limpiar el token para que el logout se autentique y revoque
+    // el refresh token del servidor.
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // noop: igual limpiamos el estado local
+    }
+    setAccessToken(null);
     setUser(null);
-    if (!ready) setReady(true);
+    localStorage.removeItem("user");
+    setReady(true);
   };
 
   const updateUser = (nextUser) => {
@@ -95,7 +75,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, hasToken, login, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, ready, hasToken: Boolean(user), login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

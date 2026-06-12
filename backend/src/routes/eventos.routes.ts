@@ -12,9 +12,12 @@ import {
 export const eventosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
   const authConfig = { preHandler: [fastify.authenticate] };
+  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
+    preHandler: [fastify.authenticate, fastify.authorize("EVENTOS", accion)],
+  });
 
   server.get("/", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Eventos"],
       summary: "Listar eventos",
@@ -25,7 +28,7 @@ export const eventosRoutes: FastifyPluginAsync = async (fastify) => {
   }, EventosController.findAll);
 
   server.get("/:id", {
-    ...authConfig,
+    ...can("ver"),
     schema: {
       tags: ["Eventos"],
       summary: "Obtener un evento por ID",
@@ -36,7 +39,7 @@ export const eventosRoutes: FastifyPluginAsync = async (fastify) => {
   }, EventosController.findById);
 
   server.post("/", {
-    ...authConfig,
+    ...can("crear"),
     schema: {
       tags: ["Eventos"],
       summary: "Crear un nuevo evento",
@@ -51,7 +54,7 @@ export const eventosRoutes: FastifyPluginAsync = async (fastify) => {
   server.delete("/", { ...authConfig, schema: { hide: true } }, methodNotAllowed);
 
   server.put("/:id", {
-    ...authConfig,
+    ...can("editar"),
     schema: {
       tags: ["Eventos"],
       summary: "Actualizar un evento",
@@ -63,7 +66,7 @@ export const eventosRoutes: FastifyPluginAsync = async (fastify) => {
   }, EventosController.update);
 
   server.delete("/:id", {
-    ...authConfig,
+    ...can("eliminar"),
     schema: {
       tags: ["Eventos"],
       summary: "Eliminar un evento",

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
@@ -11,7 +11,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   IconButton,
   LinearProgress,
   Paper,
@@ -33,20 +32,11 @@ import {
   OpenInNew,
   Payments,
   PersonAdd,
-  ReceiptLong,
-  Refresh,
   WarningAmber,
 } from "@mui/icons-material";
 import api from "../api/axios";
 import { useAuth } from "../auth/AuthContext";
-import SisfeSyncButton from "../components/SisfeSyncButton";
-import {
-  formatMoneyAr,
-  isHonorarioPendiente,
-  movementAmountPesos,
-  unwrapPaged,
-  computeHonorarioAmounts,
-} from "./finanzasUtils";
+import NovedadesExpedientesCard from "../components/NovedadesExpedientesCard";
 import {
   casoLabel,
   checklistStats,
@@ -94,10 +84,6 @@ function normalizeCode(value) {
     .toUpperCase();
 }
 
-function payloadItems(data) {
-  return unwrapPaged(data).items;
-}
-
 function readUserName(user) {
   const raw = user?.nombre || user?.name || user?.usuario?.nombre || user?.email || "";
   const clean = String(raw).split("@")[0].trim();
@@ -113,12 +99,6 @@ function eventDate(event) {
   return event?.fechaInicio || event?.fecha || event?.inicio || event?.start;
 }
 
-function moneyCompact(value) {
-  const n = Number(value || 0);
-  if (Math.abs(n) >= 1_000_000) return `${formatMoneyAr(n / 1_000_000)} M`;
-  return formatMoneyAr(n);
-}
-
 function priorityColor(priority) {
   const code = normalizeCode(priority?.codigo || priority?.nombre || priority);
   return PRIORITY_TONES[code] || PRIORITY_TONES.DEFAULT;
@@ -126,71 +106,6 @@ function priorityColor(priority) {
 
 function priorityLabel(task) {
   return task?.prioridad?.nombre || task?.prioridadNombre || "Sin prioridad";
-}
-
-function KpiCard({ title, value, caption, Icon, tone, progress, loading }) {
-  const theme = useTheme();
-  return (
-    <Box
-      component={motion.div}
-      whileHover={{ y: -5 }}
-      transition={{ type: "spring", stiffness: 300, damping: 22 }}
-      sx={{ height: "100%" }}
-    >
-      <Paper
-        elevation={0}
-        sx={{
-          ...panelSx,
-          p: 2.25,
-          height: "100%",
-          position: "relative",
-          overflow: "hidden",
-          "&:hover": {
-            borderColor: "primary.main",
-          },
-        }}
-      >
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2} sx={{ position: "relative" }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {title}
-            </Typography>
-            <Typography sx={{ fontSize: { xs: "1.8rem", xl: "2.05rem" }, fontWeight: 800, lineHeight: 1.05, mt: 1 }}>
-              {loading ? <CircularProgress size={24} /> : value}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 500, display: "block", mt: 0.8 }}>
-              {caption}
-            </Typography>
-          </Box>
-          <Avatar
-            sx={{
-              width: 46,
-              height: 46,
-              bgcolor: alpha(tone, theme.palette.mode === "dark" ? 0.18 : 0.12),
-              color: tone,
-              border: `1px solid ${alpha(tone, 0.28)}`,
-            }}
-          >
-            <Icon />
-          </Avatar>
-        </Stack>
-        <LinearProgress
-          variant="determinate"
-          value={Math.max(5, Math.min(100, Number(progress || 0)))}
-          sx={{
-            mt: 2.2,
-            height: 5,
-            borderRadius: 999,
-            bgcolor: alpha(tone, 0.12),
-            "& .MuiLinearProgress-bar": {
-              borderRadius: 999,
-              bgcolor: tone,
-            },
-          }}
-        />
-      </Paper>
-    </Box>
-  );
 }
 
 function PriorityPill({ task }) {
@@ -540,84 +455,15 @@ export default function Dashboard() {
     staleTime: 60_000,
   });
 
-  const expedientesQuery = useQuery({
-    queryKey: ["dashboard", "expedientes"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
-    staleTime: 60_000,
-  });
-
-  const clientesQuery = useQuery({
-    queryKey: ["dashboard", "clientes"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
-    staleTime: 60_000,
-  });
-
-  const honorariosQuery = useQuery({
-    queryKey: ["dashboard", "honorarios"],
-    queryFn: async () => {
-      const { data } = await api.get("/honorarios", { params: { page: 1, limit: 100 } });
-      return payloadItems(data);
-    },
-    staleTime: 60_000,
-  });
-
-  const gastosQuery = useQuery({
-    queryKey: ["dashboard", "gastos"],
-    queryFn: async () => {
-      const { data } = await api.get("/gastos", { params: { page: 1, limit: 100 } });
-      return payloadItems(data);
-    },
-    staleTime: 60_000,
-  });
-
-  const planesQuery = useQuery({
-    queryKey: ["dashboard", "planes"],
-    queryFn: () => api.get("/planes").then((r) => r.data?.data ?? []),
-    staleTime: 60_000,
-  });
-
-  const valorJusQuery = useQuery({
-    queryKey: ["dashboard", "valorjus", "actual"],
-    queryFn: async () => {
-      const { data } = await api.get("/valorjus/actual");
-      return data?.data ?? data;
-    },
-    staleTime: 60_000,
-  });
-
   const catalogQuery = useQuery({
     queryKey: ["dashboard", "catalogos"],
     queryFn: async () => {
-      const cats = ["MONEDA", "POLITICA_JUS", "ESTADO_GASTO", "ESTADO_EVENTO"];
-      const entries = await Promise.all(
-        cats.map(async (categoria) => {
-          const { data } = await api.get("/catalogos/parametros", { params: { categoria } });
-          const raw = data?.data ?? data;
-          return [categoria, Array.isArray(raw) ? raw : []];
-        })
-      );
-      return Object.fromEntries(entries);
+      const { data } = await api.get("/catalogos/parametros", { params: { categoria: "ESTADO_EVENTO" } });
+      const raw = data?.data ?? data;
+      return { ESTADO_EVENTO: Array.isArray(raw) ? raw : [] };
     },
     staleTime: 300_000,
   });
-
-  const isLoading = [
-    tareasQuery,
-    eventosQuery,
-    expedientesQuery,
-    clientesQuery,
-    honorariosQuery,
-    gastosQuery,
-    planesQuery,
-    valorJusQuery,
-    catalogQuery,
-  ].some((q) => q.isLoading);
 
   function invalidateDashboard() {
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -673,15 +519,6 @@ export default function Dashboard() {
 
   const tareas = tareasQuery.data ?? [];
   const eventos = eventosQuery.data ?? [];
-  const expedientes = expedientesQuery.data ?? [];
-  const clientes = clientesQuery.data ?? [];
-  const honorarios = honorariosQuery.data ?? [];
-  const gastos = gastosQuery.data ?? [];
-  const planes = planesQuery.data ?? [];
-  const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
-  const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
-  const catalogPoliticas = catalogQuery.data?.POLITICA_JUS ?? [];
-  const catalogEstadosGasto = catalogQuery.data?.ESTADO_GASTO ?? [];
   const catalogEstadosEvento = catalogQuery.data?.ESTADO_EVENTO ?? [];
 
   const estadoEventoIdByCodigo = useMemo(() => {
@@ -695,63 +532,21 @@ export default function Dashboard() {
   const realizadoEstadoId = estadoEventoIdByCodigo.get("REALIZADO") ?? null;
   const pendienteEstadoId = estadoEventoIdByCodigo.get("PENDIENTE") ?? null;
 
-  const planesByHonorario = useMemo(() => {
-    const map = new Map();
-    planes.forEach((plan) => {
-      const honorarioId = Number(plan.honorarioId);
-      if (!honorarioId) return;
-      const current = map.get(honorarioId) ?? { saldo: 0, cobrado: 0 };
-      current.saldo += Number(plan.totalSaldoArs ?? 0);
-      current.cobrado += Number(plan.totalCobradoArs ?? 0);
-      map.set(honorarioId, current);
-    });
-    return map;
-  }, [planes]);
-
-  const getHonorarioSaldoPendiente = useCallback((item, computed) => {
-    const planSaldo = planesByHonorario.get(Number(item.id));
-    if (planSaldo) {
-      return {
-        value: Math.max(0, planSaldo.saldo),
-        currency: "ARS",
-      };
-    }
-
-    return {
-      value: isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0,
-      currency: computed?.currency ?? "ARS",
+  const pendingTasks = useMemo(() => {
+    const fechaValor = (task) => {
+      const t = new Date(task.fechaLimite).getTime();
+      return Number.isNaN(t) ? Infinity : t; // sin fecha límite => al final
     };
-  }, [planesByHonorario]);
-
-  const estadosGastoById = useMemo(() => {
-    return new Map(catalogEstadosGasto.map((e) => [Number(e.id), e]));
-  }, [catalogEstadosGasto]);
-
-  const pendingTasks = useMemo(() => tareas.filter((task) => !task.completada), [tareas]);
-  const activeCases = useMemo(() => expedientes.filter((caso) => !caso.fechaCierre && !caso.cerrado), [expedientes]);
-  const clientesNuevosMes = useMemo(() => {
-    const limit = dayjs().subtract(30, "day");
-    return clientes.filter((cliente) => {
-      const created = cliente.createdAt || cliente.fechaAlta || cliente.created_at;
-      return created && dayjs(created).isAfter(limit);
-    }).length;
-  }, [clientes]);
-
-  const pendingHonorarios = useMemo(() => {
-    return honorarios.reduce((acc, honorario) => {
-      const computed = computeHonorarioAmounts(honorario, valorJusActual, catalogMonedas, catalogPoliticas);
-      const saldo = getHonorarioSaldoPendiente(honorario, computed);
-      return acc + Number(saldo.value ?? 0);
-    }, 0);
-  }, [honorarios, valorJusActual, catalogMonedas, catalogPoliticas, getHonorarioSaldoPendiente]);
-
-  const totalGastos = useMemo(() => {
-    return gastos.reduce((acc, gasto) => {
-      const estado = estadosGastoById.get(Number(gasto.estadoId));
-      if (String(estado?.codigo ?? "").toUpperCase() === "PAGADO") return acc;
-      return acc + movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas);
-    }, 0);
-  }, [gastos, estadosGastoById, valorJusActual, catalogMonedas]);
+    return tareas
+      .filter((task) => !task.completada)
+      .sort((a, b) => {
+        // Lo vencido primero; entre dos, la fecha límite más próxima arriba.
+        const overdueA = isOverdue(a) ? 0 : 1;
+        const overdueB = isOverdue(b) ? 0 : 1;
+        if (overdueA !== overdueB) return overdueA - overdueB;
+        return fechaValor(a) - fechaValor(b);
+      });
+  }, [tareas]);
 
   const upcomingEvents = useMemo(() => {
     const now = Date.now();
@@ -768,43 +563,7 @@ export default function Dashboard() {
       .slice(0, 6);
   }, [eventos, realizadoEstadoId]);
 
-  const kpis = [
-    {
-      title: "Casos activos",
-      value: activeCases.length,
-      caption: `${expedientes.length} expedientes cargados`,
-      Icon: FolderSpecial,
-      tone: CARD_TONES.blue,
-      progress: expedientes.length ? (activeCases.length / expedientes.length) * 100 : 0,
-    },
-    {
-      title: "Clientes nuevos",
-      value: clientesNuevosMes,
-      caption: "últimos 30 días",
-      Icon: PersonAdd,
-      tone: CARD_TONES.orange,
-      progress: clientes.length ? (clientesNuevosMes / clientes.length) * 100 : 0,
-    },
-    {
-      title: "Honorarios",
-      value: moneyCompact(pendingHonorarios),
-      caption: "pendientes de cobro",
-      Icon: Payments,
-      tone: CARD_TONES.green,
-      progress: pendingHonorarios > 0 ? 72 : 0,
-    },
-    {
-      title: "Gastos",
-      value: moneyCompact(totalGastos),
-      caption: "registrados para recuperar",
-      Icon: ReceiptLong,
-      tone: CARD_TONES.red,
-      progress: totalGastos > 0 ? 48 : 0,
-    },
-  ];
-
   const firstName = readUserName(user);
-  const refreshDashboard = () => invalidateDashboard();
 
   return (
     <Box
@@ -813,54 +572,29 @@ export default function Dashboard() {
         pb: 4,
       }}
     >
-      <Stack
+      <Box
         component={motion.div}
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        direction={{ xs: "column", md: "row" }}
-        spacing={2}
-        justifyContent="space-between"
-        alignItems={{ xs: "stretch", md: "center" }}
         sx={{ mb: 3.5, position: "relative" }}
       >
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, mb: 0.6 }}>
-            {firstName ? `¡Hola de nuevo, ${firstName}!` : "¡Hola de nuevo!"}
-          </Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 700 }}>
-            {displayDate()}
-          </Typography>
-        </Box>
-        <Button
-          variant="outlined"
-          startIcon={<Refresh className="refresh-icon" />}
-          onClick={refreshDashboard}
-          sx={{
-            borderRadius: "12px",
-            fontWeight: 800,
-            alignSelf: { xs: "stretch", md: "center" },
-            "& .refresh-icon": { transition: "transform 0.45s ease" },
-            "&:hover .refresh-icon": { transform: "rotate(180deg)" },
-          }}
-        >
-          Refrescar
-        </Button>
-      </Stack>
+        <Typography variant="h4" sx={{ fontWeight: 800, mb: 0.6 }}>
+          {firstName ? `¡Hola de nuevo, ${firstName}!` : "¡Hola de nuevo!"}
+        </Typography>
+        <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 700 }}>
+          {displayDate()}
+        </Typography>
+      </Box>
 
-      <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
-        {kpis.map((kpi, index) => (
-          <Grid key={kpi.title} size={{ xs: 12, sm: 6, md: 3 }}>
-            <motion.div
-              initial={{ opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: index * 0.05 }}
-              style={{ height: "100%" }}
-            >
-              <KpiCard {...kpi} loading={isLoading} />
-            </motion.div>
-          </Grid>
-        ))}
-      </Grid>
+      <Box
+        component={motion.div}
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        sx={{ mb: 2.5 }}
+      >
+        <NovedadesExpedientesCard />
+      </Box>
 
       {/* ===== ACCIONES RÁPIDAS (ATAJOS DE CREACIÓN) ===== */}
       <Paper elevation={0} sx={{ ...panelSx, p: 2, mb: 2.5 }}>
@@ -875,7 +609,7 @@ export default function Dashboard() {
           </Box>
           <Box sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(3, 1fr)", lg: "repeat(6, 1fr)" },
+            gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(3, 1fr)", lg: "repeat(5, 1fr)" },
             gap: 1.5,
             width: { xs: "100%", lg: "auto" },
           }}>
@@ -914,22 +648,6 @@ export default function Dashboard() {
                 {action.label}
               </Button>
             ))}
-            <SisfeSyncButton
-              sx={{
-                fontSize: "0.82rem",
-                px: 1.8,
-                py: 0.85,
-                borderRadius: "12px",
-                justifyContent: "flex-start",
-                borderColor: alpha(CARD_TONES.cyan, 0.35),
-                color: CARD_TONES.cyan,
-                bgcolor: alpha(CARD_TONES.cyan, 0.04),
-                "&:hover": {
-                  borderColor: CARD_TONES.cyan,
-                  bgcolor: alpha(CARD_TONES.cyan, 0.08),
-                }
-              }}
-            />
           </Box>
         </Stack>
       </Paper>

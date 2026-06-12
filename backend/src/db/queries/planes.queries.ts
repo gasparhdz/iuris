@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../index.js";
-import { casos, categorias, clientes, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago } from "../schema.js";
+import { casos, categorias, clientes, honorarios, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago } from "../schema.js";
 
 type NewPlanPago = typeof planesPago.$inferInsert;
 type NewPlanCuota = typeof planCuotas.$inferInsert;
@@ -401,12 +401,97 @@ export class PlanesQueries {
         id: ingresoAplicaciones.id,
         cuotaId: ingresoAplicaciones.cuotaId,
         gastoId: ingresoAplicaciones.gastoId,
+        honorarioId: ingresoAplicaciones.honorarioId,
         monto: ingresoAplicaciones.monto,
         montoCapital: ingresoAplicaciones.montoCapital,
         montoInteres: ingresoAplicaciones.montoInteres,
       })
       .from(ingresoAplicaciones)
       .where(and(eq(ingresoAplicaciones.ingresoId, ingresoId), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)));
+  }
+
+  static async findAplicacionesByHonorarioActivas(honorarioId: number, tx: DbExecutor = db) {
+    return await tx
+      .select({
+        id: ingresoAplicaciones.id,
+        monto: ingresoAplicaciones.monto,
+        montoCapital: ingresoAplicaciones.montoCapital,
+        montoInteres: ingresoAplicaciones.montoInteres,
+        fechaIngreso: ingresos.fechaIngreso,
+        valorJusAlCobro: ingresoAplicaciones.valorJusAlCobro,
+      })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
+      .where(and(eq(ingresoAplicaciones.honorarioId, honorarioId), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt), isNull(ingresos.deletedAt)))
+      .orderBy(asc(ingresos.fechaIngreso), asc(ingresos.id));
+  }
+
+  static async sumAplicacionesByHonorario(honorarioId: number, tx: DbExecutor = db) {
+    const [row] = await tx
+      .select({ total: sql`coalesce(sum(${ingresoAplicaciones.montoCapital}), 0)`.mapWith(Number) })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
+      .where(and(eq(ingresoAplicaciones.honorarioId, honorarioId), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt), isNull(ingresos.deletedAt)));
+
+    return row?.total ?? 0;
+  }
+
+  static async updateHonorarioEstado(honorarioId: number, estudioId: number, estadoId: number, tx: DbExecutor = db) {
+    const [row] = await tx
+      .update(honorarios)
+      .set({ estadoId, updatedAt: new Date() })
+      .where(and(eq(honorarios.id, honorarioId), eq(honorarios.estudioId, estudioId), isNull(honorarios.deletedAt)))
+      .returning({ id: honorarios.id });
+
+    return row ?? null;
+  }
+
+  /** Devuelve el plan de pago activo de un honorario, o null si cobra de forma directa (sin plan). */
+  static async findPlanActivoByHonorarioId(honorarioId: number, estudioId: number, tx: DbExecutor = db) {
+    const [row] = await tx
+      .select({ id: planesPago.id })
+      .from(planesPago)
+      .where(and(
+        eq(planesPago.honorarioId, honorarioId),
+        eq(planesPago.estudioId, estudioId),
+        eq(planesPago.activo, true),
+        isNull(planesPago.deletedAt),
+      ))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /** Honorarios del cliente que cobran de forma directa (sin plan activo) y siguen con saldo pendiente. */
+  static async findHonorariosSinPlanCobrables(estudioId: number, clienteId: number, casoId?: number) {
+    const cobradoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "COBRADO");
+    const anuladoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "ANULADO");
+    const incobrableParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "INCOBRABLE");
+    const excluidos = [cobradoParam?.id, anuladoParam?.id, incobrableParam?.id]
+      .filter((id): id is number => id != null);
+
+    const rows = await db
+      .select({
+        id: honorarios.id,
+        vencimiento: sql<Date>`coalesce(${honorarios.fechaVencimiento}, ${honorarios.fechaRegulacion})`,
+      })
+      .from(honorarios)
+      .where(and(
+        eq(honorarios.estudioId, estudioId),
+        eq(honorarios.clienteId, clienteId),
+        casoId ? eq(honorarios.casoId, casoId) : undefined,
+        eq(honorarios.activo, true),
+        isNull(honorarios.deletedAt),
+        excluidos.length > 0 ? sql`(${honorarios.estadoId} is null or ${honorarios.estadoId} not in (${sql.join(excluidos, sql`, `)}))` : undefined,
+        sql`not exists (
+          select 1 from ${planesPago}
+          where ${planesPago.honorarioId} = ${honorarios.id}
+            and ${planesPago.activo} = true
+            and ${planesPago.deletedAt} is null
+        )`,
+      ));
+
+    return rows;
   }
 
   static async findAplicacionesByGastoActivas(gastoId: number, tx: DbExecutor = db) {

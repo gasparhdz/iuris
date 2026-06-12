@@ -1,13 +1,17 @@
 import { EventosQueries } from "../db/queries/eventos.queries.js";
 import { TareasQueries } from "../db/queries/tareas.queries.js";
 
+type AgendaPermisos = { verEventos: boolean; verTareas: boolean };
+
 export class AgendaService {
-  static async getOverview(estudioId: number, from: string, to: string) {
+  static async getOverview(estudioId: number, from: string, to: string, permisos: AgendaPermisos) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
-    const listaEventos = await EventosQueries.findInRange(estudioId, fromDate, toDate);
-    const listaTareas = await TareasQueries.findInRange(estudioId, fromDate, toDate);
+    // Cada parte de la agenda se incluye solo si el usuario tiene permiso de lectura del
+    // modulo correspondiente; asi la vista unificada no filtra datos por la puerta de atras.
+    const listaEventos = permisos.verEventos ? await EventosQueries.findInRange(estudioId, fromDate, toDate) : [];
+    const listaTareas = permisos.verTareas ? await TareasQueries.findInRange(estudioId, fromDate, toDate) : [];
 
     const agenda = [
       ...listaEventos.map((e) => ({

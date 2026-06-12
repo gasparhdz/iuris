@@ -43,6 +43,7 @@ export const createIngresoSchema = z.object({
   cuotaId: positiveIntSchema.optional().nullable(),
   cuotaIds: z.array(positiveIntSchema).optional(),
   gastoIds: z.array(positiveIntSchema).optional(),
+  honorarioIds: z.array(positiveIntSchema).optional(),
   descripcion: z.string().optional().nullable(),
   monto: positiveAmountSchema,
   monedaId: positiveIntSchema.optional().nullable(),

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import {
   Alert,
   Box,
@@ -64,6 +65,7 @@ function formatDate(value) {
 export default function ValoresJus() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const { canCrear, canEliminar } = usePermisos("VALORJUS");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [manualOpen, setManualOpen] = useState(false);
@@ -192,17 +194,19 @@ export default function ValoresJus() {
             {total > 0 ? ` ${total.toLocaleString("es-AR")} registros activos.` : ""}
           </Typography>
         </Box>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ flexShrink: 0 }}>
-          <Button
-            variant="contained"
-            startIcon={syncMutation.isPending ? <CircularProgress size={18} color="inherit" /> : <Sync />}
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            sx={{ borderRadius: "10px", fontWeight: 900 }}
-          >
-            Actualizar JUS
-          </Button>
-        </Stack>
+        {canCrear && (
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ flexShrink: 0 }}>
+            <Button
+              variant="contained"
+              startIcon={syncMutation.isPending ? <CircularProgress size={18} color="inherit" /> : <Sync />}
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              sx={{ borderRadius: "10px", fontWeight: 900 }}
+            >
+              Actualizar JUS
+            </Button>
+          </Stack>
+        )}
       </Stack>
 
       <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "10px", overflow: "hidden", bgcolor: "background.paper" }}>
@@ -263,18 +267,20 @@ export default function ValoresJus() {
                     <TableCell>{formatDate(item.fecha)}</TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>{moneyFormatter.format(Number(item.valor))}</TableCell>
                     <TableCell align="right">
-                      <Tooltip title="Eliminar valor JUS">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => setDeleteTarget(item)}
-                          disabled={deleteMutation.isPending}
-                          aria-label="Eliminar valor JUS"
-                          sx={{ p: 0.5 }}
-                        >
-                          <Delete sx={{ fontSize: 19 }} />
-                        </IconButton>
-                      </Tooltip>
+                      {canEliminar && (
+                        <Tooltip title="Eliminar valor JUS">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => setDeleteTarget(item)}
+                            disabled={deleteMutation.isPending}
+                            aria-label="Eliminar valor JUS"
+                            sx={{ p: 0.5 }}
+                          >
+                            <Delete sx={{ fontSize: 19 }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

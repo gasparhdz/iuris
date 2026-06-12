@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
+import { usePermisos } from "../auth/usePermissions";
 import { useFinanzasModals } from "../components/finanzas/FinanzasModalsProvider";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import { alpha, useTheme } from "@mui/material/styles";
@@ -75,7 +76,7 @@ import {
   computeHonorarioAmounts,
   movementAmountPesos,
   getItemCurrencyGeneral,
-  simulateCuentaCorriente,
+  mapCuentaCorrienteApiRows,
 } from "./finanzasUtils";
 import { clienteLabel as clienteLabelFromTareas, getApiError, unwrapItems } from "./tareasUtils";
 
@@ -271,6 +272,12 @@ export default function Finanzas() {
   const tabKey = TAB_KEYS.includes(searchParams.get("tab")) ? searchParams.get("tab") : "honorarios";
   const tabIndex = TAB_KEYS.indexOf(tabKey);
 
+  const honorariosPerm = usePermisos("HONORARIOS");
+  const gastosPerm = usePermisos("GASTOS");
+  const ingresosPerm = usePermisos("INGRESOS");
+  // Crear cobros usa el modulo INGRESOS; cada seccion edita/elimina su propio modulo.
+  const canCrearActivo = tabKey === "gastos" ? gastosPerm.canCrear : tabKey === "ingresos" ? ingresosPerm.canCrear : honorariosPerm.canCrear;
+
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search);
   const [orderBy, setOrderBy] = useState("fecha");
@@ -336,6 +343,16 @@ export default function Finanzas() {
     staleTime: 60_000,
   });
 
+  // Resumen de cuenta corriente por cliente calculado en el backend (motor Decimal).
+  const ccResumenQuery = useQuery({
+    queryKey: ["clientes", "cuentas-corrientes"],
+    queryFn: async () => {
+      const { data } = await api.get("/clientes/cuentas-corrientes");
+      return data?.data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
   const valorJusQuery = useQuery({
     queryKey: ["valorjus", "actual"],
     queryFn: async () => {
@@ -345,19 +362,10 @@ export default function Finanzas() {
     staleTime: 60_000,
   });
 
-  const valorJusHistorialQuery = useQuery({
-    queryKey: ["valorjus", "historial-ledger"],
-    queryFn: async () => {
-      const { data } = await api.get("/valorjus", { params: { page: 1, limit: 200 } });
-      return data?.data?.items ?? data?.items ?? [];
-    },
-    staleTime: 60_000,
-  });
-
   const catalogQuery = useQuery({
     queryKey: ["catalogos", "finanzas-global"],
     queryFn: async () => {
-      const cats = ["MONEDA", "POLITICA_JUS", "ESTADO_GASTO"];
+      const cats = ["MONEDA", "POLITICA_JUS", "ESTADO_GASTO", "CONCEPTO_INGRESO"];
       const entries = await Promise.all(
         cats.map(async (categoria) => {
           const { data } = await api.get("/catalogos/parametros", { params: { categoria } });
@@ -413,6 +421,11 @@ export default function Finanzas() {
     [conceptosQuery.data],
   );
 
+  const conceptosIngresoById = useMemo(
+    () => new Map((catalogQuery.data?.CONCEPTO_INGRESO ?? []).map((c) => [Number(c.id), c])),
+    [catalogQuery.data?.CONCEPTO_INGRESO],
+  );
+
   const estadosGastoById = useMemo(() => {
     const list = catalogQuery.data?.ESTADO_GASTO ?? [];
     return new Map(list.map((e) => [Number(e.id), e]));
@@ -458,8 +471,11 @@ export default function Finanzas() {
       };
     }
 
+    // Honorario SIN plan: saldo = bruto actualizado menos lo cobrado directo (montoCobrado).
+    const bruto = isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0;
+    const cobrado = Number(item.montoCobrado ?? 0);
     return {
-      value: isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0,
+      value: Math.max(0, bruto - cobrado),
       currency: computed?.currency ?? "ARS",
     };
   }, [planesByHonorario]);
@@ -471,7 +487,6 @@ export default function Finanzas() {
 
     const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
     const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
-    const catalogPoliticas = catalogQuery.data?.POLITICA_JUS ?? [];
 
     // 1. Agrupar honorarios, gastos e ingresos por clienteId
     const map = new Map();
@@ -514,16 +529,6 @@ export default function Finanzas() {
 
     [...map.values()].forEach((group) => {
       if (group.honorarios.length === 0 && group.gastos.length === 0 && group.ingresos.length === 0) return;
-
-      const cc = simulateCuentaCorriente({
-        honorarios: group.honorarios,
-        gastos: group.gastos,
-        ingresos: group.ingresos,
-        valorJusActual,
-        valorJusHistorial: valorJusHistorialQuery.data ?? [],
-        catalogMonedas,
-        catalogPoliticas,
-      });
 
       const hasUsd = group.honorarios.some((h) => {
         const curr = h.monedaOriginal || getItemCurrencyGeneral(h, catalogMonedas);
@@ -589,7 +594,7 @@ export default function Finanzas() {
       ingresosRecaudados,
       saldoPendienteTotal,
     };
-  }, [processedHonorarios, gastos, ingresos, dateRange, catalogQuery.data, valorJusQuery.data, valorJusHistorialQuery.data, getHonorarioSaldoPendiente, estadosGastoById]);
+  }, [processedHonorarios, gastos, ingresos, dateRange, catalogQuery.data, valorJusQuery.data, getHonorarioSaldoPendiente, estadosGastoById]);
 
   const kpiLoading = honorariosQuery.isLoading || gastosQuery.isLoading || ingresosQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading;
 
@@ -719,6 +724,7 @@ export default function Finanzas() {
 
   const sortedIngresos = useMemo(() => {
     const rows = filterBySearch(ingresos, (item) => [
+      conceptosIngresoById.get(Number(item.tipoId))?.nombre,
       item.descripcion,
       clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
       casoLabel(expedientesById.get(Number(item.casoId))),
@@ -729,8 +735,8 @@ export default function Finanzas() {
       let valB;
       switch (orderBy) {
         case "concepto":
-          valA = a.descripcion;
-          valB = b.descripcion;
+          valA = conceptosIngresoById.get(Number(a.tipoId))?.nombre || a.descripcion;
+          valB = conceptosIngresoById.get(Number(b.tipoId))?.nombre || b.descripcion;
           break;
         case "cliente":
           valA = clienteLabelFromTareas(clientesById.get(Number(a.clienteId)));
@@ -752,68 +758,18 @@ export default function Finanzas() {
       const cmp = compareValues(valA, valB);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [ingresos, debouncedSearch, orderBy, order, clientesById, expedientesById, dateRange]);
+  }, [ingresos, debouncedSearch, orderBy, order, clientesById, expedientesById, conceptosIngresoById, dateRange]);
 
   const cuentasCorrientes = useMemo(() => {
-    const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
-    const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
-    const catalogPoliticas = catalogQuery.data?.POLITICA_JUS ?? [];
-    const map = new Map();
-    const ensure = (clienteId) => {
-      const id = Number(clienteId);
-      if (!id) return null;
-      if (!map.has(id)) {
-        const cliente = clientesById.get(id);
-        map.set(id, {
-          clienteId: id,
-          cliente,
-          clienteNombre: clienteLabelFromTareas(cliente) || `Cliente #${id}`,
-          honorarios: [],
-          gastos: [],
-          ingresos: [],
-        });
-      }
-      return map.get(id);
-    };
-
-    honorarios.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.honorarios.push(item);
-    });
-    gastos.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.gastos.push(item);
-    });
-    ingresos.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.ingresos.push(item);
-    });
-
-    const rows = [...map.values()].map((group) => {
-      const cc = simulateCuentaCorriente({
-        honorarios: group.honorarios,
-        gastos: group.gastos,
-        ingresos: group.ingresos,
-        valorJusActual,
-        valorJusHistorial: valorJusHistorialQuery.data ?? [],
-        catalogMonedas,
-        catalogPoliticas,
-      });
-      const honorariosPendientesPlanAware = group.honorarios.reduce((acc, honorario) => {
-        const computed = computeHonorarioAmounts(honorario, valorJusActual, catalogMonedas, catalogPoliticas);
-        const saldo = getHonorarioSaldoPendiente(honorario, computed);
-        return acc + Number(saldo.value ?? 0);
-      }, 0);
-      const rowsPlanAware = adjustLedgerRowsToSaldo(cc.rows ?? [], honorariosPendientesPlanAware, valorJusActual, cc.pendingHonorariosPesos);
-      const saldoPendientePlanAware = Number(rowsPlanAware[rowsPlanAware.length - 1]?.saldo ?? 0);
-
+    const rows = (ccResumenQuery.data ?? []).map(({ clienteId, totales }) => {
+      const cliente = clientesById.get(Number(clienteId));
       return {
-        clienteId: group.clienteId,
-        cliente: group.cliente,
-        clienteNombre: group.clienteNombre,
-        totalCargos: cc.totalHonorariosPesos + cc.totalGastosPesos,
-        totalCobrado: cc.totalIngresosPesos,
-        saldoPendiente: saldoPendientePlanAware,
+        clienteId: Number(clienteId),
+        cliente,
+        clienteNombre: clienteLabelFromTareas(cliente) || `Cliente #${clienteId}`,
+        totalCargos: Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0),
+        totalCobrado: Number(totales?.ingresosPesos ?? 0),
+        saldoPendiente: Number(totales?.saldoPesos ?? 0),
       };
     });
 
@@ -848,7 +804,7 @@ export default function Finanzas() {
       const cmp = compareValues(valA, valB);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [honorarios, gastos, ingresos, clientesById, debouncedSearch, orderBy, order, catalogQuery.data, valorJusQuery.data, valorJusHistorialQuery.data, getHonorarioSaldoPendiente]);
+  }, [ccResumenQuery.data, clientesById, debouncedSearch, orderBy, order]);
 
   const activeRows = tabKey === "honorarios"
     ? sortedHonorarios
@@ -919,11 +875,6 @@ export default function Finanzas() {
           next.delete("clienteId");
           return next;
         })}
-        valorJusActual={Number(valorJusQuery.data?.valor ?? 0)}
-        valorJusHistorial={valorJusHistorialQuery.data ?? []}
-        catalogMonedas={catalogQuery.data?.MONEDA ?? []}
-        catalogPoliticas={catalogQuery.data?.POLITICA_JUS ?? []}
-        planes={planesQuery.data ?? []}
         theme={theme}
       />
     );
@@ -938,7 +889,7 @@ export default function Finanzas() {
             Vista consolidada de honorarios, gastos e ingresos del estudio.
           </Typography>
         </Box>
-        {tabKey !== "cuentas_corrientes" && (
+        {tabKey !== "cuentas_corrientes" && canCrearActivo && (
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -1217,7 +1168,7 @@ export default function Finanzas() {
                         </TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <Stack direction="row" spacing={0.25}>
-                            {puedeCobrar && (
+                            {puedeCobrar && ingresosPerm.canCrear && (
                               <Tooltip title="Registrar cobro">
                                 <IconButton
                                   size="small"
@@ -1239,22 +1190,26 @@ export default function Finanzas() {
                                 </IconButton>
                               </Tooltip>
                             )}
-                            <Tooltip title="Editar">
-                              <IconButton
-                                size="small"
-                                color="primary"
-                                sx={{ p: { xs: 1.25, md: 0.75 } }}
-                                onClick={() => navigate(finanzasEditarUrl("honorario", item.id), { state: { from: currentPath, item } })}
-                                aria-label={`Editar honorario de ${clienteNombre}`}
-                              >
-                                <Edit fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Eliminar">
-                              <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "honorario", item })} aria-label={`Eliminar honorario de ${clienteNombre}`}>
-                                <Delete fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                            {honorariosPerm.canEditar && (
+                              <Tooltip title="Editar">
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                  onClick={() => navigate(finanzasEditarUrl("honorario", item.id), { state: { from: currentPath, item } })}
+                                  aria-label={`Editar honorario de ${clienteNombre}`}
+                                >
+                                  <Edit fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            {honorariosPerm.canEliminar && (
+                              <Tooltip title="Eliminar">
+                                <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "honorario", item })} aria-label={`Eliminar honorario de ${clienteNombre}`}>
+                                  <Delete fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1325,7 +1280,7 @@ export default function Finanzas() {
                           <Typography variant="caption" color="text.secondary">{formatDateShort(item.fechaRegulacion)}</Typography>
                           <Chip size="small" label={chip.label} color={chip.color} variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }} role="status" aria-label={`Estado: ${chip.label}`} />
                           <Box sx={{ ml: "auto", display: "flex", gap: 0.5 }}>
-                            {puedeCobrar && (
+                            {puedeCobrar && ingresosPerm.canCrear && (
                               <IconButton size="small" color="success" aria-label="Cobrar honorario"
                                 sx={{ p: { xs: 1.25, md: 0.75 } }}
                                 onClick={() => navigate(finanzasNuevoUrl({ tipo: "ingreso", clienteId: item.clienteId, casoId: item.casoId, honorarioId: item.id, monto: saldoPendiente.value }), { state: { from: currentPath } })}
@@ -1333,18 +1288,22 @@ export default function Finanzas() {
                                 <AccountBalanceWallet fontSize="small" />
                               </IconButton>
                             )}
-                            <IconButton size="small" color="primary" aria-label={`Editar honorario de ${clienteLabel(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => navigate(finanzasEditarUrl("honorario", item.id), { state: { from: currentPath, item } })}
-                            >
-                              <Edit fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="error" aria-label={`Eliminar honorario de ${clienteLabel(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => finanzasModals.openDelete({ type: "honorario", item })}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
+                            {honorariosPerm.canEditar && (
+                              <IconButton size="small" color="primary" aria-label={`Editar honorario de ${clienteLabel(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => navigate(finanzasEditarUrl("honorario", item.id), { state: { from: currentPath, item } })}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            )}
+                            {honorariosPerm.canEliminar && (
+                              <IconButton size="small" color="error" aria-label={`Eliminar honorario de ${clienteLabel(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => finanzasModals.openDelete({ type: "honorario", item })}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            )}
                           </Box>
                         </Box>
                       </Paper>
@@ -1422,6 +1381,7 @@ export default function Finanzas() {
                         </TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={0.25}>
+                            {ingresosPerm.canCrear && (
                             <Tooltip title="Reintegrar">
                               <span>
                                 <IconButton
@@ -1445,8 +1405,9 @@ export default function Finanzas() {
                                 </IconButton>
                               </span>
                             </Tooltip>
-                            <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(finanzasEditarUrl("gasto", item.id), { state: { from: currentPath, item } })} aria-label={`Editar gasto de ${clienteNombre}`}><Edit fontSize="small" /></IconButton>
-                            <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "gasto", item })} aria-label={`Eliminar gasto de ${clienteNombre}`}><Delete fontSize="small" /></IconButton>
+                            )}
+                            {gastosPerm.canEditar && <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(finanzasEditarUrl("gasto", item.id), { state: { from: currentPath, item } })} aria-label={`Editar gasto de ${clienteNombre}`}><Edit fontSize="small" /></IconButton>}
+                            {gastosPerm.canEliminar && <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "gasto", item })} aria-label={`Eliminar gasto de ${clienteNombre}`}><Delete fontSize="small" /></IconButton>}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1503,25 +1464,31 @@ export default function Finanzas() {
                           <Typography variant="caption" color="text.secondary">{formatDateShort(item.fechaGasto)}</Typography>
                           <Chip size="small" label={estadoGasto?.nombre || "Pendiente"} color={chipColor} variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }} role="status" aria-label={`Estado: ${estadoGasto?.nombre || "Pendiente"}`} />
                           <Box sx={{ ml: "auto", display: "flex", gap: 0.5 }}>
-                            <IconButton size="small" color="success" aria-label="Reintegrar gasto"
-                              disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => navigate(finanzasNuevoUrl({ tipo: "ingreso", gastoId: item.id, clienteId: item.clienteId, casoId: item.casoId || "", monto: item.monto }), { state: { from: currentPath } })}
-                            >
-                              <ReceiptLong fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="primary" aria-label={`Editar gasto de ${clienteLabelFromTareas(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => navigate(finanzasEditarUrl("gasto", item.id), { state: { from: currentPath, item } })}
-                            >
-                              <Edit fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="error" aria-label={`Eliminar gasto de ${clienteLabelFromTareas(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => finanzasModals.openDelete({ type: "gasto", item })}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
+                            {ingresosPerm.canCrear && (
+                              <IconButton size="small" color="success" aria-label="Reintegrar gasto"
+                                disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => navigate(finanzasNuevoUrl({ tipo: "ingreso", gastoId: item.id, clienteId: item.clienteId, casoId: item.casoId || "", monto: item.monto }), { state: { from: currentPath } })}
+                              >
+                                <ReceiptLong fontSize="small" />
+                              </IconButton>
+                            )}
+                            {gastosPerm.canEditar && (
+                              <IconButton size="small" color="primary" aria-label={`Editar gasto de ${clienteLabelFromTareas(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => navigate(finanzasEditarUrl("gasto", item.id), { state: { from: currentPath, item } })}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            )}
+                            {gastosPerm.canEliminar && (
+                              <IconButton size="small" color="error" aria-label={`Eliminar gasto de ${clienteLabelFromTareas(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => finanzasModals.openDelete({ type: "gasto", item })}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            )}
                           </Box>
                         </Box>
                       </Paper>
@@ -1559,11 +1526,12 @@ export default function Finanzas() {
                     const cliente = clientesById.get(Number(item.clienteId));
                     const clienteNombre = clienteLabelFromTareas(cliente) || "Cliente";
                     const caso = expedientesById.get(Number(item.casoId));
-                    const label = item.descripcion || `Ingreso #${item.id}`;
+                    const conceptoIngreso = conceptosIngresoById.get(Number(item.tipoId));
+                    const label = conceptoIngreso?.nombre || item.descripcion || `Ingreso #${item.id}`;
                     return (
                       <TableRow key={item.id} hover>
                         <TableCell>
-                          <Tooltip title={label}>
+                          <Tooltip title={item.descripcion || label}>
                             <Typography variant="body2" sx={{ fontWeight: 700, ...ellipsisSx, maxWidth: 260 }}>{label}</Typography>
                           </Tooltip>
                         </TableCell>
@@ -1608,8 +1576,8 @@ export default function Finanzas() {
                         </TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={0.25}>
-                            <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(finanzasEditarUrl("ingreso", item.id), { state: { from: currentPath, item } })} aria-label={`Editar ingreso de ${clienteNombre}`}><Edit fontSize="small" /></IconButton>
-                            <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "ingreso", item })} aria-label={`Eliminar ingreso de ${clienteNombre}`}><Delete fontSize="small" /></IconButton>
+                            {ingresosPerm.canEditar && <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(finanzasEditarUrl("ingreso", item.id), { state: { from: currentPath, item } })} aria-label={`Editar ingreso de ${clienteNombre}`}><Edit fontSize="small" /></IconButton>}
+                            {ingresosPerm.canEliminar && <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "ingreso", item })} aria-label={`Eliminar ingreso de ${clienteNombre}`}><Delete fontSize="small" /></IconButton>}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1624,7 +1592,8 @@ export default function Finanzas() {
                   {paginatedRows.map((item) => {
                     const cliente = clientesById.get(Number(item.clienteId));
                     const caso = expedientesById.get(Number(item.casoId));
-                    const label = item.descripcion || `Ingreso #${item.id}`;
+                    const conceptoIngreso = conceptosIngresoById.get(Number(item.tipoId));
+                    const label = conceptoIngreso?.nombre || item.descripcion || `Ingreso #${item.id}`;
                     const currency = getItemCurrencyGeneral(item, catalogQuery.data?.MONEDA ?? []);
                     const amount = Number(item.monto ?? 0);
                     const cotizacion = Number(item.cotizacionArs ?? 0);
@@ -1674,18 +1643,22 @@ export default function Finanzas() {
                         <Box sx={{ px: 2, pb: 1.5, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                           <Typography variant="caption" color="text.secondary">{formatDateShort(item.fechaIngreso)}</Typography>
                           <Box sx={{ ml: "auto", display: "flex", gap: 0.5 }}>
-                            <IconButton size="small" color="primary" aria-label={`Editar ingreso de ${clienteLabelFromTareas(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => navigate(finanzasEditarUrl("ingreso", item.id), { state: { from: currentPath, item } })}
-                            >
-                              <Edit fontSize="small" />
-                            </IconButton>
-                            <IconButton size="small" color="error" aria-label={`Eliminar ingreso de ${clienteLabelFromTareas(cliente) || ""}`}
-                              sx={{ p: { xs: 1.25, md: 0.75 } }}
-                              onClick={() => finanzasModals.openDelete({ type: "ingreso", item })}
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
+                            {ingresosPerm.canEditar && (
+                              <IconButton size="small" color="primary" aria-label={`Editar ingreso de ${clienteLabelFromTareas(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => navigate(finanzasEditarUrl("ingreso", item.id), { state: { from: currentPath, item } })}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            )}
+                            {ingresosPerm.canEliminar && (
+                              <IconButton size="small" color="error" aria-label={`Eliminar ingreso de ${clienteLabelFromTareas(cliente) || ""}`}
+                                sx={{ p: { xs: 1.25, md: 0.75 } }}
+                                onClick={() => finanzasModals.openDelete({ type: "ingreso", item })}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            )}
                           </Box>
                         </Box>
                       </Paper>
@@ -1840,39 +1813,6 @@ function MoneyWithNote({ value, note, formatMoney }) {
       {note && <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>{note}</Typography>}
     </Box>
   );
-}
-
-function recalculateLedgerSaldo(rows) {
-  let runningSaldo = 0;
-  return rows.map((row) => {
-    runningSaldo += Number(row.debe ?? 0) - Number(row.haber ?? 0);
-    return { ...row, saldo: runningSaldo };
-  });
-}
-
-function adjustLedgerRowsToSaldo(rows, honorariosPendientesPesos, valorJusActual, totalHonorariosSimulado) {
-  if (!rows.length) return rows;
-  const ajuste = Number(honorariosPendientesPesos ?? 0) - Number(totalHonorariosSimulado ?? 0);
-  if (Math.abs(ajuste) <= 0.01) return rows;
-
-  const absoluteAjuste = Math.abs(ajuste);
-  const jusAdeudados = valorJusActual > 0 ? absoluteAjuste / valorJusActual : 0;
-  const isPositive = ajuste > 0;
-
-  return recalculateLedgerSaldo([
-    ...rows,
-    {
-      id: "ajuste-jus-plan-aware",
-      tipo: "Ajuste",
-      fecha: new Date(),
-      descripcion: `Ajuste por Actualizacion JUS (${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(jusAdeudados)} JUS ${isPositive ? "adeudados" : "excedentes"})`,
-      debe: isPositive ? absoluteAjuste : 0,
-      haber: isPositive ? 0 : absoluteAjuste,
-      currency: "ARS",
-      note: "",
-      saldo: 0,
-    },
-  ]);
 }
 
 function CuentaCorrienteLedger({ title, subtitle, rows, formatDate, formatMoney, onPrint }) {
@@ -2043,63 +1983,33 @@ function CuentaCorrienteLedger({ title, subtitle, rows, formatDate, formatMoney,
   );
 }
 
-function ClienteCuentaCorrienteDetail({ clienteId, onBack, valorJusActual, valorJusHistorial = [], catalogMonedas, catalogPoliticas, planes = [], theme }) {
-  const detailQuery = useQuery({
-    queryKey: ["clientes", clienteId, "detalle"],
+function ClienteCuentaCorrienteDetail({ clienteId, onBack, theme }) {
+  // El libro mayor se calcula en el backend (motor Decimal); acá solo se renderiza.
+  const ccQuery = useQuery({
+    queryKey: ["clientes", clienteId, "cuenta-corriente"],
     queryFn: async () => {
-      const { data } = await api.get(`/clientes/${clienteId}/detalle`);
+      const { data } = await api.get(`/clientes/${clienteId}/cuenta-corriente`);
+      return data?.data ?? data;
+    },
+    enabled: Boolean(clienteId),
+  });
+  const clienteQuery = useQuery({
+    queryKey: ["clientes", clienteId],
+    queryFn: async () => {
+      const { data } = await api.get(`/clientes/${clienteId}`);
       return data?.data ?? data;
     },
     enabled: Boolean(clienteId),
   });
 
-  const loading = detailQuery.isLoading;
-  const error = detailQuery.error?.response?.data?.error?.message
-    || detailQuery.error?.message
-    || (detailQuery.isError ? "Error de conexion" : null);
+  const loading = ccQuery.isLoading;
+  const error = ccQuery.error?.response?.data?.error?.message
+    || ccQuery.error?.message
+    || (ccQuery.isError ? "Error de conexion" : null);
 
-  const cc = useMemo(() => {
-    if (!detailQuery.data) return null;
-    const { honorarios = [], gastos = [], ingresos = [] } = detailQuery.data;
-    return simulateCuentaCorriente({
-      honorarios,
-      gastos,
-      ingresos,
-      valorJusActual,
-      valorJusHistorial,
-      catalogMonedas,
-      catalogPoliticas,
-    });
-  }, [detailQuery.data, valorJusActual, valorJusHistorial, catalogMonedas, catalogPoliticas]);
-
-  const planAware = useMemo(() => {
-    if (!detailQuery.data || !cc) return { saldo: 0, honorariosPendientes: 0, rows: [] };
-    const { honorarios = [] } = detailQuery.data;
-    const planesByHonorarioDetalle = new Map();
-    planes
-      .filter((plan) => Number(plan.clienteId) === Number(clienteId))
-      .forEach((plan) => {
-        const honorarioId = Number(plan.honorarioId);
-        if (!honorarioId) return;
-        const current = planesByHonorarioDetalle.get(honorarioId) ?? { saldo: 0 };
-        current.saldo += Number(plan.totalSaldoArs ?? 0);
-        planesByHonorarioDetalle.set(honorarioId, current);
-      });
-
-    const honorariosPendientes = honorarios.reduce((acc, honorario) => {
-      const planSaldo = planesByHonorarioDetalle.get(Number(honorario.id));
-      if (planSaldo) return acc + Math.max(0, Number(planSaldo.saldo ?? 0));
-      const computed = computeHonorarioAmounts(honorario, valorJusActual, catalogMonedas, catalogPoliticas);
-      return acc + (isHonorarioPendiente(honorario) ? Math.max(0, Number(computed.updatedVal ?? 0)) : 0);
-    }, 0);
-    const rows = adjustLedgerRowsToSaldo(cc.rows ?? [], honorariosPendientes, valorJusActual, cc.pendingHonorariosPesos);
-    const saldo = Number(rows[rows.length - 1]?.saldo ?? 0);
-    return {
-      saldo,
-      honorariosPendientes,
-      rows,
-    };
-  }, [cc, clienteId, detailQuery.data, planes, valorJusActual, catalogMonedas, catalogPoliticas]);
+  const totales = ccQuery.data?.totales ?? null;
+  const rows = useMemo(() => mapCuentaCorrienteApiRows(ccQuery.data?.rows ?? []), [ccQuery.data?.rows]);
+  const saldo = Number(totales?.saldoPesos ?? 0);
 
   if (loading) {
     return (
@@ -2122,14 +2032,12 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack, valorJusActual, valor
     );
   }
 
-  const cliente = detailQuery.data?.cliente ?? null;
+  const cliente = clienteQuery.data ?? null;
   const nombre = clienteLabel(cliente) || (cliente ? [cliente.apellido, cliente.nombre].filter(Boolean).join(", ") : "") || `Cliente #${clienteId}`;
-  
-  const totalHonorarios = cc?.totalHonorariosPesos ?? 0;
-  const totalGastos = cc?.totalGastosPesos ?? 0;
-  const totalIngresos = cc?.totalIngresosPesos ?? 0;
-  const saldo = planAware.saldo;
-  const rows = planAware.rows;
+
+  const totalHonorarios = Number(totales?.honorariosPesos ?? 0);
+  const totalGastos = Number(totales?.gastosPesos ?? 0);
+  const totalIngresos = Number(totales?.ingresosPesos ?? 0);
 
   return (
     <Stack spacing={3}>

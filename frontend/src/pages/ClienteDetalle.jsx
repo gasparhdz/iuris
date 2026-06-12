@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
-import { buildCuentaCorrienteRows, finanzasNuevoUrl, formatMoneyAr, honorarioMontoBase, isHonorarioPendiente, invalidateFinanzasQueries, computeHonorarioAmounts, computeGastoAmounts, simulateCuentaCorriente } from "./finanzasUtils";
+import { usePermisos } from "../auth/usePermissions";
+import { finanzasNuevoUrl, formatMoneyAr, honorarioMontoBase, isHonorarioPendiente, invalidateFinanzasQueries, computeHonorarioAmounts, computeGastoAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import {
   Avatar,
@@ -132,6 +133,13 @@ export default function ClienteDetalle() {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
+  const tareasPerm = usePermisos("TAREAS");
+  const eventosPerm = usePermisos("EVENTOS");
+  const notasPerm = usePermisos("NOTAS");
+  const honorariosPerm = usePermisos("HONORARIOS");
+  const gastosPerm = usePermisos("GASTOS");
+  const ingresosPerm = usePermisos("INGRESOS");
+  const canCrearFinanzas = honorariosPerm.canCrear || gastosPerm.canCrear || ingresosPerm.canCrear;
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab = tabParam && TAB_ITEMS.some((t) => t.value === tabParam) ? tabParam : "expedientes";
@@ -166,15 +174,6 @@ export default function ClienteDetalle() {
     queryFn: async () => {
       const { data } = await api.get("/valorjus/actual");
       return data?.data ?? data;
-    },
-    staleTime: 60_000,
-  });
-
-  const valorJusHistorialQuery = useQuery({
-    queryKey: ["valorjus", "historial-ledger"],
-    queryFn: async () => {
-      const { data } = await api.get("/valorjus", { params: { page: 1, limit: 200 } });
-      return data?.data?.items ?? data?.items ?? [];
     },
     staleTime: 60_000,
   });
@@ -215,7 +214,6 @@ export default function ClienteDetalle() {
   const nombre = nombreCliente(cliente);
 
   const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
-  const valorJusHistorial = valorJusHistorialQuery.data ?? [];
   const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
   const catalogPoliticas = catalogQuery.data?.POLITICA_JUS ?? [];
   const conceptosGastoById = useMemo(
@@ -227,23 +225,20 @@ export default function ClienteDetalle() {
     [catalogQuery.data?.ESTADO_GASTO],
   );
 
-  const ccSimulation = useMemo(() => {
-    return simulateCuentaCorriente({
-      honorarios,
-      gastos,
-      ingresos,
-      valorJusActual,
-      valorJusHistorial,
-      catalogMonedas,
-      catalogPoliticas,
-    });
-  }, [honorarios, gastos, ingresos, valorJusActual, valorJusHistorial, catalogMonedas, catalogPoliticas]);
+  // La cuenta corriente se calcula en el backend (motor Decimal); acá solo se renderiza.
+  const cuentaCorrienteQuery = useQuery({
+    queryKey: ["clientes", id, "cuenta-corriente"],
+    queryFn: async () => {
+      const { data } = await api.get(`/clientes/${id}/cuenta-corriente`);
+      return data?.data ?? data;
+    },
+    enabled: Boolean(id),
+  });
+  const ccTotales = cuentaCorrienteQuery.data?.totales ?? null;
 
-  const totalHonorarios = ccSimulation.totalHonorariosPesos;
-  const totalGastos = ccSimulation.totalGastosPesos;
-  const totalIngresos = ccSimulation.totalIngresosPesos;
-  const saldo = ccSimulation.saldoPendientePesos;
-  const cuentaCorrienteRows = ccSimulation.rows;
+  const totalHonorarios = Number(ccTotales?.honorariosPesos ?? 0);
+  const totalGastos = Number(ccTotales?.gastosPesos ?? 0);
+  const totalIngresos = Number(ccTotales?.ingresosPesos ?? 0);
 
   const planesByHonorario = useMemo(() => {
     const map = new Map();
@@ -266,11 +261,22 @@ export default function ClienteDetalle() {
         currency: "ARS",
       };
     }
+    // Honorario SIN plan: saldo = bruto actualizado menos lo ya cobrado directo (montoCobrado).
+    // Antes devolvia el bruto entero y el override forzaba el saldo final ignorando los cobros.
+    const bruto = isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0;
+    const cobrado = Number(item.montoCobrado ?? 0);
     return {
-      value: isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0,
+      value: Math.max(0, bruto - cobrado),
       currency: computed?.currency ?? "ARS",
     };
   }, [planesByHonorario]);
+
+  const cuentaCorrienteRows = useMemo(
+    () => mapCuentaCorrienteApiRows(cuentaCorrienteQuery.data?.rows ?? []),
+    [cuentaCorrienteQuery.data?.rows],
+  );
+
+  const saldo = Number(ccTotales?.saldoPesos ?? 0);
 
   const timeline = useMemo(() => {
     const items = [
@@ -471,14 +477,16 @@ export default function ClienteDetalle() {
 
       {tab === "tareas" && (
         <Stack spacing={2}>
-          <Button
-            startIcon={<Add />}
-            variant="contained"
-            onClick={() => navigate(`/tareas/nuevo?clienteId=${id}`, { state: { from: location.pathname + location.search } })}
-            sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
-          >
-            Nueva Tarea
-          </Button>
+          {tareasPerm.canCrear && (
+            <Button
+              startIcon={<Add />}
+              variant="contained"
+              onClick={() => navigate(`/tareas/nuevo?clienteId=${id}`, { state: { from: location.pathname + location.search } })}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
+            >
+              Nueva Tarea
+            </Button>
+          )}
           <DataTable
             title="Tareas asociadas"
             empty="No hay tareas para este cliente."
@@ -494,14 +502,16 @@ export default function ClienteDetalle() {
 
       {tab === "eventos" && (
         <Stack spacing={2}>
-          <Button
-            startIcon={<Add />}
-            variant="contained"
-            onClick={() => navigate(`/eventos/nuevo?clienteId=${id}`, { state: { from: location.pathname + location.search } })}
-            sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
-          >
-            Nuevo Evento
-          </Button>
+          {eventosPerm.canCrear && (
+            <Button
+              startIcon={<Add />}
+              variant="contained"
+              onClick={() => navigate(`/eventos/nuevo?clienteId=${id}`, { state: { from: location.pathname + location.search } })}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" } }}
+            >
+              Nuevo Evento
+            </Button>
+          )}
         <DataTable
           title="Eventos"
           empty="No hay eventos asociados a este cliente."
@@ -511,12 +521,16 @@ export default function ClienteDetalle() {
             formatDate(evento.fechaInicio),
             evento.ubicacion || "Sin ubicación",
             <Stack key="acciones" direction="row" spacing={0.5}>
-              <IconButton size="small" color="primary" onClick={() => navigate(`/eventos/editar/${evento.id}`, { state: { from: location.pathname + location.search } })}>
-                <Edit fontSize="small" />
-              </IconButton>
-              <IconButton size="small" color="error" onClick={() => setDeleteEventoTarget(evento)}>
-                <Delete fontSize="small" />
-              </IconButton>
+              {eventosPerm.canEditar && (
+                <IconButton size="small" color="primary" onClick={() => navigate(`/eventos/editar/${evento.id}`, { state: { from: location.pathname + location.search } })}>
+                  <Edit fontSize="small" />
+                </IconButton>
+              )}
+              {eventosPerm.canEliminar && (
+                <IconButton size="small" color="error" onClick={() => setDeleteEventoTarget(evento)}>
+                  <Delete fontSize="small" />
+                </IconButton>
+              )}
             </Stack>,
           ])}
         />
@@ -557,14 +571,16 @@ export default function ClienteDetalle() {
 
       {tab === "finanzas" && (
         <Stack spacing={3}>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => navigate(finanzasNuevoUrl({ clienteId: id }), { state: { from: `/clientes/${id}?tab=finanzas` } })}
-            sx={{ fontWeight: 900, borderRadius: "10px", alignSelf: { xs: "stretch", sm: "flex-start" }, width: { xs: "100%", sm: "auto" } }}
-          >
-            Registrar movimiento
-          </Button>
+          {canCrearFinanzas && (
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => navigate(finanzasNuevoUrl({ clienteId: id }), { state: { from: `/clientes/${id}?tab=finanzas` } })}
+              sx={{ fontWeight: 900, borderRadius: "10px", alignSelf: { xs: "stretch", sm: "flex-start" }, width: { xs: "100%", sm: "auto" } }}
+            >
+              Registrar movimiento
+            </Button>
+          )}
           <Box>
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -665,7 +681,7 @@ export default function ClienteDetalle() {
                       formatMoney(saldoPendiente.value),
                       <Chip key="estado" size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 800 }} />,
                       <Stack key="acciones" direction="row" spacing={0.5}>
-                        {puedeCobrar && (
+                        {puedeCobrar && ingresosPerm.canCrear && (
                           <Button
                             size="small"
                             variant="outlined"
@@ -705,27 +721,29 @@ export default function ClienteDetalle() {
                       formatDate(gasto.fechaGasto),
                       formatMoney(gasto.monto),
                       <Chip key="estado" size="small" label={estado?.nombre || "Pendiente"} color={estadoCodigo === "PAGADO" ? "success" : estadoCodigo === "PENDIENTE" ? "warning" : "default"} sx={{ fontWeight: 800 }} />,
-                      <Button
-                        key="reintegrar"
-                        size="small"
-                        color="success"
-                        variant="outlined"
-                        startIcon={<ReceiptLong fontSize="small" />}
-                        disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
-                        onClick={() => navigate(
-                          finanzasNuevoUrl({
-                            tipo: "ingreso",
-                            gastoId: gasto.id,
-                            clienteId: gasto.clienteId,
-                            casoId: gasto.casoId || "",
-                            monto: gasto.monto,
-                          }),
-                          { state: { from: `/clientes/${id}?tab=finanzas` } },
-                        )}
-                        sx={{ borderRadius: "8px", fontWeight: 900 }}
-                      >
-                        Reintegrar
-                      </Button>
+                      ingresosPerm.canCrear ? (
+                        <Button
+                          key="reintegrar"
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          startIcon={<ReceiptLong fontSize="small" />}
+                          disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
+                          onClick={() => navigate(
+                            finanzasNuevoUrl({
+                              tipo: "ingreso",
+                              gastoId: gasto.id,
+                              clienteId: gasto.clienteId,
+                              casoId: gasto.casoId || "",
+                              monto: gasto.monto,
+                            }),
+                            { state: { from: `/clientes/${id}?tab=finanzas` } },
+                          )}
+                          sx={{ borderRadius: "8px", fontWeight: 900 }}
+                        >
+                          Reintegrar
+                        </Button>
+                      ) : null,
                     ];
                   })}
                 />
@@ -771,14 +789,16 @@ export default function ClienteDetalle() {
               value={nota}
               onChange={(event) => setNota(event.target.value)}
             />
-            <Button
-              variant="contained"
-              disabled={!nota.trim() || createNotaMutation.isPending}
-              onClick={() => createNotaMutation.mutate()}
-              sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}
-            >
-              Agregar Nota
-            </Button>
+            {notasPerm.canCrear && (
+              <Button
+                variant="contained"
+                disabled={!nota.trim() || createNotaMutation.isPending}
+                onClick={() => createNotaMutation.mutate()}
+                sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}
+              >
+                Agregar Nota
+              </Button>
+            )}
             {notas.map((item) => (
               <Paper key={item.id} elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: "12px" }}>
                 <Typography variant="caption" color="text.secondary">{formatDate(item.createdAt)}</Typography>
