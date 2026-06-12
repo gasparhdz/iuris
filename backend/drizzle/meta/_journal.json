@@ -288,6 +288,13 @@
       "when": 1780589800000,
       "tag": "0040_estado_honorario_cobro",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1780589900000,
+      "tag": "0041_tarea_movimiento_plazo",
+      "breakpoints": true
     }
   ]
 }

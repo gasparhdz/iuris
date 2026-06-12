@@ -158,6 +158,9 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
         fechaLimite: fechaIso,
         recordatorio: recordatorioIso,
         casoId: novedad?.casoId ?? null,
+        // La novedad ES un movimiento judicial: vinculamos la tarea como su plazo, así
+        // el vencimiento se ve en el expediente sin cargarlo dos veces.
+        movimientoId: novedad?.id ?? null,
       });
     }
   };

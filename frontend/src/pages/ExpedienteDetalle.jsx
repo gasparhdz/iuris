@@ -108,29 +108,30 @@ function formatDateTime(value) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-/*
+// Chip de plazo de un movimiento. La fecha sale de la tarea-plazo vinculada (la tarea ES el
+// plazo) o, en su defecto, del vencimiento cargado manualmente en el movimiento.
 function getVencimientoChip(vencimientoStr) {
   if (!vencimientoStr) return null;
   const now = new Date();
-  // set time to midnight to compare days accurately
   now.setHours(0, 0, 0, 0);
-  const vDate = new Date(vencimientoStr);
   const vDateMidnight = new Date(vencimientoStr);
   vDateMidnight.setHours(0, 0, 0, 0);
-  
-  const diffTime = vDateMidnight.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  const diffDays = Math.ceil((vDateMidnight.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
     return <Chip size="small" color="error" label={`Vencido el ${formatDate(vencimientoStr)}`} sx={{ fontWeight: 800 }} />;
   } else if (diffDays <= 3) {
     const daysText = diffDays === 0 ? "hoy" : diffDays === 1 ? "mañana" : `en ${diffDays} días`;
     return <Chip size="small" color="warning" label={`Vence ${daysText}`} sx={{ fontWeight: 800 }} />;
-  } else {
-    return <Chip size="small" color="info" label={`Vence el ${formatDate(vencimientoStr)}`} sx={{ fontWeight: 800 }} />;
   }
+  return <Chip size="small" color="info" label={`Vence el ${formatDate(vencimientoStr)}`} sx={{ fontWeight: 800 }} />;
 }
-*/
+
+// Fecha de plazo efectiva de un movimiento: prioriza la tarea-plazo vinculada.
+function plazoDe(mov) {
+  return mov.tareaVencimiento ?? mov.vencimiento ?? null;
+}
 
 function getTipoMovimientoColor(tipo) {
   const t = String(tipo ?? "").toLowerCase();
@@ -414,8 +415,9 @@ export default function ExpedienteDetalle() {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     return movimientos.some((mov) => {
-      if (!mov.vencimiento) return false;
-      const vDate = new Date(mov.vencimiento);
+      const venc = plazoDe(mov);
+      if (!venc) return false;
+      const vDate = new Date(venc);
       vDate.setHours(0, 0, 0, 0);
       const diffTime = vDate.getTime() - now.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -900,7 +902,12 @@ export default function ExpedienteDetalle() {
                               <Chip size="small" color={getTipoMovimientoColor(mov.tipo)} label={mov.tipo || "Trámite"} sx={{ fontWeight: 900 }} />
                             </TableCell>
                             <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDate(mov.fecha)}</TableCell>
-                            <TableCell sx={{ fontWeight: 900 }}>{mov.novedad || mov.tipo}</TableCell>
+                            <TableCell sx={{ fontWeight: 900 }}>
+                              <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+                                <span>{mov.novedad || mov.tipo}</span>
+                                {getVencimientoChip(plazoDe(mov))}
+                              </Stack>
+                            </TableCell>
                             <TableCell sx={{ color: "text.secondary", minWidth: 260 }}>{mov.descripcion || "—"}</TableCell>
                           </TableRow>
                         ))
@@ -925,6 +932,7 @@ export default function ExpedienteDetalle() {
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
                           <Chip size="small" color={getTipoMovimientoColor(mov.tipo)} label={mov.tipo || "Trámite"} sx={{ fontWeight: 900 }} />
                           <Chip size="small" label={formatDate(mov.fecha)} />
+                          {getVencimientoChip(plazoDe(mov))}
                         </Stack>
                         <Typography sx={{ mt: 1, fontWeight: 900 }}>{mov.novedad || mov.tipo}</Typography>
                         {mov.descripcion && (

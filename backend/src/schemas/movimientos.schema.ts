@@ -33,6 +33,9 @@ export const movimientoItemSchema = z.object({
   createdAt: z.string(),
   createdBy: z.number().nullable(),
   novedad: z.string().nullable().optional(),
+  // Tarea-plazo vinculada (la tarea ES el plazo del movimiento), si existe.
+  tareaId: z.number().nullable().optional(),
+  tareaVencimiento: z.string().nullable().optional(),
 });
 
 export const movimientoResponseSchema = z.object({

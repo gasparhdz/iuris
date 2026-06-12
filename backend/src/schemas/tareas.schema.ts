@@ -25,6 +25,8 @@ export const tareaBaseSchema = z.object({
   asignadoA: positiveIntSchema.max(999999).optional().nullable(),
   clienteId: positiveIntSchema.max(999999).optional().nullable(),
   casoId: positiveIntSchema.max(999999).optional().nullable(),
+  // Movimiento judicial al que esta tarea representa el plazo (opcional).
+  movimientoId: positiveIntSchema.max(999999).optional().nullable(),
   recordatorio: z.string().datetime().optional().nullable(),
   items: z.array(subtareaInputSchema).optional(),
 }).strict();
@@ -100,6 +102,7 @@ export const tareaItemSchema = z.object({
   asignadoA: z.number().nullable(),
   clienteId: z.number().nullable(),
   casoId: z.number().nullable(),
+  movimientoId: z.number().nullable(),
   recordatorioEnviado: z.boolean(),
   activo: z.boolean(),
   createdBy: z.number().nullable(),

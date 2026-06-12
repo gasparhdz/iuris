@@ -524,6 +524,9 @@ export const tareas = pgTable("tareas", {
   asignadoA: integer("asignado_a").references(() => usuarios.id),
   clienteId: integer("cliente_id"),
   casoId: integer("caso_id"),
+  // Plazo de un movimiento judicial: la tarea ES el plazo (con su fechaLimite + recordatorio),
+  // vinculada al movimiento puntual. set null si se borra el movimiento (la tarea sobrevive).
+  movimientoId: integer("movimiento_id").references(() => movimientosJudiciales.id, { onDelete: "set null" }),
   recordatorioEnviado: boolean("recordatorio_enviado").default(false).notNull(),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
@@ -551,6 +554,9 @@ export const tareas = pgTable("tareas", {
     .where(sql`${table.deletedAt} IS NULL`),
   index("tareas_estudio_cliente_idx")
     .on(table.estudioId, table.clienteId)
+    .where(sql`${table.deletedAt} IS NULL`),
+  index("tareas_movimiento_idx")
+    .on(table.movimientoId)
     .where(sql`${table.deletedAt} IS NULL`),
 ]);
 

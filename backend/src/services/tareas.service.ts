@@ -2,7 +2,7 @@ import { db } from "../db/index.js";
 import { CasosQueries } from "../db/queries/casos.queries.js";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { TareasQueries } from "../db/queries/tareas.queries.js";
-import { subTareas, tareas } from "../db/schema.js";
+import { movimientosJudiciales, subTareas, tareas } from "../db/schema.js";
 import { serializeDates } from "../utils/serialize.js";
 import { and, eq, isNull } from "drizzle-orm";
 import type { CreateTareaInput, UpdateTareaInput } from "../schemas/tareas.schema.js";
@@ -34,7 +34,7 @@ export class TareasService {
 
   static async create(estudioId: number, userId: number, data: CreateTareaInput) {
     const { items, ...tareaData } = data;
-    await validateTenantReferences(estudioId, tareaData.clienteId, tareaData.casoId);
+    await validateTenantReferences(estudioId, tareaData.clienteId, tareaData.casoId, tareaData.movimientoId);
 
     const nuevaTarea = await db.transaction(async (tx) => {
       const nuevaTarea = await TareasQueries.insert(tx, {
@@ -72,7 +72,7 @@ export class TareasService {
   static async update(id: number, estudioId: number, userId: number, data: UpdateTareaInput) {
     const { items, fechaLimite, recordatorio, completarSubtareas, ...tareaData } = data;
     const before = await this.findById(id, estudioId);
-    await validateTenantReferences(estudioId, tareaData.clienteId, tareaData.casoId);
+    await validateTenantReferences(estudioId, tareaData.clienteId, tareaData.casoId, tareaData.movimientoId);
 
     const updateValues: Parameters<typeof TareasQueries.update>[2] = { ...tareaData, updatedAt: new Date(), updatedBy: userId };
     if (fechaLimite !== undefined) updateValues.fechaLimite = fechaLimite ? new Date(fechaLimite) : null;
@@ -191,7 +191,7 @@ export class TareasService {
   }
 }
 
-async function validateTenantReferences(estudioId: number, clienteId?: number | null, casoId?: number | null) {
+async function validateTenantReferences(estudioId: number, clienteId?: number | null, casoId?: number | null, movimientoId?: number | null) {
   if (clienteId !== undefined && clienteId !== null) {
     const cliente = await ClientesQueries.findById(clienteId, estudioId);
     if (!cliente) throw new Error("UNAUTHORIZED_TENANT_REFERENCE");
@@ -200,5 +200,14 @@ async function validateTenantReferences(estudioId: number, clienteId?: number | 
   if (casoId !== undefined && casoId !== null) {
     const caso = await CasosQueries.findById(casoId, estudioId);
     if (!caso) throw new Error("UNAUTHORIZED_TENANT_REFERENCE");
+  }
+
+  if (movimientoId !== undefined && movimientoId !== null) {
+    const [mov] = await db
+      .select({ id: movimientosJudiciales.id })
+      .from(movimientosJudiciales)
+      .where(and(eq(movimientosJudiciales.id, movimientoId), eq(movimientosJudiciales.estudioId, estudioId)))
+      .limit(1);
+    if (!mov) throw new Error("UNAUTHORIZED_TENANT_REFERENCE");
   }
 }
