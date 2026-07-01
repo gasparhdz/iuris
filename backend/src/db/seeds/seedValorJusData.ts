@@ -40,7 +40,6 @@ const VALORES_JUS: { valor: string; fecha: Date; activo: boolean }[] = [
   { valor: "124873.0500", fecha: new Date("2026-01-01"), activo: true },
   { valor: "128494.3700", fecha: new Date("2026-02-01"), activo: true },
   { valor: "132863.1800", fecha: new Date("2026-03-01"), activo: true },
-  { valor: "135000.0000", fecha: new Date("2026-05-02"), activo: true },
 ];
 
 export async function seedValorJus(estudioId: number) {
