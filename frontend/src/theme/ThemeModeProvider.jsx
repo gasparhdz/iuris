@@ -1,12 +1,14 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
+import { getThemeIuris } from "./themeIuris";
 import { getTheme } from "./theme";
 import { getThemeA } from "./themeA";
 import { getThemeB } from "./themeB";
 import { getThemeC } from "./themeC";
 
 export const PALETTE_OPTIONS = [
+  { key: "iuris",    label: "Iuris",       accent: "#00B8A9", desc: "Azul + Turquesa (marca)" },
   { key: "original", label: "Original",    accent: "#6366F1", desc: "Índigo + Teal"      },
   { key: "A",        label: "Institucional", accent: "#1D4ED8", desc: "Azul + Sky"         },
   { key: "B",        label: "Jurídico",    accent: "#D97706", desc: "Slate + Dorado"     },
@@ -14,6 +16,7 @@ export const PALETTE_OPTIONS = [
 ];
 
 const themeBuilders = {
+  iuris: getThemeIuris,
   original: getTheme,
   A: getThemeA,
   B: getThemeB,
@@ -35,7 +38,7 @@ export function ThemeModeProvider({ children }) {
 
   const [palette, setPaletteState] = useState(() => {
     const saved = localStorage.getItem("iuris_theme_palette");
-    return saved && themeBuilders[saved] ? saved : "A";
+    return saved && themeBuilders[saved] ? saved : "iuris";
   });
 
   const toggle = () => {

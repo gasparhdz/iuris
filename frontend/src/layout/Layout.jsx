@@ -450,7 +450,7 @@ export default function Layout() {
             </IconButton>
             <BrandLogo
               sx={{
-                height: { xs: 38, sm: 44 },
+                height: { xs: 44, sm: 52 },
                 flexShrink: 0,
               }}
             />

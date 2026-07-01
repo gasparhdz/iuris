@@ -1,8 +1,13 @@
-import { Box } from "@mui/material";
+import { Box, useTheme } from "@mui/material";
 
-const logoSrc = `${import.meta.env.BASE_URL}icons/logo.png`;
+const base = import.meta.env.BASE_URL;
+const logoLight = `${base}icons/iuris-horizontal.svg`;        // texto oscuro, para fondos claros
+const logoDark = `${base}icons/iuris-horizontal-negativo.svg`; // texto blanco, para fondos oscuros
 
 export default function BrandLogo({ alt = "Iuris", sx, ...props }) {
+  const theme = useTheme();
+  const logoSrc = theme.palette.mode === "dark" ? logoDark : logoLight;
+
   return (
     <Box
       component="img"
