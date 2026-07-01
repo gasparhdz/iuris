@@ -101,6 +101,9 @@ rateLimitRedis.on("error", (err: Error) => server.log.warn({ err }, "Redis de ra
 server.register(rateLimit, {
   global: false, // Solo aplica a rutas que lo configuren explícitamente
   redis: rateLimitRedis,
+  // Fail-open real: si el store de Redis falla (caído/inaccesible), se omite el límite
+  // en vez de rechazar la request. Sin esto, un Redis caído devuelve 429 y rompe el login.
+  skipOnError: true,
 });
 server.register(multipart, {
   limits: {
