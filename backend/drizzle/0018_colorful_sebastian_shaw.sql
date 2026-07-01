@@ -1,1 +1,0 @@
-ALTER TABLE "movimientos_judiciales" ADD COLUMN "novedad" text;

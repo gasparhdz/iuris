@@ -1,2 +1,0 @@
-ALTER TABLE "planes_pago" ADD COLUMN "moneda_id" integer;--> statement-breakpoint
-ALTER TABLE "planes_pago" ADD CONSTRAINT "planes_pago_moneda_id_parametros_id_fk" FOREIGN KEY ("moneda_id") REFERENCES "public"."parametros"("id") ON DELETE no action ON UPDATE no action;

@@ -1,2 +1,0 @@
-ALTER TABLE "ingreso_aplicaciones" ADD CONSTRAINT "ingreso_aplicaciones_monto_partes_check" CHECK ("ingreso_aplicaciones"."monto" = "ingreso_aplicaciones"."monto_capital" + "ingreso_aplicaciones"."monto_interes");--> statement-breakpoint
-ALTER TABLE "planes_pago" ADD CONSTRAINT "planes_pago_regimen_mora_check" CHECK ("planes_pago"."regimen_mora" in ('SIMPLE', 'COMPUESTO'));
