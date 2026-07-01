@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSnackbar } from "notistack";
 import api from "../api/axios";
+import { disablePush, enablePush, getPushStatus } from "../api/push.api";
 import { useAuth } from "../auth/AuthContext";
 import SisfeSyncPanel from "../components/SisfeSyncPanel";
 import {
@@ -22,6 +23,9 @@ import {
   AccountCircle,
   BadgeOutlined,
   LockOutlined,
+  NotificationsActiveOutlined,
+  NotificationsOffOutlined,
+  NotificationsOutlined,
   SaveOutlined,
   SecurityOutlined,
   Visibility,
@@ -48,6 +52,33 @@ export default function Perfil() {
   });
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [pushStatus, setPushStatus] = useState({
+    supported: false,
+    permission: "default",
+    subscribed: false,
+    loading: true,
+  });
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getPushStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setPushStatus({ ...status, loading: false });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPushStatus((current) => ({ ...current, loading: false }));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setProfile({
@@ -107,6 +138,55 @@ export default function Perfil() {
   const togglePassword = (key) => {
     setShowPasswords((current) => ({ ...current, [key]: !current[key] }));
   };
+
+  const refreshPushStatus = async () => {
+    const status = await getPushStatus();
+    setPushStatus({ ...status, loading: false });
+  };
+
+  const handlePushToggle = async () => {
+    setPushBusy(true);
+    try {
+      if (pushStatus.subscribed) {
+        await disablePush();
+        await refreshPushStatus();
+        enqueueSnackbar("Notificaciones push desactivadas", { variant: "success" });
+        return;
+      }
+
+      await enablePush();
+      await refreshPushStatus();
+      enqueueSnackbar("Notificaciones push activadas", { variant: "success" });
+    } catch (error) {
+      const code = error?.message;
+      if (code === "PUSH_NOT_SUPPORTED" || code === "PUSH_NO_SERVICE_WORKER") {
+        enqueueSnackbar("Tu navegador no soporta notificaciones push o el service worker no está disponible", { variant: "warning" });
+      } else if (code === "PUSH_PERMISSION_DENIED") {
+        await refreshPushStatus();
+        enqueueSnackbar("Permiso de notificaciones denegado. Habilitalo desde la configuración del navegador.", { variant: "warning" });
+      } else if (code === "PUSH_SERVER_DISABLED") {
+        enqueueSnackbar("Las notificaciones push no están habilitadas en el servidor", { variant: "info" });
+      } else {
+        enqueueSnackbar(error.response?.data?.error?.message || "No se pudieron actualizar las notificaciones push", { variant: "error" });
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const pushAlert = useMemo(() => {
+    if (pushStatus.loading) return null;
+    if (!pushStatus.supported) {
+      return { severity: "warning", text: "Tu navegador no soporta notificaciones push en este dispositivo." };
+    }
+    if (pushStatus.permission === "denied") {
+      return { severity: "warning", text: "Bloqueaste las notificaciones. Habilitalas desde la configuración del navegador para recibir recordatorios." };
+    }
+    if (pushStatus.subscribed) {
+      return { severity: "success", text: "Recibirás recordatorios de tareas y eventos aunque la app esté cerrada." };
+    }
+    return { severity: "info", text: "Activá las notificaciones para recibir recordatorios de tareas y eventos en este dispositivo." };
+  }, [pushStatus]);
 
   const passwordAdornment = (key, visible) => (
     <InputAdornment position="end">
@@ -264,6 +344,53 @@ export default function Perfil() {
             </Paper>
           </Grid>
         </Grid>
+
+        <Paper
+          elevation={0}
+          sx={{ width: "100%", p: { xs: 2.5, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: "16px" }}
+        >
+          <Stack spacing={2.5}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              {pushStatus.subscribed ? <NotificationsActiveOutlined color="primary" /> : <NotificationsOutlined color="primary" />}
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 850 }}>
+                  Notificaciones
+                </Typography>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Recordatorios push de tareas y eventos en este dispositivo.
+                </Typography>
+              </Box>
+            </Stack>
+
+            {pushAlert ? (
+              <Alert severity={pushAlert.severity} sx={{ borderRadius: "8px" }}>
+                {pushAlert.text}
+              </Alert>
+            ) : (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
+                <CircularProgress size={24} />
+              </Box>
+            )}
+
+            <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                variant="contained"
+                color={pushStatus.subscribed ? "inherit" : "primary"}
+                disabled={pushBusy || pushStatus.loading || !pushStatus.supported || pushStatus.permission === "denied"}
+                onClick={handlePushToggle}
+                startIcon={
+                  pushBusy
+                    ? <CircularProgress size={18} />
+                    : pushStatus.subscribed
+                      ? <NotificationsOffOutlined />
+                      : <NotificationsActiveOutlined />
+                }
+              >
+                {pushStatus.subscribed ? "Desactivar" : "Activar"}
+              </Button>
+            </Box>
+          </Stack>
+        </Paper>
 
         <SisfeSyncPanel />
       </Stack>

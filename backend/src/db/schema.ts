@@ -195,6 +195,21 @@ export const sisfeSessions = pgTable("sisfe_sessions", {
   uniqueIndex("sisfe_sessions_usuario_unique").on(table.usuarioId),
 ]);
 
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial("id").primaryKey(),
+  estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
+  usuarioId: integer("usuario_id").references(() => usuarios.id, { onDelete: "cascade" }).notNull(),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  userAgent: varchar("user_agent", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+}, (table) => [
+  uniqueIndex("push_subscriptions_endpoint_unico").on(table.endpoint),
+  index("push_subscriptions_usuario_idx").on(table.usuarioId),
+]);
+
 // ==========================================
 // 5. CLIENTES Y TERCEROS
 // ==========================================

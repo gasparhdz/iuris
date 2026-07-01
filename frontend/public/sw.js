@@ -1,4 +1,4 @@
-const CACHE_NAME = "iuris-cache-v1";
+const CACHE_NAME = "iuris-cache-v2";
 const BASE_PATH = "/lex/";
 const APP_SHELL = [
   BASE_PATH,
@@ -94,7 +94,7 @@ const navigationFallback = async (request) => {
       cache.put(BASE_PATH, networkResponse.clone());
     }
     return networkResponse;
-  } catch (error) {
+  } catch {
     return caches.match(BASE_PATH);
   }
 };
@@ -125,4 +125,64 @@ self.addEventListener("fetch", (event) => {
   if (isStaticAsset(request, url)) {
     event.respondWith(cacheFirst(request));
   }
+});
+
+self.addEventListener("push", (event) => {
+  let payload = {
+    title: "Iuris",
+    body: "",
+    url: BASE_PATH,
+    tag: "iuris-notification",
+  };
+
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      payload = {
+        title: parsed.title || payload.title,
+        body: parsed.body || payload.body,
+        url: parsed.url || payload.url,
+        tag: parsed.tag || payload.tag,
+      };
+    } catch {
+      payload.body = event.data.text();
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      data: { url: payload.url },
+      icon: "/lex/icons/icon-192.png",
+      badge: "/lex/icons/icon-192.png",
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || BASE_PATH;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          return client.focus().then((focusedClient) => {
+            if ("navigate" in focusedClient) {
+              return focusedClient.navigate(targetUrl);
+            }
+            return focusedClient;
+          });
+        }
+      }
+
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+
+      return undefined;
+    }),
+  );
 });

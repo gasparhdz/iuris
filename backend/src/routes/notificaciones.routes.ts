@@ -6,6 +6,8 @@ import { db } from "../db/index.js";
 import { casos, eventos, movimientosJudiciales, movimientosVistos, sisfeSessions, tareas } from "../db/schema.js";
 import { documentedResponses } from "../schemas/common.schema.js";
 import { AuthQueries } from "../db/queries/auth.queries.js";
+import { PushService } from "../services/push.service.js";
+import { env } from "../env.js";
 
 const NOVEDADES_LIMIT = 50;
 
@@ -29,6 +31,31 @@ const novedadesResponseSchema = z.object({
 const marcarLeidoBodySchema = z.object({
   // Si se omite, marca como leídas TODAS las novedades SISFE no vistas del usuario.
   movimientoIds: z.array(z.number().int().positive()).optional(),
+});
+
+const pushSubscribeBodySchema = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+const pushUnsubscribeBodySchema = z.object({
+  endpoint: z.string().url(),
+});
+
+const vapidPublicKeyResponseSchema = z.object({
+  data: z.object({
+    publicKey: z.string().nullable(),
+    enabled: z.boolean(),
+  }),
+});
+
+const pushOkResponseSchema = z.object({
+  data: z.object({
+    ok: z.literal(true),
+  }),
 });
 
 const notificacionesPendientesResponseSchema = z.object({
@@ -260,5 +287,65 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       .onConflictDoNothing();
 
     return { data: { marcados: objetivo.length } };
+  });
+
+  server.get("/push/vapid-public-key", {
+    ...authConfig,
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Obtener clave publica VAPID para suscripcion push",
+      security: [{ bearerAuth: [] }],
+      response: documentedResponses(200, vapidPublicKeyResponseSchema),
+    },
+  }, async () => {
+    const enabled = PushService.isEnabled();
+    return {
+      data: {
+        publicKey: enabled ? env.VAPID_PUBLIC_KEY ?? null : null,
+        enabled,
+      },
+    };
+  });
+
+  server.post("/push/subscribe", {
+    ...authConfig,
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Registrar suscripcion push del dispositivo",
+      security: [{ bearerAuth: [] }],
+      body: pushSubscribeBodySchema,
+      response: documentedResponses(200, pushOkResponseSchema),
+    },
+  }, async (request) => {
+    const { endpoint, keys } = request.body as z.infer<typeof pushSubscribeBodySchema>;
+    const userAgent = request.headers["user-agent"];
+
+    await PushService.saveSubscription({
+      estudioId: request.authUser.estudioId,
+      usuarioId: request.authUser.id,
+      endpoint,
+      p256dh: keys.p256dh,
+      auth: keys.auth,
+      userAgent: typeof userAgent === "string" ? userAgent : null,
+    });
+
+    return { data: { ok: true as const } };
+  });
+
+  server.post("/push/unsubscribe", {
+    ...authConfig,
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Eliminar suscripcion push del dispositivo",
+      security: [{ bearerAuth: [] }],
+      body: pushUnsubscribeBodySchema,
+      response: documentedResponses(200, pushOkResponseSchema),
+    },
+  }, async (request) => {
+    const { endpoint } = request.body as z.infer<typeof pushUnsubscribeBodySchema>;
+
+    await PushService.deleteSubscription(endpoint, request.authUser.id);
+
+    return { data: { ok: true as const } };
   });
 };

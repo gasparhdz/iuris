@@ -4,6 +4,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/index.js";
 import { casos, eventos, subTareas, tareas, usuarios } from "../db/schema.js";
 import { EmailService } from "./email.service.js";
+import { PushService } from "./push.service.js";
 
 let cronStarted = false;
 let isProcessing = false;
@@ -81,6 +82,13 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         subtareas,
       }, usuario);
 
+      await PushService.sendToUsuario(usuarioId, {
+        title: "Recordatorio de tarea",
+        body: tarea.titulo,
+        url: "/lex/tareas",
+        tag: `tarea-${tarea.id}`,
+      }, logger);
+
       await db
         .update(tareas)
         .set({ recordatorioEnviado: true, updatedAt: new Date() })
@@ -124,6 +132,13 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         descripcion: evento.descripcion,
         fechaInicio: evento.fechaInicio,
       }, usuario);
+
+      await PushService.sendToUsuario(evento.createdBy, {
+        title: "Recordatorio de evento",
+        body: evento.descripcion ?? "Evento próximo",
+        url: "/lex/agenda",
+        tag: `evento-${evento.id}`,
+      }, logger);
 
       await db
         .update(eventos)
