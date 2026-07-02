@@ -156,13 +156,9 @@ export default function Expedientes() {
         const clB = clientesById.get(b.clienteId);
         valA = clienteNombre(clA);
         valB = clienteNombre(clB);
-      } else if (orderBy === "rama") {
-        const tA = tiposById.get(a.tipoId);
-        const tB = tiposById.get(b.tipoId);
-        const rA = ramas.find((r) => r.id === tA?.parentId);
-        const rB = ramas.find((r) => r.id === tB?.parentId);
-        valA = rA?.nombre || "";
-        valB = rB?.nombre || "";
+      } else if (orderBy === "tipo") {
+        valA = tiposById.get(a.tipoId)?.nombre || "";
+        valB = tiposById.get(b.tipoId)?.nombre || "";
       } else if (orderBy === "juzgado") {
         const radA = radicacionesById.get(a.radicacionId);
         const radB = radicacionesById.get(b.radicacionId);
@@ -192,7 +188,7 @@ export default function Expedientes() {
     });
 
     return stabilized;
-  }, [rows, orderBy, order, clientesById, tiposById, ramas, estadosById, radicacionesById]);
+  }, [rows, orderBy, order, clientesById, tiposById, estadosById, radicacionesById]);
 
   const paginatedRows = useMemo(() => {
     return sortedRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
@@ -230,6 +226,7 @@ export default function Expedientes() {
           "Carátula": caso.caratula || "",
           "Cliente": clienteNombre(cliente),
           "Nro. Expediente": caso.nroExpte || "Sin número",
+          "Tipo de Caso": tipo?.nombre || "Sin tipo",
           "Rama del Derecho": rama?.nombre || "Sin rama",
           "Juzgado / Radicación": radicacion?.nombre || "Sin radicación",
           "Estado": estado?.nombre || "Sin estado",
@@ -354,7 +351,7 @@ export default function Expedientes() {
                     { id: "caratula", label: "Carátula" },
                     { id: "cliente", label: "Cliente" },
                     { id: "nroExpte", label: "Expediente" },
-                    { id: "rama", label: "Rama" },
+                    { id: "tipo", label: "Tipo de Caso" },
                     { id: "juzgado", label: "Juzgado" },
                     { id: "estado", label: "Estado" },
                     { id: "acciones", label: "Acciones" }
@@ -396,7 +393,6 @@ export default function Expedientes() {
                 {paginatedRows.map((caso) => {
                   const cliente = clientesById.get(caso.clienteId);
                   const tipo = tiposById.get(caso.tipoId);
-                  const rama = ramas.find((r) => r.id === tipo?.parentId);
                   const estado = estadosById.get(caso.estadoId);
                   const radicacion = radicacionesById.get(caso.radicacionId);
                   return (
@@ -443,7 +439,7 @@ export default function Expedientes() {
                         </Link>
                       </TableCell>
                       <TableCell>{caso.nroExpte || "Sin número"}</TableCell>
-                      <TableCell>{rama?.nombre || "Sin rama"}</TableCell>
+                      <TableCell>{tipo?.nombre || "Sin tipo"}</TableCell>
                       <TableCell>{radicacion?.nombre || "Sin radicación"}</TableCell>
                       <TableCell>{estado ? <Chip size="small" color={estadoColor(estado.nombre)} label={estado.nombre} sx={{ fontWeight: 800 }} /> : "Sin estado"}</TableCell>
                       <TableCell onClick={(event) => event.stopPropagation()}>
