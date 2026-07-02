@@ -808,12 +808,12 @@ export default function Layout() {
 
         <Divider />
 
-        <List sx={{ px: 1, py: 2 }}>
+        <List sx={{ px: 1, py: 1.5 }}>
           {menuItems.map((item) => {
             const active = isActivePath(item.path);
 
             return (
-              <ListItem key={item.text} disablePadding sx={{ display: "block", mb: 0.5 }}>
+              <ListItem key={item.text} disablePadding sx={{ display: "block", mb: 0.25 }}>
                 <Tooltip title={!open && !isMobile ? item.text : ""} placement="right">
                   <ListItemButton
                     component={NavLink}
@@ -823,7 +823,8 @@ export default function Layout() {
                       if (isMobile) setOpen(false);
                     }}
                     sx={{
-                      minHeight: 48,
+                      minHeight: 34,
+                      py: 0.5,
                       justifyContent: open || isMobile ? "initial" : "center",
                       px: 2.25,
                       borderRadius: "10px",
