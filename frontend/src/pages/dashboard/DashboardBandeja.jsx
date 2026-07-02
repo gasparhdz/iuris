@@ -981,18 +981,21 @@ export default function DashboardBandeja({ view, onSwitchView }) {
       )}
 
       <Menu anchorEl={createAnchor} open={Boolean(createAnchor)} onClose={() => setCreateAnchor(null)}>
-        {QUICK_CREATE.map(({ label, path, icon: Icon }) => (
-          <MenuItem
-            key={path}
-            onClick={() => {
-              setCreateAnchor(null);
-              navigate(path);
-            }}
-          >
-            <ListItemIcon><Icon fontSize="small" /></ListItemIcon>
-            <ListItemText>{label}</ListItemText>
-          </MenuItem>
-        ))}
+        {QUICK_CREATE.map((item) => {
+          const ItemIcon = item.icon;
+          return (
+            <MenuItem
+              key={item.path}
+              onClick={() => {
+                setCreateAnchor(null);
+                navigate(item.path);
+              }}
+            >
+              <ListItemIcon><ItemIcon fontSize="small" /></ListItemIcon>
+              <ListItemText>{item.label}</ListItemText>
+            </MenuItem>
+          );
+        })}
       </Menu>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
