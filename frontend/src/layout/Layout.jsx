@@ -9,6 +9,7 @@ import {
   Box,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogContent,
   Divider,
@@ -38,6 +39,7 @@ import {
   Dashboard as DashboardIcon,
   DarkModeOutlined,
   Description as DescriptionIcon,
+  ExpandMore as ExpandMoreIcon,
   FolderSpecial as FolderIcon,
   Group as GroupIcon,
   Assignment as TaskIcon,
@@ -45,6 +47,7 @@ import {
   Logout as LogoutIcon,
   Menu as MenuIcon,
   People as PeopleIcon,
+  PersonOutline as PersonOutlineIcon,
   Search as SearchIcon,
   CalendarMonth as CalendarIcon,
   ContactMail,
@@ -67,8 +70,14 @@ const collapsedDrawerWidth = 72;
 // agregadas como Agenda/Finanzas/Reportes); `roles` => gateado por rol. Sin nada => libre.
 const allMenuItems = [
   { text: "Dashboard", icon: <DashboardIcon />, path: "/" },
-  { text: "Clientes", icon: <PeopleIcon />, path: "/clientes", modulo: "CLIENTES" },
-  { text: "Terceros", icon: <ContactMail />, path: "/contactos", modulo: "TERCEROS" },
+  {
+    text: "Personas",
+    icon: <PeopleIcon />,
+    children: [
+      { text: "Clientes", icon: <PersonOutlineIcon />, path: "/clientes", modulo: "CLIENTES" },
+      { text: "Terceros", icon: <ContactMail />, path: "/contactos", modulo: "TERCEROS" },
+    ],
+  },
   { text: "Expedientes", icon: <FolderIcon />, path: "/expedientes", modulo: "CASOS" },
   { text: "Agenda", icon: <CalendarIcon />, path: "/agenda", modulos: ["EVENTOS", "TAREAS"] },
   { text: "Tareas", icon: <TaskIcon />, path: "/tareas", modulo: "TAREAS" },
@@ -106,6 +115,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(!isMobile);
+  const [openGroups, setOpenGroups] = useState({});
   const [anchorEl, setAnchorEl] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState(emptySearchResults);
@@ -119,7 +129,7 @@ export default function Layout() {
   const canManageValoresJus = roles.includes("DIRECTOR") || user?.rol === "DIRECTOR";
   const puedeVerModulo = (modulo) =>
     (user?.permisos ?? []).some((p) => p.modulo === modulo && p.ver === true);
-  const menuItems = allMenuItems.filter((item) => {
+  const puedeVerItem = (item) => {
     if (item.roles) {
       const userRol = String(user?.rol ?? "").toUpperCase();
       const userRoles = roles.map((role) => String(role).toUpperCase());
@@ -128,7 +138,18 @@ export default function Layout() {
     if (item.modulo && !puedeVerModulo(item.modulo)) return false;
     if (item.modulos && !item.modulos.some(puedeVerModulo)) return false;
     return true;
-  });
+  };
+  // Los items con `children` (ej: "Personas") se muestran si al menos un hijo es visible,
+  // y se filtran sus hijos por permiso.
+  const menuItems = allMenuItems
+    .map((item) => {
+      if (item.children) {
+        const children = item.children.filter(puedeVerItem);
+        return children.length ? { ...item, children } : null;
+      }
+      return puedeVerItem(item) ? item : null;
+    })
+    .filter(Boolean);
   const isPlatformAdmin = Number(user?.estudioId) === 1 && [...roles, ...singleRole].some(
     (role) => ["SUPERADMIN", "ADMIN"].includes(String(role).toUpperCase())
   );
@@ -136,6 +157,19 @@ export default function Layout() {
   useEffect(() => {
     setOpen(!isMobile);
   }, [isMobile]);
+
+  // Auto-despliega un grupo (ej: "Personas") cuando la ruta actual es la de alguno de sus hijos.
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const next = { ...prev };
+      for (const item of allMenuItems) {
+        if (item.children?.some((child) => location.pathname === child.path || location.pathname.startsWith(child.path))) {
+          next[item.text] = true;
+        }
+      }
+      return next;
+    });
+  }, [location.pathname]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -417,6 +451,37 @@ export default function Layout() {
   const isActivePath = (path) => {
     return location.pathname === path || (path !== "/" && location.pathname.startsWith(path));
   };
+
+  // Estilos compartidos por los botones de navegación (leaf, padre de grupo e hijos).
+  const navButtonSx = (active) => ({
+    minHeight: 34,
+    py: 0.5,
+    justifyContent: open || isMobile ? "initial" : "center",
+    px: 2.25,
+    borderRadius: "10px",
+    backgroundColor: active ? "rgba(99, 102, 241, 0.12)" : "transparent",
+    border: "1px solid",
+    borderColor: active ? "rgba(99, 102, 241, 0.28)" : "transparent",
+    color: active ? "primary.light" : "text.secondary",
+    transition: "background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease",
+    "&:hover": {
+      backgroundColor: "action.hover",
+      color: "text.primary",
+      "& .MuiListItemIcon-root": { color: "text.primary" },
+    },
+  });
+  const navIconSx = (active) => ({
+    minWidth: 0,
+    mr: open || isMobile ? 2.5 : "auto",
+    justifyContent: "center",
+    color: active ? "primary.light" : "text.secondary",
+    transition: "color 0.2s ease, margin 0.2s ease",
+  });
+  const navTextSx = (active) => ({
+    opacity: open || isMobile ? 1 : 0,
+    transition: "opacity 0.16s ease",
+    "& .MuiTypography-root": { fontWeight: active ? 800 : 600, fontSize: "0.9rem" },
+  });
 
   return (
     <Box sx={{ minHeight: "100vh", width: "100%", backgroundColor: "background.default" }}>
@@ -810,8 +875,66 @@ export default function Layout() {
 
         <List sx={{ px: 1, py: 1.5 }}>
           {menuItems.map((item) => {
-            const active = isActivePath(item.path);
+            // Grupo desplegable (ej: "Personas")
+            if (item.children) {
+              const collapsedSidebar = !open && !isMobile;
+              const groupActive = item.children.some((child) => isActivePath(child.path));
+              const groupOpen = Boolean(openGroups[item.text]);
+              return (
+                <Box key={item.text} sx={{ mb: 0.25 }}>
+                  <Tooltip title={collapsedSidebar ? item.text : ""} placement="right">
+                    <ListItemButton
+                      onClick={() => {
+                        // Barra colapsada: al clickear se expande la barra y se abre el grupo.
+                        if (collapsedSidebar) {
+                          setOpen(true);
+                          setOpenGroups((prev) => ({ ...prev, [item.text]: true }));
+                        } else {
+                          setOpenGroups((prev) => ({ ...prev, [item.text]: !prev[item.text] }));
+                        }
+                      }}
+                      sx={navButtonSx(groupActive)}
+                    >
+                      <ListItemIcon sx={navIconSx(groupActive)}>{item.icon}</ListItemIcon>
+                      <ListItemText primary={item.text} sx={navTextSx(groupActive)} />
+                      {(open || isMobile) && (
+                        <ExpandMoreIcon
+                          sx={{
+                            fontSize: 18,
+                            color: "text.disabled",
+                            transition: "transform 0.2s ease",
+                            transform: groupOpen ? "none" : "rotate(-90deg)",
+                          }}
+                        />
+                      )}
+                    </ListItemButton>
+                  </Tooltip>
+                  <Collapse in={groupOpen && (open || isMobile)} timeout="auto" unmountOnExit>
+                    <List disablePadding sx={{ pl: 1.5 }}>
+                      {item.children.map((child) => {
+                        const childActive = isActivePath(child.path);
+                        return (
+                          <ListItem key={child.text} disablePadding sx={{ display: "block", mb: 0.25 }}>
+                            <ListItemButton
+                              component={NavLink}
+                              to={child.path}
+                              onClick={() => { if (isMobile) setOpen(false); }}
+                              sx={navButtonSx(childActive)}
+                            >
+                              <ListItemIcon sx={navIconSx(childActive)}>{child.icon}</ListItemIcon>
+                              <ListItemText primary={child.text} sx={navTextSx(childActive)} />
+                            </ListItemButton>
+                          </ListItem>
+                        );
+                      })}
+                    </List>
+                  </Collapse>
+                </Box>
+              );
+            }
 
+            // Item simple (leaf)
+            const active = isActivePath(item.path);
             return (
               <ListItem key={item.text} disablePadding sx={{ display: "block", mb: 0.25 }}>
                 <Tooltip title={!open && !isMobile ? item.text : ""} placement="right">
@@ -822,48 +945,10 @@ export default function Layout() {
                     onClick={() => {
                       if (isMobile) setOpen(false);
                     }}
-                    sx={{
-                      minHeight: 34,
-                      py: 0.5,
-                      justifyContent: open || isMobile ? "initial" : "center",
-                      px: 2.25,
-                      borderRadius: "10px",
-                      backgroundColor: active ? "rgba(99, 102, 241, 0.12)" : "transparent",
-                      border: "1px solid",
-                      borderColor: active ? "rgba(99, 102, 241, 0.28)" : "transparent",
-                      color: active ? "primary.light" : "text.secondary",
-                      transition: "background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease",
-                      "&:hover": {
-                        backgroundColor: "action.hover",
-                        color: "text.primary",
-                        "& .MuiListItemIcon-root": {
-                          color: "text.primary",
-                        },
-                      },
-                    }}
+                    sx={navButtonSx(active)}
                   >
-                    <ListItemIcon
-                      sx={{
-                        minWidth: 0,
-                        mr: open || isMobile ? 2.5 : "auto",
-                        justifyContent: "center",
-                        color: active ? "primary.light" : "text.secondary",
-                        transition: "color 0.2s ease, margin 0.2s ease",
-                      }}
-                    >
-                      {item.icon}
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={item.text}
-                      sx={{
-                        opacity: open || isMobile ? 1 : 0,
-                        transition: "opacity 0.16s ease",
-                        "& .MuiTypography-root": {
-                          fontWeight: active ? 800 : 600,
-                          fontSize: "0.9rem",
-                        },
-                      }}
-                    />
+                    <ListItemIcon sx={navIconSx(active)}>{item.icon}</ListItemIcon>
+                    <ListItemText primary={item.text} sx={navTextSx(active)} />
                   </ListItemButton>
                 </Tooltip>
               </ListItem>
