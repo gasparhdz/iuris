@@ -356,7 +356,17 @@ export default function Terceros() {
       <Paper elevation={0} sx={{ ...panelSx, p: 2, borderRadius: "16px", mb: 2.5 }}>
         <TextField fullWidth size="small" placeholder="Buscar por nombre, email o teléfono..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} InputProps={{ startAdornment: <Search sx={{ mr: 1, color: "text.disabled" }} /> }} />
       </Paper>
-      {isMobile ? (
+      {filtered.length === 0 ? (
+        <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
+          <Person sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            No hay terceros para mostrar
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
+            Probá ajustar la búsqueda o registrá un nuevo tercero.
+          </Typography>
+        </Paper>
+      ) : isMobile ? (
         <Stack spacing={1.5}>
           {paginated.map((t) => {
             const isJuridica = Boolean(t.razonSocial);
@@ -422,28 +432,21 @@ export default function Terceros() {
               </Paper>
             );
           })}
-          {!filtered.length && (
-            <Paper elevation={0} sx={{ ...panelSx, borderRadius: "16px", p: 4, textAlign: "center" }}>
-              <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 700 }}>No hay terceros para mostrar.</Typography>
-            </Paper>
-          )}
-          {filtered.length > 0 && (
-            <TablePagination
-              component="div"
-              count={filtered.length}
-              page={page}
-              onPageChange={(_, newPage) => setPage(newPage)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(event) => {
-                setRowsPerPage(parseInt(event.target.value, 10));
-                setPage(0);
-              }}
-              rowsPerPageOptions={[5, 10, 25, 50]}
-              labelRowsPerPage="Filas:"
-              labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count}`}
-              sx={{ borderTop: "1px solid", borderColor: "divider", mt: 1 }}
-            />
-          )}
+          <TablePagination
+            component="div"
+            count={filtered.length}
+            page={page}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[5, 10, 25, 50]}
+            labelRowsPerPage="Filas:"
+            labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count}`}
+            sx={{ borderTop: "1px solid", borderColor: "divider", mt: 1 }}
+          />
         </Stack>
       ) : (
         <Paper elevation={0} sx={{ ...panelSx, borderRadius: "16px", overflow: "hidden" }}>
