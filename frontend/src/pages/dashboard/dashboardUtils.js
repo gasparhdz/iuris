@@ -1,0 +1,141 @@
+import dayjs from "dayjs";
+import "dayjs/locale/es";
+
+dayjs.locale("es");
+
+export const CARD_TONES = {
+  blue: "#5B7CFA",
+  orange: "#FFA726",
+  green: "#2EBD85",
+  red: "#EF5350",
+  violet: "#8B5CF6",
+  cyan: "#29B6F6",
+};
+
+export const BANDEJA_TONES = {
+  overdue: "#C13A33",
+  novedad: "#1A66C9",
+  evento: "#7C5CFC",
+  tarea: "#D64038",
+  success: "#1E9E6A",
+};
+
+export const PRIORITY_TONES = {
+  CRITICA: "#EF5350",
+  CRITICA_: "#EF5350",
+  ALTA: "#FFA726",
+  MEDIA: "#29B6F6",
+  BAJA: "#66BB6A",
+  DEFAULT: "#8EA0B8",
+};
+
+export const panelSx = {
+  border: "1px solid",
+  borderColor: "divider",
+  backgroundColor: "background.paper",
+  boxShadow: "none",
+  borderRadius: "16px",
+};
+
+export const DASHBOARD_VIEW_KEY = "iuris_dashboard_view";
+
+export function normalizeCode(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+    .toUpperCase();
+}
+
+export function readUserName(user) {
+  const raw = user?.nombre || user?.name || user?.usuario?.nombre || user?.email || "";
+  const clean = String(raw).split("@")[0].trim();
+  return clean ? clean.split(/\s+/)[0] : "";
+}
+
+/** Franja horaria local para el saludo. */
+function greetingSlot() {
+  const hour = dayjs().hour();
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 20) return "afternoon";
+  return "evening";
+}
+
+/** Índice estable por día — rota el tono sin cambiar en cada render. */
+function dailyVariantIndex(count) {
+  if (count <= 0) return 0;
+  return (dayjs().date() + dayjs().month() * 31) % count;
+}
+
+const BANDEJA_GREETING_TEXT = {
+  morning: [
+    (n) => (n ? `¡Buenos días, ${n}!` : "¡Buenos días!"),
+    (n) => (n ? `Buenos días, ${n} — ¡muy buen día!` : "Buenos días — ¡muy buen día!"),
+    (n) => (n ? `¡Buenos días, ${n}!` : "¡Buenos días!"),
+  ],
+  afternoon: [
+    (n) => (n ? `¡Buenas tardes, ${n}!` : "¡Buenas tardes!"),
+    (n) => (n ? `Buenas tardes, ${n} — ¡vamos!` : "Buenas tardes — ¡vamos!"),
+    (n) => (n ? `¡Buenas tardes, ${n}!` : "¡Buenas tardes!"),
+  ],
+  evening: [
+    (n) => (n ? `¡Buenas noches, ${n}!` : "¡Buenas noches!"),
+    (n) => (n ? `Buenas noches, ${n} — ¡buen descanso!` : "Buenas noches — ¡buen descanso!"),
+    (n) => (n ? `¡Buenas noches, ${n}!` : "¡Buenas noches!"),
+  ],
+};
+
+/** Saludo según hora local (Argentina, navegador del usuario). */
+export function timeGreeting() {
+  const slot = greetingSlot();
+  if (slot === "morning") return "Buenos días";
+  if (slot === "afternoon") return "Buenas tardes";
+  return "Buenas noches";
+}
+
+/**
+ * Saludo cálido para la vista bandeja.
+ * @returns {{ text: string, slot: 'morning' | 'afternoon' | 'evening' }}
+ */
+export function bandejaGreeting(user) {
+  const firstName = readUserName(user);
+  const slot = greetingSlot();
+  const variants = BANDEJA_GREETING_TEXT[slot];
+  const text = variants[dailyVariantIndex(variants.length)](firstName);
+  return { text, slot };
+}
+
+export function displayDate() {
+  const value = dayjs().format("dddd, D [de] MMMM [de] YYYY");
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+export function eventDate(event) {
+  return event?.fechaInicio || event?.fecha || event?.inicio || event?.start;
+}
+
+export function priorityColor(priority) {
+  const code = normalizeCode(priority?.codigo || priority?.nombre || priority);
+  return PRIORITY_TONES[code] || PRIORITY_TONES.DEFAULT;
+}
+
+export function priorityLabel(task) {
+  return task?.prioridad?.nombre || task?.prioridadNombre || "Sin prioridad";
+}
+
+export function readDashboardView() {
+  try {
+    const saved = localStorage.getItem(DASHBOARD_VIEW_KEY);
+    return saved === "classic" ? "classic" : "bandeja";
+  } catch {
+    return "bandeja";
+  }
+}
+
+export function saveDashboardView(view) {
+  try {
+    localStorage.setItem(DASHBOARD_VIEW_KEY, view);
+  } catch {
+    /* noop */
+  }
+}
