@@ -612,17 +612,17 @@ function TaskTable({
 }) {
   const columns = [
     { id: "titulo", label: "Tarea" },
-    { id: "prioridad", label: "Prioridad" },
-    { id: "vencimiento", label: "Vencimiento" },
-    { id: "vinculacion", label: "Vinculación" },
-    { id: "checklist", label: "Checklist" },
-    { id: "acciones", label: "Acciones" }
+    { id: "prioridad", label: "Prioridad", width: 130 },
+    { id: "vencimiento", label: "Vencimiento", width: 140 },
+    { id: "vinculacion", label: "Vinculación", width: 220 },
+    { id: "checklist", label: "Checklist", width: 130 },
+    { id: "acciones", label: "Acciones", width: 100 }
   ];
 
   return (
     <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
       <TableContainer>
-        <Table>
+        <Table sx={{ tableLayout: "fixed", minWidth: 900 }}>
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
               {columns.map((column) => {
@@ -632,6 +632,7 @@ function TaskTable({
                     key={column.id}
                     sortDirection={orderBy === column.id ? order : false}
                     sx={{
+                      width: column.width,
                       fontWeight: 900,
                       color: "text.secondary",
                       fontSize: "0.72rem",
@@ -688,6 +689,7 @@ function TaskTable({
                           variant="body2"
                           sx={{
                             fontWeight: 900,
+                            wordBreak: "break-word",
                             textDecoration: task.completada ? "line-through" : "none",
                             color: task.completada ? "text.secondary" : "text.primary"
                           }}
