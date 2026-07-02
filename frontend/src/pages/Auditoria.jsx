@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { alpha, useTheme } from "@mui/material/styles";
+import { denseTableSx } from "../theme/tableStyles";
 import {
   Box,
   Button,
@@ -549,7 +550,7 @@ export default function Auditoria() {
           <>
             {/* Desktop */}
             <TableContainer sx={{ display: { xs: "none", md: "block" } }}>
-              <Table>
+              <Table size="small" sx={denseTableSx}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
                     {columns.map((column) => {

@@ -26,7 +26,6 @@ import {
   Paper,
   Skeleton,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -35,7 +34,6 @@ import {
   TablePagination,
   TableRow,
   TableSortLabel,
-  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -81,6 +79,13 @@ import {
 import { clienteLabel as clienteLabelFromTareas, getApiError, unwrapItems } from "./tareasUtils";
 
 const TAB_KEYS = ["honorarios", "gastos", "ingresos", "planes", "cuentas_corrientes"];
+const TAB_LABELS = {
+  honorarios: "Honorarios",
+  gastos: "Gastos",
+  ingresos: "Ingresos",
+  planes: "Planes",
+  cuentas_corrientes: "Cuentas Corrientes",
+};
 
 const DATE_PRESETS = [
   { key: "todo", label: "Todo" },
@@ -173,9 +178,11 @@ function KpiCard({ label, valuePesos, valueUsd, icon, tone }) {
           <Typography variant="h5" sx={{ fontWeight: 950, mt: 0.5, lineHeight: 1.2, fontSize: { lg: "1.25rem", xl: "1.5rem" } }}>
             {valuePesos}
           </Typography>
-          <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.25, fontWeight: 700 }}>
-            {valueUsd}
-          </Typography>
+          {valueUsd ? (
+            <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.25, fontWeight: 700 }}>
+              {valueUsd}
+            </Typography>
+          ) : null}
         </Box>
         <Avatar sx={{ bgcolor: alpha(tone, 0.12), color: tone, width: { xs: 48, lg: 40, xl: 48 }, height: { xs: 48, lg: 40, xl: 48 } }}>{icon}</Avatar>
       </Stack>
@@ -481,130 +488,135 @@ export default function Finanzas() {
   }, [planesByHonorario]);
 
   const kpis = useMemo(() => {
-    const honorariosFiltrados = (dateRange.from || dateRange.to)
-      ? processedHonorarios.filter((item) => isInDateRange(item.fechaRegulacion, dateRange.from, dateRange.to))
-      : processedHonorarios;
-
     const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
     const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
+    const q = debouncedSearch.trim().toLowerCase();
 
-    // 1. Agrupar honorarios, gastos e ingresos por clienteId
-    const map = new Map();
-    const ensure = (clienteId) => {
-      const id = Number(clienteId);
-      if (!id) return null;
-      if (!map.has(id)) {
-
-        map.set(id, {
-          honorarios: [],
-          gastos: [],
-          ingresos: [],
-        });
+    const honorariosFiltrados = processedHonorarios.filter((item) => {
+      if (dateRange.from || dateRange.to) {
+        if (!isInDateRange(item.fechaRegulacion, dateRange.from, dateRange.to)) return false;
       }
-      return map.get(id);
-    };
-
-    // Agrupamos todos los gastos e ingresos historicos por cliente para amortizacion contable consolidada
-    gastos.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.gastos.push(item);
-    });
-    ingresos.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.ingresos.push(item);
+      if (!q) return true;
+      const haystack = [
+        conceptoLabel(item),
+        clienteLabel(item.cliente) || clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
+        casoLabel(item.caso) || casoLabel(expedientesById.get(Number(item.casoId))),
+        item.estado?.nombre,
+      ].join(" ").toLowerCase();
+      return haystack.includes(q);
     });
 
-    // Agrupamos solo los honorarios filtrados en el periodo
-    honorariosFiltrados.forEach((item) => {
-      const row = ensure(item.clienteId);
-      if (row) row.honorarios.push(item);
-    });
-
-    let honorariosPendientesArs = 0;
-    let honorariosPendientesUsd = 0;
-    let gastosPendientesArs = 0;
-    let gastosPendientesUsd = 0;
-    let saldoPendienteArs = 0;
-    let saldoPendienteUsd = 0;
-
-    [...map.values()].forEach((group) => {
-      if (group.honorarios.length === 0 && group.gastos.length === 0 && group.ingresos.length === 0) return;
-
-      const hasUsd = group.honorarios.some((h) => {
-        const curr = h.monedaOriginal || getItemCurrencyGeneral(h, catalogMonedas);
-        return curr === "USD";
-      }) || group.gastos.some((g) => {
-        const curr = g.monedaOriginal || getItemCurrencyGeneral(g, catalogMonedas);
-        return curr === "USD";
-      });
-      const honorariosPendientesPlanAware = group.honorarios.reduce((acc, honorario) => {
-        const saldo = getHonorarioSaldoPendiente(honorario, honorario.computed);
-        return acc + Number(saldo.value ?? 0);
-      }, 0);
-      const gastosPendientesPropios = group.gastos.reduce((acc, gasto) => {
-        const estado = estadosGastoById.get(Number(gasto.estadoId));
-        if (String(estado?.codigo ?? "").toUpperCase() === "PAGADO") return acc;
-        return acc + movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas);
-      }, 0);
-      const saldoPendientePlanAware = honorariosPendientesPlanAware + gastosPendientesPropios;
-
-      if (hasUsd) {
-        honorariosPendientesUsd += honorariosPendientesPlanAware;
-        gastosPendientesUsd += gastosPendientesPropios;
-        saldoPendienteUsd += saldoPendientePlanAware;
-      } else {
-        honorariosPendientesArs += honorariosPendientesPlanAware;
-        gastosPendientesArs += gastosPendientesPropios;
-        saldoPendienteArs += saldoPendientePlanAware;
-      }
-    });
-
-    const honorariosPendientes = {
-      ars: honorariosPendientesArs,
-      usd: honorariosPendientesUsd,
-    };
-
-    const gastosPendientes = {
-      ars: gastosPendientesArs,
-      usd: gastosPendientesUsd,
-    };
-
-    const saldoPendienteTotal = {
-      ars: saldoPendienteArs,
-      usd: saldoPendienteUsd,
-    };
-
-    // 2. Ingresos recaudados (Ingresos totales)
-    const ingresosRecaudados = ingresos.reduce(
-      (totals, item) => {
-        const currency = getItemCurrencyGeneral(item, catalogMonedas);
-        if (currency === "USD") {
-          totals.usd += Number(item.monto || 0);
+    const honorariosKpi = honorariosFiltrados.reduce(
+      (acc, honorario) => {
+        const computed = honorario.computed;
+        const planData = planesByHonorario.get(Number(honorario.id));
+        acc.total += Number(computed?.updatedVal ?? 0);
+        if (planData) {
+          acc.cobrado += planData.cobrado;
+          acc.pendiente += planData.saldo;
         } else {
-          totals.ars += Number(item.monto || 0);
+          acc.cobrado += Number(honorario.montoCobrado ?? 0);
+          const saldo = getHonorarioSaldoPendiente(honorario, computed);
+          acc.pendiente += Number(saldo.value ?? 0);
         }
-        return totals;
+        return acc;
       },
-      { ars: 0, usd: 0 }
+      { total: 0, cobrado: 0, pendiente: 0 },
     );
 
-    return {
-      honorariosPendientes,
-      gastosPendientes,
-      ingresosRecaudados,
-      saldoPendienteTotal,
-    };
-  }, [processedHonorarios, gastos, ingresos, dateRange, catalogQuery.data, valorJusQuery.data, getHonorarioSaldoPendiente, estadosGastoById]);
+    const gastosFiltrados = gastos.filter((item) => {
+      if (!q) return true;
+      const haystack = [
+        conceptoLabel(item, conceptosById),
+        clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
+        casoLabel(expedientesById.get(Number(item.casoId))),
+        item.descripcion,
+        estadosGastoById.get(Number(item.estadoId))?.nombre,
+      ].join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
 
-  const kpiLoading = honorariosQuery.isLoading || gastosQuery.isLoading || ingresosQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading;
+    const gastosKpi = gastosFiltrados.reduce(
+      (acc, gasto) => {
+        const amount = movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas);
+        const estado = estadosGastoById.get(Number(gasto.estadoId));
+        const isPagado = String(estado?.codigo ?? "").toUpperCase() === "PAGADO";
+        acc.total += amount;
+        if (isPagado) acc.pagado += amount;
+        else acc.pendiente += amount;
+        return acc;
+      },
+      { total: 0, pagado: 0, pendiente: 0 },
+    );
 
-  const handleTabChange = (_, newIndex) => {
-    const key = TAB_KEYS[newIndex] ?? "honorarios";
-    setSearchParams({ tab: key }, { replace: true });
+    const cuentasKpi = (ccResumenQuery.data ?? []).reduce(
+      (acc, { totales }) => {
+        acc.cargos += Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0);
+        acc.cobrado += Number(totales?.ingresosPesos ?? 0);
+        acc.pendiente += Number(totales?.saldoPesos ?? 0);
+        return acc;
+      },
+      { cargos: 0, cobrado: 0, pendiente: 0 },
+    );
+
+    return { honorarios: honorariosKpi, gastos: gastosKpi, cuentas: cuentasKpi };
+  }, [
+    processedHonorarios,
+    gastos,
+    dateRange,
+    debouncedSearch,
+    catalogQuery.data,
+    valorJusQuery.data,
+    getHonorarioSaldoPendiente,
+    estadosGastoById,
+    planesByHonorario,
+    clientesById,
+    expedientesById,
+    conceptosById,
+    ccResumenQuery.data,
+  ]);
+
+  const kpiLoading = tabKey === "honorarios"
+    ? honorariosQuery.isLoading || planesQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
+    : tabKey === "gastos"
+      ? gastosQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
+      : tabKey === "cuentas_corrientes"
+        ? ccResumenQuery.isLoading
+        : false;
+
+  const kpiCards = useMemo(() => {
+    switch (tabKey) {
+      case "honorarios":
+        return [
+          { label: "Total Honorarios", value: formatMoneyAr(kpis.honorarios.total), icon: <Payments />, tone: theme.palette.primary.main },
+          { label: "Cobrado", value: formatMoneyAr(kpis.honorarios.cobrado), icon: <AccountBalanceWallet />, tone: theme.palette.success.main },
+          { label: "Pendiente", value: formatMoneyAr(kpis.honorarios.pendiente), icon: <TrendingDown />, tone: theme.palette.warning.main },
+        ];
+      case "gastos":
+        return [
+          { label: "Gastos Totales", value: formatMoneyAr(kpis.gastos.total), icon: <ReceiptLong />, tone: theme.palette.warning.main },
+          { label: "Cobrado", value: formatMoneyAr(kpis.gastos.pagado), icon: <AccountBalanceWallet />, tone: theme.palette.success.main },
+          { label: "Pendiente", value: formatMoneyAr(kpis.gastos.pendiente), icon: <TrendingDown />, tone: theme.palette.error.main },
+        ];
+      case "cuentas_corrientes":
+        return [
+          { label: "Total Cargos", value: formatMoneyAr(kpis.cuentas.cargos), icon: <Payments />, tone: theme.palette.primary.main },
+          { label: "Total Cobrado", value: formatMoneyAr(kpis.cuentas.cobrado), icon: <AccountBalanceWallet />, tone: theme.palette.success.main },
+          { label: "Total Pendiente", value: formatMoneyAr(kpis.cuentas.pendiente), icon: <TrendingDown />, tone: kpis.cuentas.pendiente > 0 ? theme.palette.error.main : theme.palette.success.main },
+        ];
+      default:
+        return [];
+    }
+  }, [tabKey, kpis, theme]);
+
+  // La navegación entre secciones ahora es por la barra lateral (?tab=). Al cambiar de
+  // sección limpiamos búsqueda, orden y página (lo que antes hacía el onChange de las tabs).
+  useEffect(() => {
     setSearch("");
     setOrderBy("fecha");
     setOrder("desc");
-  };
+    setPage(0);
+  }, [tabKey]);
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -884,9 +896,11 @@ export default function Finanzas() {
     <Box>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "flex-start" }} spacing={2} sx={{ mb: 3 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0 }}>Finanzas</Typography>
-          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
-            Vista consolidada de honorarios, gastos e ingresos del estudio.
+          <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Finanzas
+          </Typography>
+          <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: 0, mt: 0.25 }}>
+            {TAB_LABELS[tabKey]}
           </Typography>
         </Box>
         {tabKey !== "cuentas_corrientes" && canCrearActivo && (
@@ -916,10 +930,31 @@ export default function Finanzas() {
           display: "flex",
           flexWrap: "wrap",
           alignItems: "center",
-          gap: 1,
+          gap: 1.5,
         }}
       >
-        <CalendarMonth sx={{ color: "text.secondary", fontSize: 20, mr: 0.5 }} />
+        <TextField
+          size="small"
+          value={search}
+          onChange={(event) => { setSearch(event.target.value); setPage(0); }}
+          placeholder={
+            tabKey === "honorarios"
+              ? "Buscar por concepto, cliente o expediente..."
+              : "Buscar por descripcion, cliente o expediente..."
+          }
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search fontSize="small" sx={{ color: "text.secondary" }} />
+                </InputAdornment>
+              ),
+            },
+          }}
+          sx={{ flex: "1 1 240px", minWidth: 200 }}
+        />
+        <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1, ml: { md: "auto" } }}>
+          <CalendarMonth sx={{ color: "text.secondary", fontSize: 20, mr: 0.5 }} />
         <Typography
           variant="caption"
           sx={{
@@ -967,132 +1002,41 @@ export default function Finanzas() {
             />
           </>
         )}
+        </Box>
       </Paper>
 
-      <MotionDiv
-        initial="hidden"
-        animate="show"
-        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
-      >
-        <Grid container spacing={2} sx={{ mb: 2.5 }}>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <MotionDiv
-              variants={{
-                hidden: { opacity: 0, y: 16 },
-                show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-              }}
-            >
-              {kpiLoading ? <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} /> : (
-                <KpiCard
-                  label="Honorarios pendientes"
-                  valuePesos={formatMoneyAr(kpis.honorariosPendientes.ars)}
-                  valueUsd={formatCurrency(kpis.honorariosPendientes.usd, "USD")}
-                  icon={<Payments />}
-                  tone={theme.palette.primary.main}
-                />
-              )}
-            </MotionDiv>
+      {kpiCards.length > 0 && (
+        <MotionDiv
+          initial="hidden"
+          animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
+        >
+          <Grid container spacing={2} sx={{ mb: 2.5 }}>
+            {kpiCards.map((card) => (
+              <Grid key={card.label} size={{ xs: 12, sm: 6, md: 4 }}>
+                <MotionDiv
+                  variants={{
+                    hidden: { opacity: 0, y: 16 },
+                    show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+                  }}
+                >
+                  {kpiLoading ? (
+                    <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} />
+                  ) : (
+                    <KpiCard
+                      label={card.label}
+                      valuePesos={card.value}
+                      valueUsd=""
+                      icon={card.icon}
+                      tone={card.tone}
+                    />
+                  )}
+                </MotionDiv>
+              </Grid>
+            ))}
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <MotionDiv
-              variants={{
-                hidden: { opacity: 0, y: 16 },
-                show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-              }}
-            >
-              {kpiLoading ? <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} /> : (
-                <KpiCard
-                  label="Gastos pendientes"
-                  valuePesos={formatMoneyAr(kpis.gastosPendientes.ars)}
-                  valueUsd={formatCurrency(kpis.gastosPendientes.usd, "USD")}
-                  icon={<ReceiptLong />}
-                  tone={theme.palette.warning.main}
-                />
-              )}
-            </MotionDiv>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <MotionDiv
-              variants={{
-                hidden: { opacity: 0, y: 16 },
-                show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-              }}
-            >
-              {kpiLoading ? <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} /> : (
-                <KpiCard
-                  label="Ingresos totales"
-                  valuePesos={formatMoneyAr(kpis.ingresosRecaudados.ars)}
-                  valueUsd={formatCurrency(kpis.ingresosRecaudados.usd, "USD")}
-                  icon={<AccountBalanceWallet />}
-                  tone={theme.palette.success.main}
-                />
-              )}
-            </MotionDiv>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <MotionDiv
-              variants={{
-                hidden: { opacity: 0, y: 16 },
-                show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-              }}
-            >
-              {kpiLoading ? <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} /> : (
-                <KpiCard
-                  label="Saldo pendiente total"
-                  valuePesos={formatMoneyAr(kpis.saldoPendienteTotal.ars)}
-                  valueUsd={formatCurrency(kpis.saldoPendienteTotal.usd, "USD")}
-                  icon={<TrendingDown />}
-                  tone={kpis.saldoPendienteTotal.ars > 0 ? theme.palette.error.main : theme.palette.success.main}
-                />
-              )}
-            </MotionDiv>
-          </Grid>
-        </Grid>
-      </MotionDiv>
-
-      <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", bgcolor: "background.paper", overflow: "hidden" }}>
-        <Box sx={{ px: 2, pt: 1.5, borderBottom: "1px solid", borderColor: "divider" }}>
-          <Tabs
-            value={tabIndex}
-            onChange={handleTabChange}
-            variant="scrollable"
-            scrollButtons="auto"
-            allowScrollButtonsMobile
-            sx={{
-              minHeight: 44,
-              "& .MuiTab-root": { minHeight: 44, fontWeight: 900, textTransform: "none" },
-            }}
-          >
-            <Tab label="Honorarios" />
-            <Tab label="Gastos" />
-            <Tab label="Ingresos" />
-            <Tab label="Planes" />
-            <Tab label="Cuentas Corrientes" />
-          </Tabs>
-        </Box>
-
-        <Box sx={{ p: 2 }}>
-          <TextField
-            size="small"
-            fullWidth
-            value={search}
-            onChange={(event) => { setSearch(event.target.value); setPage(0); }}
-            placeholder={
-              tabKey === "honorarios"
-                ? "Buscar por concepto, cliente o expediente..."
-                : "Buscar por descripcion, cliente o expediente..."
-            }
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" sx={{ color: "text.secondary" }} />
-                  </InputAdornment>
-                ),
-              },
-            }}
-            sx={{ mb: 2 }}
-          />
+        </MotionDiv>
+      )}
 
           <TabPanel value={tabIndex} index={0}>
             <FinanzasTableShell
@@ -1327,7 +1271,7 @@ export default function Finanzas() {
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
-                  <TableRow sx={{ bgcolor: alpha(theme.palette.warning.main, 0.08) }}>
+                  <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
                     {sortableHead("cliente", "Cliente")}
                     {sortableHead("expediente", "Expediente")}
@@ -1512,7 +1456,7 @@ export default function Finanzas() {
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
-                  <TableRow sx={{ bgcolor: alpha(theme.palette.success.main, 0.08) }}>
+                  <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
                     {sortableHead("cliente", "Cliente")}
                     {sortableHead("expediente", "Expediente")}
@@ -1800,8 +1744,6 @@ export default function Finanzas() {
               <Typography variant="caption" sx={{ color: "text.secondary" }}>Sincronizando...</Typography>
             </Stack>
           )}
-        </Box>
-      </Paper>
     </Box>
   );
 }

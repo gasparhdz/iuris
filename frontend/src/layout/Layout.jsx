@@ -54,6 +54,11 @@ import {
   Event as EventIcon,
   ManageSearch as AuditoriaIcon,
   Paid as PaidIcon,
+  RequestQuote as HonorariosIcon,
+  Payments as GastosIcon,
+  TrendingUp as IngresosIcon,
+  EventRepeat as PlanesIcon,
+  AccountBalanceWallet as CuentaCorrienteIcon,
   Shield as ShieldIcon,
 } from "@mui/icons-material";
 import { useThemeMode } from "../theme/ThemeModeProvider";
@@ -82,7 +87,17 @@ const allMenuItems = [
   { text: "Agenda", icon: <CalendarIcon />, path: "/agenda", modulos: ["EVENTOS", "TAREAS"] },
   { text: "Tareas", icon: <TaskIcon />, path: "/tareas", modulo: "TAREAS" },
   { text: "Eventos", icon: <EventIcon />, path: "/eventos", modulo: "EVENTOS" },
-  { text: "Finanzas", icon: <PaidIcon />, path: "/finanzas", modulos: ["HONORARIOS", "GASTOS", "INGRESOS", "PLANES"] },
+  {
+    text: "Finanzas",
+    icon: <PaidIcon />,
+    children: [
+      { text: "Honorarios", icon: <HonorariosIcon />, path: "/finanzas", tab: "honorarios", modulo: "HONORARIOS" },
+      { text: "Gastos", icon: <GastosIcon />, path: "/finanzas", tab: "gastos", modulo: "GASTOS" },
+      { text: "Ingresos", icon: <IngresosIcon />, path: "/finanzas", tab: "ingresos", modulo: "INGRESOS" },
+      { text: "Planes", icon: <PlanesIcon />, path: "/finanzas", tab: "planes", modulo: "PLANES" },
+      { text: "Cuentas Corrientes", icon: <CuentaCorrienteIcon />, path: "/finanzas", tab: "cuentas_corrientes", modulos: ["INGRESOS", "HONORARIOS", "GASTOS"] },
+    ],
+  },
   { text: "Reportes", icon: <BarChartIcon />, path: "/reportes", modulos: ["HONORARIOS", "GASTOS", "INGRESOS"] },
   { text: "Mi Equipo", icon: <GroupIcon />, path: "/equipo", modulo: "EQUIPO" },
   { text: "Auditoría", icon: <AuditoriaIcon />, path: "/auditoria", roles: ["DIRECTOR"] },
@@ -513,12 +528,33 @@ export default function Layout() {
             >
               <MenuIcon />
             </IconButton>
-            <BrandLogo
+            <Box
+              component={NavLink}
+              to="/"
+              end
+              aria-label="Ir al inicio"
               sx={{
-                height: { xs: 44, sm: 52 },
-                flexShrink: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                lineHeight: 0,
+                borderRadius: "10px",
+                textDecoration: "none",
+                color: "inherit",
+                "&:hover": { opacity: 0.88 },
+                "&:focus-visible": {
+                  outline: "2px solid",
+                  outlineColor: "primary.main",
+                  outlineOffset: 2,
+                },
               }}
-            />
+            >
+              <BrandLogo
+                sx={{
+                  height: { xs: 44, sm: 52 },
+                  flexShrink: 0,
+                }}
+              />
+            </Box>
           </Box>
 
           <Box
@@ -880,6 +916,9 @@ export default function Layout() {
               const collapsedSidebar = !open && !isMobile;
               const groupActive = item.children.some((child) => isActivePath(child.path));
               const groupOpen = Boolean(openGroups[item.text]);
+              // Para hijos con `tab` (Finanzas comparten /finanzas): el resaltado mira el ?tab= actual.
+              const currentTab = new URLSearchParams(location.search).get("tab");
+              const effectiveTab = currentTab || item.children.find((c) => c.tab)?.tab;
               return (
                 <Box key={item.text} sx={{ mb: 0.25 }}>
                   <Tooltip title={collapsedSidebar ? item.text : ""} placement="right">
@@ -912,12 +951,15 @@ export default function Layout() {
                   <Collapse in={groupOpen && (open || isMobile)} timeout="auto" unmountOnExit>
                     <List disablePadding sx={{ pl: 1.5 }}>
                       {item.children.map((child) => {
-                        const childActive = isActivePath(child.path);
+                        const childActive = child.tab
+                          ? location.pathname === child.path && child.tab === effectiveTab
+                          : isActivePath(child.path);
+                        const childTo = child.tab ? `${child.path}?tab=${child.tab}` : child.path;
                         return (
                           <ListItem key={child.text} disablePadding sx={{ display: "block", mb: 0.25 }}>
                             <ListItemButton
                               component={NavLink}
-                              to={child.path}
+                              to={childTo}
                               onClick={() => { if (isMobile) setOpen(false); }}
                               sx={navButtonSx(childActive)}
                             >

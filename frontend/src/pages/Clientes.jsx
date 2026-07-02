@@ -7,6 +7,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import * as XLSX from "xlsx";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
+import { denseTableSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -484,7 +485,7 @@ export default function Clientes() {
       ) : (
         <Paper elevation={0} sx={{ ...panelSx, borderRadius: "16px", overflow: "hidden" }}>
           <TableContainer>
-            <Table>
+            <Table size="small" sx={denseTableSx}>
               <TableHead>
                 <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
                   {[

@@ -8,6 +8,7 @@ import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
 import SisfeSyncButton from "../components/SisfeSyncButton";
+import { denseTableSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -344,7 +345,7 @@ export default function Expedientes() {
       ) : (
         <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
           <TableContainer>
-            <Table>
+            <Table size="small" sx={denseTableSx}>
               <TableHead>
                 <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                   {[

@@ -5,7 +5,7 @@ import { enqueueSisfeSync } from "../queue/sisfe.queue.js";
 import { SecurityAuditService } from "../services/security-audit.service.js";
 
 const SISFE_BASE_URL = "https://sisfe.justiciasantafe.gov.ar";
-const APP_SISFE_PREFIX = "/lex/api/sisfe";
+const APP_SISFE_PREFIX = "/api/sisfe";
 
 type ProxyQuery = {
   sisfeToken?: string;
@@ -271,11 +271,11 @@ function rewriteHtml(html: string, token?: string) {
   const tokenParam = token ? `sisfeToken=${encodeURIComponent(token)}` : "";
   const withProxy = html
     .replaceAll(SISFE_BASE_URL, `${APP_SISFE_PREFIX}/proxy`)
-    .replace(/\b(href|action|src)="\/(?!lex\/api\/sisfe\/proxy|api\/v1\/sisfe\/proxy)/g, (_match, attr: string) => `${attr}="${APP_SISFE_PREFIX}/proxy/`);
+    .replace(/\b(href|action|src)="\/(?!api\/sisfe\/proxy|api\/v1\/sisfe\/proxy)/g, (_match, attr: string) => `${attr}="${APP_SISFE_PREFIX}/proxy/`);
 
   if (!tokenParam) return withProxy;
 
-  return withProxy.replace(/(href|action|src)="([^"]*\/lex\/api\/sisfe\/proxy[^"]*)"/g, (_match, attr: string, url: string) => {
+  return withProxy.replace(/(href|action|src)="([^"]*\/api\/sisfe\/proxy[^"]*)"/g, (_match, attr: string, url: string) => {
     return `${attr}="${appendQuery(url, tokenParam)}"`;
   });
 }

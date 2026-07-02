@@ -85,7 +85,7 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
       await PushService.sendToUsuario(usuarioId, {
         title: "Recordatorio de tarea",
         body: tarea.titulo,
-        url: "/lex/tareas",
+        url: "/tareas",
         tag: `tarea-${tarea.id}`,
       }, logger);
 
@@ -136,7 +136,7 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
       await PushService.sendToUsuario(evento.createdBy, {
         title: "Recordatorio de evento",
         body: evento.descripcion ?? "Evento próximo",
-        url: "/lex/agenda",
+        url: "/agenda",
         tag: `evento-${evento.id}`,
       }, logger);
 

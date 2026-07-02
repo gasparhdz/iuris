@@ -6,6 +6,7 @@ import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
+import { denseTableSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -622,7 +623,7 @@ function TaskTable({
   return (
     <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
       <TableContainer>
-        <Table sx={{ tableLayout: "fixed", minWidth: 900 }}>
+        <Table size="small" sx={{ ...denseTableSx, tableLayout: "fixed", minWidth: 900 }}>
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
               {columns.map((column) => {

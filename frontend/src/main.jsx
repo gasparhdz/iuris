@@ -85,7 +85,7 @@ function ScrollToTop() {
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("/lex/sw.js")
+      .register(`${import.meta.env.BASE_URL}sw.js`)
       .then((registration) => {
         registration.addEventListener("updatefound", () => {
           const newWorker = registration.installing;
@@ -147,7 +147,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             autoHideDuration={3000}
             anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
           >
-            <BrowserRouter basename="/lex">
+            <BrowserRouter>
               <ScrollToTop />
               <ErrorBoundary>
               <Routes>

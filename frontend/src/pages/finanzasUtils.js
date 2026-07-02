@@ -100,9 +100,7 @@ export function compareValues(valA, valB) {
   return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: "base" });
 }
 
-export const denseTableSx = {
-  "& td": { py: 0.75, px: 2 },
-};
+export { denseTableSx } from "../theme/tableStyles";
 
 export const ellipsisSx = {
   maxWidth: 220,

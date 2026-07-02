@@ -1,30 +1,32 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Redirecciona rutas HTML al base path de la app en desarrollo y producción.
-const redirectBasePlugin = () => {
+// Redirige bookmarks viejos (/lex, /iuris) a la raíz.
+const legacyRedirectPlugin = () => {
   const middleware = (req, res, next) => {
     const [pathname, queryString] = req.url.split('?')
     const query = queryString ? `?${queryString}` : ''
-    const acceptsHtml = req.headers.accept?.includes('text/html')
-    const hasFileExtension = /\.[a-zA-Z0-9]+$/.test(pathname)
-    const isViteInternal = pathname.startsWith('/@') || pathname.startsWith('/src/') || pathname.startsWith('/node_modules/')
-    const isPublicAsset = pathname.startsWith('/icons/') || pathname === '/manifest.json' || pathname === '/sw.js' || pathname === '/vite.svg'
 
-    if (pathname === '/lex') {
-      res.writeHead(301, { Location: `/lex/${query}` })
+    if (pathname === '/lex' || pathname === '/lex/') {
+      res.writeHead(301, { Location: `/${query}` })
       res.end()
       return
     }
 
-    if (
-      acceptsHtml
-      && !pathname.startsWith('/lex/')
-      && !hasFileExtension
-      && !isViteInternal
-      && !isPublicAsset
-    ) {
-      res.writeHead(302, { Location: `/lex${pathname === '/' ? '/' : pathname}${query}` })
+    if (pathname.startsWith('/lex/')) {
+      res.writeHead(301, { Location: `/${pathname.slice('/lex/'.length)}${query}` })
+      res.end()
+      return
+    }
+
+    if (pathname === '/iuris' || pathname === '/iuris/') {
+      res.writeHead(301, { Location: `/${query}` })
+      res.end()
+      return
+    }
+
+    if (pathname.startsWith('/iuris/')) {
+      res.writeHead(301, { Location: `/${pathname.slice('/iuris/'.length)}${query}` })
       res.end()
       return
     }
@@ -33,7 +35,7 @@ const redirectBasePlugin = () => {
   }
 
   return {
-    name: 'redirect-base',
+    name: 'legacy-redirect',
     configureServer(server) {
       server.middlewares.use(middleware)
     },
@@ -44,9 +46,9 @@ const redirectBasePlugin = () => {
 }
 
 export default defineConfig({
-  base: '/lex/',
+  base: '/',
   publicDir: 'public',
-  plugins: [react(), redirectBasePlugin()],
+  plugins: [react(), legacyRedirectPlugin()],
   server: {
     host: '0.0.0.0',
     port: 5173,
@@ -57,10 +59,10 @@ export default defineConfig({
       port: 5173,
     },
     proxy: {
-      '/lex/api': {
+      '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/lex\/api/, '/api/v1'),
+        rewrite: (path) => path.replace(/^\/api/, '/api/v1'),
       },
     },
   },
@@ -69,10 +71,10 @@ export default defineConfig({
     port: 4174,
     strictPort: true,
     proxy: {
-      '/lex/api': {
+      '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/lex\/api/, '/api/v1'),
+        rewrite: (path) => path.replace(/^\/api/, '/api/v1'),
       },
     },
   },

@@ -1,5 +1,5 @@
 const CACHE_NAME = "iuris-cache-v2";
-const BASE_PATH = "/lex/";
+const BASE_PATH = "/";
 const APP_SHELL = [
   BASE_PATH,
   `${BASE_PATH}manifest.json`,
@@ -154,8 +154,8 @@ self.addEventListener("push", (event) => {
       body: payload.body,
       tag: payload.tag,
       data: { url: payload.url },
-      icon: "/lex/icons/icon-192.png",
-      badge: "/lex/icons/icon-192.png",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
     }),
   );
 });

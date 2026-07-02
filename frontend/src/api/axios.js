@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const apiBasePath = `${import.meta.env.BASE_URL}api`.replace(/\/+$/, "");
+
 const api = axios.create({
-  baseURL: "/lex/api",
+  baseURL: apiBasePath,
   // Necesario para enviar la cookie HttpOnly del refresh token en /auth/refresh.
   withCredentials: true,
 });

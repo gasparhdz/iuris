@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -454,16 +455,16 @@ export default function Equipo() {
           ) : (
             <Paper elevation={0} sx={{ ...panelStyle, overflow: "hidden" }}>
               <TableContainer>
-                <Table>
+                <Table size="small" sx={denseTableSx}>
                   <TableHead>
                     <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
-                      <TableCell sx={{ fontWeight: 800 }}>Usuario</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>Email / Contacto</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>DNI / Documento</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>Rol Asignado</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>Ultimo acceso</TableCell>
-                      <TableCell sx={{ fontWeight: 800 }}>Estado de Cuenta</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 800 }}>Acciones</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Usuario</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Email / Contacto</TableCell>
+                      <TableCell sx={tableHeadCellSx}>DNI / Documento</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Rol Asignado</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Ultimo acceso</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Estado de Cuenta</TableCell>
+                      <TableCell align="right" sx={tableHeadCellSx}>Acciones</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

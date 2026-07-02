@@ -1,4 +1,4 @@
-import { createTheme } from "@mui/material/styles";
+import { alpha, createTheme } from "@mui/material/styles";
 
 // Tema Iuris — Dirección "Clave"
 // Identidad de marca oficial. Azul de confianza + turquesa de acento.
@@ -123,6 +123,16 @@ export const getThemeIuris = (mode = "light") => {
                 ? "0 8px 32px 0 rgba(0,0,0,0.50)"
                 : "0 8px 32px 0 rgba(12,16,21,0.10)",
             },
+          },
+        },
+      },
+      MuiTableCell: {
+        styleOverrides: {
+          // Color unico de cabecera de tabla en todo el sistema. Al ir en la celda
+          // (variant head), predomina sobre cualquier bgcolor que ponga cada pagina en el TableRow.
+          head: {
+            backgroundColor: alpha(primaryMain, isDark ? 0.08 : 0.05),
+            padding: "6px 16px",
           },
         },
       },
