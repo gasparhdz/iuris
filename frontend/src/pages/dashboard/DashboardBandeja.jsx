@@ -93,7 +93,7 @@ function TypeBadge({ kind, overdue }) {
   );
 }
 
-function GroupHeader({ group, onMarkAll }) {
+function GroupHeader({ group, onMarkAll, collapsed, onToggle }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
   // Colores derivados del tono del grupo, adaptados al modo: en oscuro el texto y
@@ -109,8 +109,10 @@ function GroupHeader({ group, onMarkAll }) {
       spacing={1.1}
       flexWrap="wrap"
       useFlexGap
-      sx={{ mt: 2.75, mb: 1.25, rowGap: 1 }}
+      onClick={onToggle}
+      sx={{ mt: 2.75, mb: 1.25, rowGap: 1, cursor: "pointer", userSelect: "none" }}
     >
+      <ExpandMore sx={{ fontSize: 18, color: "text.disabled", flexShrink: 0, transition: "transform 0.2s ease", transform: collapsed ? "rotate(-90deg)" : "none" }} />
       <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: dotColor, flexShrink: 0 }} />
       <Typography sx={{ fontWeight: 700, fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase", color: labelColor }}>
         {group.label}
@@ -122,7 +124,7 @@ function GroupHeader({ group, onMarkAll }) {
       {group.showMarkAll && (
         <Button
           size="small"
-          onClick={onMarkAll}
+          onClick={(e) => { e.stopPropagation(); onMarkAll(); }}
           sx={{
             height: 26,
             px: 1.25,
@@ -649,6 +651,8 @@ export default function DashboardBandeja({ view, onSwitchView }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuNovedad, setMenuNovedad] = useState(null);
   const [dialog, setDialog] = useState({ open: false, modo: "tarea", novedad: null });
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const toggleGroup = (id) => setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const { text: greetingText, slot: greetingSlot } = bandejaGreeting(user);
   const { Icon: GreetingIcon, color: greetingColor } = GREETING_ICON[greetingSlot];
@@ -968,8 +972,10 @@ export default function DashboardBandeja({ view, onSwitchView }) {
             <GroupHeader
               group={group}
               onMarkAll={() => marcarTodo.mutate()}
+              collapsed={Boolean(collapsedGroups[group.id])}
+              onToggle={() => toggleGroup(group.id)}
             />
-            {renderGroupItems(group)}
+            {!collapsedGroups[group.id] && renderGroupItems(group)}
           </Box>
         ))
       )}
