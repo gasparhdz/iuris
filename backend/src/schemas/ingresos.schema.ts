@@ -26,6 +26,7 @@ export const ingresoQuerySchema = z.object({
   cuotaId: positiveIntSchema.optional(),
   from: dateStringSchema.optional(),
   to: dateStringSchema.optional(),
+  search: z.string().optional(),
 }).strict();
 
 export const ingresoListResponseSchema = z.object({

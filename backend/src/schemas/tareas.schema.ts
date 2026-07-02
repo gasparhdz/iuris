@@ -67,6 +67,8 @@ export const updateTareaSchema = tareaBaseSchema.partial().extend({
 export const tareaQuerySchema = z.object({
   completada: z.enum(["true", "false"]).optional().describe("true o false"),
   asignadoA: positiveIntSchema.optional(),
+  search: z.string().optional(),
+  prioridadId: positiveIntSchema.optional(),
   ...paginationQuerySchema.shape,
 }).strict();
 
@@ -142,3 +144,4 @@ export const subtareaToggleResponseSchema = z.object({
 
 export type CreateTareaInput = z.infer<typeof createTareaSchema>;
 export type UpdateTareaInput = z.infer<typeof updateTareaSchema>;
+export type TareaQueryInput = z.infer<typeof tareaQuerySchema>;

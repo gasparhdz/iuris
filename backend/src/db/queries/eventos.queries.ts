@@ -1,11 +1,17 @@
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "../index.js";
 import { eventos } from "../schema.js";
 
 type NewEvento = typeof eventos.$inferInsert;
 
 export class EventosQueries {
-  static async findAll(estudioId: number, limit: number, offset: number, from?: Date, to?: Date) {
+  static async findAll(
+    estudioId: number,
+    limit: number,
+    offset: number,
+    filters: { from?: Date; to?: Date; search?: string; tipoId?: number; estadoId?: number; upcoming?: boolean } = {},
+  ) {
+    const { from, to, search, tipoId, estadoId, upcoming } = filters;
     const conditions = [
       eq(eventos.estudioId, estudioId),
       isNull(eventos.deletedAt),
@@ -13,6 +19,18 @@ export class EventosQueries {
 
     if (from) conditions.push(gte(eventos.fechaInicio, from));
     if (to) conditions.push(lte(eventos.fechaInicio, to));
+    if (tipoId) conditions.push(eq(eventos.tipoId, tipoId));
+    if (estadoId) conditions.push(eq(eventos.estadoId, estadoId));
+    if (upcoming === true) conditions.push(gte(eventos.fechaInicio, new Date()));
+    if (upcoming === false) conditions.push(lte(eventos.fechaInicio, new Date()));
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`;
+      conditions.push(or(
+        ilike(eventos.descripcion, term),
+        ilike(eventos.observaciones, term),
+        ilike(eventos.ubicacion, term),
+      )!);
+    }
 
     const whereCondition = and(...conditions);
 

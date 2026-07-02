@@ -1,10 +1,8 @@
-import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs from "dayjs";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale/es";
 import {
-  abrirCanalNotificaciones,
   getNovedades,
   marcarNovedadesLeidas,
 } from "../../api/notificaciones.api";
@@ -40,13 +38,6 @@ export function useNovedadesData() {
   const totalNovedades = novedadesQuery.data?.data?.total ?? 0;
   const lastSyncAt = sisfeQuery.data?.lastSyncAt ?? null;
   const frescura = frescuraSync(lastSyncAt);
-
-  useEffect(() => {
-    const source = abrirCanalNotificaciones(() => {
-      queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] });
-    });
-    return () => source?.close();
-  }, [queryClient]);
 
   const marcarTodo = useMutation({
     mutationFn: () => marcarNovedadesLeidas(),

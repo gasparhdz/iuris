@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
 import { usePermisos } from "../auth/usePermissions";
 import {
@@ -86,19 +87,13 @@ export default function TareaDetalle() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 1000 * 60 * 5,
   });
 

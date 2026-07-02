@@ -105,13 +105,31 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
       metadata: { scopedToCase: Boolean(casoId) },
     });
 
-    const job = await enqueueSisfeSync({
-      usuarioId: request.authUser.id,
-      estudioId: request.authUser.estudioId,
-      casoId,
-    });
+    await updateSyncStatus(request.authUser.id, "running", 0, "Preparando sincronización...");
 
-    return reply.status(202).send({ data: { message: "Sincronización encolada", jobId: job.id } });
+    try {
+      const job = await enqueueSisfeSync({
+        usuarioId: request.authUser.id,
+        estudioId: request.authUser.estudioId,
+        casoId,
+      });
+
+      return reply.status(202).send({ data: { message: "Sincronización encolada", jobId: job.id } });
+    } catch (error) {
+      request.log.error(error, "No se pudo encolar sincronización SISFE");
+      await updateSyncStatus(
+        request.authUser.id,
+        "error",
+        0,
+        "No se pudo iniciar la sincronización. Verificá que Redis esté activo y reiniciá el backend.",
+      );
+      return reply.status(503).send({
+        error: {
+          code: "SISFE_SYNC_QUEUE_UNAVAILABLE",
+          message: "No se pudo encolar la sincronización SISFE",
+        },
+      });
+    }
   });
 
   fastify.post("/sync/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {

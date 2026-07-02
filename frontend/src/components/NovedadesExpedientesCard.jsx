@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs from "dayjs";
@@ -40,7 +40,6 @@ import {
 import {
   getNovedades,
   marcarNovedadesLeidas,
-  abrirCanalNotificaciones,
 } from "../api/notificaciones.api";
 import { getSisfeStatus } from "../api/sisfe.api";
 import AgendarDialog from "./AgendarDialog";
@@ -109,14 +108,6 @@ export default function NovedadesExpedientesCard() {
   });
   const lastSyncAt = sisfeStatus?.lastSyncAt ?? null;
   const frescura = frescuraSync(lastSyncAt);
-
-  // Refrescar cuando llega un evento SSE de novedades nuevas.
-  useEffect(() => {
-    const source = abrirCanalNotificaciones(() => {
-      queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] });
-    });
-    return () => source?.close();
-  }, [queryClient]);
 
   const marcarTodo = useMutation({
     mutationFn: () => marcarNovedadesLeidas(),

@@ -24,6 +24,7 @@ export const gastoQuerySchema = z.object({
   casoId: positiveIntSchema.optional(),
   from: dateStringSchema.optional(),
   to: dateStringSchema.optional(),
+  search: z.string().optional(),
 }).strict();
 
 export const gastoItemSchema = z.object({

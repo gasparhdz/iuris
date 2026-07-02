@@ -7,6 +7,8 @@ import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
+import { fetchAllPages, unwrapPaged } from "../api/pagination";
+import { useDebounced } from "../hooks/useDebounced";
 import SisfeSyncButton from "../components/SisfeSyncButton";
 import { denseTableSx } from "../theme/tableStyles";
 import {
@@ -95,20 +97,29 @@ export default function Expedientes() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
+  const debouncedSearch = useDebounced(search);
+
+  const listParams = useMemo(() => ({
+    page: page + 1,
+    limit: rowsPerPage,
+    search: debouncedSearch.trim() || undefined,
+    ramaId: ramaFilter === "all" ? undefined : Number(ramaFilter),
+    estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
+    radicacionParentId: radicacionFilter === "all" ? undefined : Number(radicacionFilter),
+  }), [page, rowsPerPage, debouncedSearch, ramaFilter, estadoFilter, radicacionFilter]);
+
   const casosQuery = useQuery({
-    queryKey: ["expedientes"],
+    queryKey: ["expedientes", "list", listParams],
     queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
+      const { data } = await api.get("/expedientes", { params: listParams });
+      return unwrapPaged(data);
     },
+    placeholderData: (previous) => previous,
   });
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
   });
 
@@ -132,20 +143,8 @@ export default function Expedientes() {
   const estadosById = useMemo(() => new Map(estados.map((p) => [p.id, p])), [estados]);
   const radicacionesById = useMemo(() => new Map(radicaciones.map((p) => [p.id, p])), [radicaciones]);
 
-  const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (casosQuery.data ?? []).filter((caso) => {
-      const cliente = clientesById.get(caso.clienteId);
-      const tipo = tiposById.get(caso.tipoId);
-      const radicacion = radicacionesById.get(caso.radicacionId);
-      const searchable = [caso.caratula, caso.nroExpte, clienteNombre(cliente)].filter(Boolean).join(" ").toLowerCase();
-      const matchSearch = !q || searchable.includes(q);
-      const matchRama = ramaFilter === "all" || Number(tipo?.parentId) === Number(ramaFilter);
-      const matchEstado = estadoFilter === "all" || Number(caso.estadoId) === Number(estadoFilter);
-      const matchRad = radicacionFilter === "all" || Number(radicacion?.parentId) === Number(radicacionFilter);
-      return matchSearch && matchRama && matchEstado && matchRad;
-    });
-  }, [casosQuery.data, clientesById, tiposById, estadosById, radicacionesById, search, ramaFilter, estadoFilter, radicacionFilter]);
+  const casos = casosQuery.data?.items ?? [];
+  const totalCount = casosQuery.data?.meta?.total ?? 0;
 
   const sortedRows = useMemo(() => {
     const comparator = (a, b) => {
@@ -183,17 +182,15 @@ export default function Expedientes() {
       return valA < valB ? -1 : 1;
     };
 
-    const stabilized = [...rows].sort((a, b) => {
+    const stabilized = [...casos].sort((a, b) => {
       const cmp = comparator(a, b);
       return order === "desc" ? -cmp : cmp;
     });
 
     return stabilized;
-  }, [rows, orderBy, order, clientesById, tiposById, estadosById, radicacionesById]);
+  }, [casos, orderBy, order, clientesById, tiposById, estadosById, radicacionesById]);
 
-  const paginatedRows = useMemo(() => {
-    return sortedRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [sortedRows, page, rowsPerPage]);
+  const displayRows = sortedRows;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -212,11 +209,19 @@ export default function Expedientes() {
     onError: (error) => enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo eliminar el expediente", { variant: "error" }),
   });
 
-  const loading = casosQuery.isLoading || clientesQuery.isLoading;
+  const loading = casosQuery.isLoading;
 
-  function handleExportExcel() {
+  async function handleExportExcel() {
     try {
-      const exportRows = rows.map((caso) => {
+      const exportBase = {
+        limit: 100,
+        search: search.trim() || undefined,
+        ramaId: ramaFilter === "all" ? undefined : Number(ramaFilter),
+        estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
+        radicacionParentId: radicacionFilter === "all" ? undefined : Number(radicacionFilter),
+      };
+      const allCasos = await fetchAllPages("/expedientes", exportBase);
+      const exportRows = allCasos.map((caso) => {
         const cliente = clientesById.get(caso.clienteId);
         const tipo = tiposById.get(caso.tipoId);
         const rama = ramas.find((r) => r.id === tipo?.parentId);
@@ -283,7 +288,7 @@ export default function Expedientes() {
 
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
-      ) : rows.length === 0 ? (
+      ) : totalCount === 0 && !casosQuery.isFetching ? (
         <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
           <FolderOpen sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 900 }}>
@@ -295,7 +300,7 @@ export default function Expedientes() {
         </Paper>
       ) : isMobile ? (
         <Stack spacing={1.5}>
-          {paginatedRows.map((caso) => {
+          {displayRows.map((caso) => {
             const cliente = clientesById.get(caso.clienteId);
             const estado = estadosById.get(caso.estadoId);
             return (
@@ -328,7 +333,7 @@ export default function Expedientes() {
           })}
           <TablePagination
             component="div"
-            count={rows.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
@@ -391,7 +396,7 @@ export default function Expedientes() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedRows.map((caso) => {
+                {displayRows.map((caso) => {
                   const cliente = clientesById.get(caso.clienteId);
                   const tipo = tiposById.get(caso.tipoId);
                   const estado = estadosById.get(caso.estadoId);
@@ -455,7 +460,7 @@ export default function Expedientes() {
           </TableContainer>
           <TablePagination
             component="div"
-            count={rows.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}

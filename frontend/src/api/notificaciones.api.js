@@ -23,8 +23,14 @@ export async function marcarNovedadesLeidas(movimientoIds) {
 /**
  * Abre el canal SSE de notificaciones. Devuelve el EventSource para cerrarlo.
  * El token viaja por query param porque EventSource no admite headers.
+ *
+ * @param {((data: unknown) => void) | { onNovedades?: (data: unknown) => void; onSisfeSync?: (data: unknown) => void }} handlers
  */
-export function abrirCanalNotificaciones(onNovedades) {
+export function abrirCanalNotificaciones(handlers) {
+  const normalized = typeof handlers === "function"
+    ? { onNovedades: handlers }
+    : (handlers ?? {});
+
   // EventSource no admite headers, así que el token viaja por query param. Se toma de memoria
   // (getAccessToken) porque ya no se persiste en localStorage.
   const token = getAccessToken();
@@ -32,12 +38,22 @@ export function abrirCanalNotificaciones(onNovedades) {
 
   const url = `${api.defaults.baseURL}/notificaciones/sse/stream?token=${encodeURIComponent(token)}`;
   const source = new EventSource(url);
-  source.addEventListener("novedades", (event) => {
+
+  const parse = (event) => {
     try {
-      onNovedades(JSON.parse(event.data));
+      return JSON.parse(event.data);
     } catch {
-      onNovedades(null);
+      return null;
     }
+  };
+
+  source.addEventListener("novedades", (event) => {
+    normalized.onNovedades?.(parse(event));
   });
+
+  source.addEventListener("sisfe_sync", (event) => {
+    normalized.onSisfeSync?.(parse(event));
+  });
+
   return source;
 }

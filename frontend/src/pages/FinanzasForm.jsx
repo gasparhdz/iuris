@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const MotionDiv = motion.div;
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 import {
   Alert,
   Autocomplete,
@@ -512,18 +513,12 @@ export default function FinanzasForm() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
   });
 
   const valorJusQuery = useQuery({
@@ -585,8 +580,8 @@ export default function FinanzasForm() {
         return unwrapEntity(data);
       }
       const path = tipo === "gasto" ? "gastos" : "ingresos";
-      const { data } = await api.get(`/${path}`, { params: { page: 1, limit: 100 } });
-      const found = unwrapPaged(data).items.find((row) => Number(row.id) === Number(editId));
+      const items = await fetchAllPages(`/${path}`);
+      const found = items.find((row) => Number(row.id) === Number(editId));
       if (!found) throw new Error("NOT_FOUND");
       return found;
     },
@@ -599,15 +594,11 @@ export default function FinanzasForm() {
     queryKey: ["honorarios", "pendientes", clienteIdForHonorarios, form.casoId],
     enabled: (tipoMovimiento === "ingreso" || tipoMovimiento === "convenio") && Boolean(clienteIdForHonorarios),
     queryFn: async () => {
-      const { data } = await api.get("/honorarios", {
-        params: {
-          page: 1,
-          limit: 100,
-          clienteId: clienteIdForHonorarios,
-          casoId: form.casoId || lockCasoId || undefined,
-        },
+      const items = await fetchAllPages("/honorarios", {
+        clienteId: clienteIdForHonorarios,
+        casoId: form.casoId || lockCasoId || undefined,
       });
-      return unwrapPaged(data).items.filter(isHonorarioPendiente);
+      return items.filter(isHonorarioPendiente);
     },
   });
 
@@ -629,13 +620,10 @@ export default function FinanzasForm() {
     enabled: tipoMovimiento === "ingreso" && Boolean(form.clienteId || lockClienteId),
     queryFn: async () => {
       const params = {
-        page: 1,
-        limit: 100,
         clienteId: form.clienteId || lockClienteId,
       };
       if (form.casoId || lockCasoId) params.casoId = form.casoId || lockCasoId;
-      const { data } = await api.get("/gastos", { params });
-      return unwrapPaged(data).items;
+      return fetchAllPages("/gastos", params);
     },
     staleTime: 60_000,
   });

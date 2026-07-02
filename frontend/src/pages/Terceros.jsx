@@ -12,6 +12,7 @@ import Grid from "@mui/material/Grid";
 import { Add, ArrowBack, Business, Delete, Edit, Person, Save, Search } from "@mui/icons-material";
 import api from "../api/axios";
 import { createTercero, deleteTercero, fetchTerceros, updateTercero } from "../api/terceros";
+import { useDebounced } from "../hooks/useDebounced";
 import { usePermisos } from "../auth/usePermissions";
 
 const EMPTY = {
@@ -76,7 +77,20 @@ export default function Terceros() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const tercerosQuery = useQuery({ queryKey: ["terceros"], queryFn: fetchTerceros, staleTime: 60_000 });
+  const debouncedSearch = useDebounced(search);
+
+  const listParams = useMemo(() => ({
+    page: page + 1,
+    limit: rowsPerPage,
+    search: debouncedSearch.trim() || undefined,
+  }), [page, rowsPerPage, debouncedSearch]);
+
+  const tercerosQuery = useQuery({
+    queryKey: ["terceros", "list", listParams],
+    queryFn: () => fetchTerceros(listParams),
+    staleTime: 60_000,
+    placeholderData: (previous) => previous,
+  });
   const tipoPersonaQuery = useQuery({
     queryKey: ["catalogos", "parametros", "TIPO_PERSONA"],
     queryFn: async () => {
@@ -134,13 +148,8 @@ export default function Terceros() {
     });
   }, [editing, open]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (tercerosQuery.data ?? []).filter((t) => {
-      const text = [label(t), t.email, t.telefono, t.dni, t.cuit, t.observaciones].filter(Boolean).join(" ").toLowerCase();
-      return !q || text.includes(q);
-    });
-  }, [search, tercerosQuery.data]);
+  const terceros = tercerosQuery.data?.items ?? [];
+  const totalCount = tercerosQuery.data?.meta?.total ?? 0;
 
   const sorted = useMemo(() => {
     const getValue = (item) => {
@@ -152,17 +161,15 @@ export default function Terceros() {
       return "";
     };
 
-    return [...filtered].sort((a, b) => {
+    return [...terceros].sort((a, b) => {
       const valA = getValue(a);
       const valB = getValue(b);
       const result = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: "base" });
       return order === "desc" ? -result : result;
     });
-  }, [filtered, order, orderBy]);
+  }, [terceros, order, orderBy]);
 
-  const paginated = useMemo(() => {
-    return sorted.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [page, rowsPerPage, sorted]);
+  const displayRows = sorted;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -356,7 +363,7 @@ export default function Terceros() {
       <Paper elevation={0} sx={{ ...panelSx, p: 2, borderRadius: "16px", mb: 2.5 }}>
         <TextField fullWidth size="small" placeholder="Buscar por nombre, email o teléfono..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} InputProps={{ startAdornment: <Search sx={{ mr: 1, color: "text.disabled" }} /> }} />
       </Paper>
-      {filtered.length === 0 ? (
+      {totalCount === 0 && !tercerosQuery.isFetching ? (
         <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
           <Person sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -368,7 +375,7 @@ export default function Terceros() {
         </Paper>
       ) : isMobile ? (
         <Stack spacing={1.5}>
-          {paginated.map((t) => {
+          {displayRows.map((t) => {
             const isJuridica = Boolean(t.razonSocial);
             const tone = isJuridica ? theme.palette.secondary.main : theme.palette.primary.main;
             return (
@@ -434,7 +441,7 @@ export default function Terceros() {
           })}
           <TablePagination
             component="div"
-            count={filtered.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
@@ -495,7 +502,7 @@ export default function Terceros() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginated.map((t) => {
+                {displayRows.map((t) => {
                   const isJuridica = Boolean(t.razonSocial);
                   const tone = isJuridica ? theme.palette.secondary.main : theme.palette.primary.main;
                   return (
@@ -528,7 +535,7 @@ export default function Terceros() {
           </TableContainer>
           <TablePagination
             component="div"
-            count={filtered.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}

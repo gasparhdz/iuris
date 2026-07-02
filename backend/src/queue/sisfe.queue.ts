@@ -30,9 +30,23 @@ const syncJobOptions: JobsOptions = {
 };
 
 export async function enqueueSisfeSync(data: SisfeSyncJobData) {
+  const jobId = `sync-${data.usuarioId}`;
+
+  const existing = await sisfeSyncQueue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === "completed" || state === "failed") {
+      await existing.remove();
+    } else if (state === "waiting" || state === "delayed") {
+      await existing.remove();
+    }
+    // Si está "active" dejamos que BullMQ resuelva el conflicto; el handler de /sync
+    // ya valida syncStatus en BD antes de encolar otra corrida.
+  }
+
   return sisfeSyncQueue.add("sync", data, {
     ...syncJobOptions,
-    jobId: `sync-${data.usuarioId}`,
+    jobId,
   });
 }
 

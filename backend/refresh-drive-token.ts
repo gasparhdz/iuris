@@ -2,14 +2,19 @@
  * Script para regenerar el refresh_token de Google Drive OAuth2.
  *
  * Uso:
- *   npx tsx refresh-drive-token.ts
+ *   npm run drive:refresh-token
+ *   # o: npx tsx refresh-drive-token.ts
+ *
+ * Requisitos en Google Cloud Console (credencial OAuth tipo "Aplicación web"):
+ *   - URI de redirección autorizada: http://localhost:3333
  *
  * 1. Se abre automáticamente el navegador con la pantalla de login de Google.
- * 2. Iniciá sesión con la cuenta drive.iuris@gmail.com.
+ * 2. Iniciá sesión con la cuenta que administra Drive del estudio.
  * 3. Autorizá la aplicación.
  * 4. El código se captura automáticamente y se imprime el nuevo refresh_token.
  */
 
+import "dotenv/config";
 import { OAuth2Client } from "google-auth-library";
 import http from "node:http";
 import { exec } from "node:child_process";

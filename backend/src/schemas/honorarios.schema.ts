@@ -45,6 +45,8 @@ export const honorarioQuerySchema = z.object({
   casoId: positiveIntSchema.optional(),
   estadoId: positiveIntSchema.optional(),
   search: z.string().optional(),
+  from: dateStringSchema.optional(),
+  to: dateStringSchema.optional(),
 }).strict();
 
 const honorarioRelationSchema = z.object({

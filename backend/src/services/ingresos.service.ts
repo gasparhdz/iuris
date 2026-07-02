@@ -22,6 +22,7 @@ export class IngresosService {
         cuotaId: query.cuotaId,
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
+        search: query.search,
       },
       { limit, offset }
     );

@@ -6,6 +6,8 @@ import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
+import { fetchAllPages, unwrapPaged } from "../api/pagination";
+import { useDebounced } from "../hooks/useDebounced";
 import { denseTableSx } from "../theme/tableStyles";
 import {
   Avatar,
@@ -73,7 +75,6 @@ import {
   priorityStyles,
   unwrapData,
   unwrapEntity,
-  unwrapItems,
 } from "./tareasUtils";
 
 export default function Tareas() {
@@ -97,16 +98,28 @@ export default function Tareas() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
+  const debouncedSearch = useDebounced(search);
+
+  const listParams = useMemo(() => {
+    const params = {
+      page: page + 1,
+      limit: rowsPerPage,
+      search: debouncedSearch.trim() || undefined,
+      prioridadId: priorityFilter === "all" ? undefined : Number(priorityFilter),
+    };
+    if (statusFilter === "pendientes") params.completada = "false";
+    if (statusFilter === "completadas") params.completada = "true";
+    return params;
+  }, [page, rowsPerPage, debouncedSearch, priorityFilter, statusFilter]);
+
   const tareasQuery = useQuery({
-    queryKey: ["tareas", statusFilter],
+    queryKey: ["tareas", "list", listParams],
     queryFn: async () => {
-      const params = { page: 1, limit: 100 };
-      if (statusFilter === "pendientes") params.completada = "false";
-      if (statusFilter === "completadas") params.completada = "true";
-      const { data } = await api.get("/tareas", { params });
-      return unwrapItems(data);
+      const { data } = await api.get("/tareas", { params: listParams });
+      return unwrapPaged(data);
     },
     staleTime: 1000 * 60,
+    placeholderData: (previous) => previous,
   });
 
   const prioridadesQuery = useQuery({
@@ -120,42 +133,21 @@ export default function Tareas() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
-    enabled: Boolean(tareasQuery.data && tareasQuery.data.length > 0),
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 1000 * 60 * 5,
-    enabled: Boolean(tareasQuery.data && tareasQuery.data.length > 0),
   });
 
   const prioridadesById = useMemo(() => new Map((prioridadesQuery.data ?? []).map((p) => [Number(p.id), p])), [prioridadesQuery.data]);
   const clientesById = useMemo(() => new Map((clientesQuery.data ?? []).map((c) => [Number(c.id), c])), [clientesQuery.data]);
   const expedientesById = useMemo(() => new Map((expedientesQuery.data ?? []).map((c) => [Number(c.id), c])), [expedientesQuery.data]);
-  const allTasks = tareasQuery.data ?? [];
-
-  const filteredTasks = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return allTasks.filter((task) => {
-      const priorityMatch = priorityFilter === "all" || Number(task.prioridadId) === Number(priorityFilter);
-      const searchable = [
-        task.titulo,
-        task.descripcion,
-        clienteLabel(clientesById.get(Number(task.clienteId))),
-        casoLabel(expedientesById.get(Number(task.casoId))),
-      ].filter(Boolean).join(" ").toLowerCase();
-      return priorityMatch && (!q || searchable.includes(q));
-    });
-  }, [allTasks, clientesById, expedientesById, priorityFilter, search]);
+  const allTasks = tareasQuery.data?.items ?? [];
+  const totalCount = tareasQuery.data?.meta?.total ?? 0;
 
   const sortedTasks = useMemo(() => {
     const comparator = (a, b) => {
@@ -193,15 +185,13 @@ export default function Tareas() {
       return valA < valB ? -1 : 1;
     };
 
-    return [...filteredTasks].sort((a, b) => {
+    return [...allTasks].sort((a, b) => {
       const cmp = comparator(a, b);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [filteredTasks, orderBy, order, prioridadesById, clientesById, expedientesById]);
+  }, [allTasks, orderBy, order, prioridadesById, clientesById, expedientesById]);
 
-  const paginatedTasks = useMemo(() => {
-    return sortedTasks.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [sortedTasks, page, rowsPerPage]);
+  const displayTasks = sortedTasks;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -210,12 +200,30 @@ export default function Tareas() {
     setPage(0);
   };
 
+  const kpiFilterParams = useMemo(() => {
+    const params = {
+      search: debouncedSearch.trim() || undefined,
+      prioridadId: priorityFilter === "all" ? undefined : Number(priorityFilter),
+    };
+    if (statusFilter === "pendientes") params.completada = "false";
+    if (statusFilter === "completadas") params.completada = "true";
+    return params;
+  }, [debouncedSearch, priorityFilter, statusFilter]);
+
+  const tareasKpiQuery = useQuery({
+    queryKey: ["tareas", "kpi", kpiFilterParams],
+    queryFn: () => fetchAllPages("/tareas", kpiFilterParams),
+    staleTime: 1000 * 60,
+  });
+
+  const kpiTasks = tareasKpiQuery.data ?? [];
+
   const kpis = useMemo(() => [
-    { label: "Pendientes", value: allTasks.filter((t) => !t.completada).length, icon: <Assignment />, tone: theme.palette.primary.main },
-    { label: "Vencidas", value: allTasks.filter(isOverdue).length, icon: <WarningAmber />, tone: "hsl(350, 80%, 45%)" },
-    { label: "Para Hoy", value: allTasks.filter(isToday).length, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
-    { label: "Completadas", value: allTasks.filter((t) => t.completada).length, icon: <CheckCircle />, tone: "hsl(150, 80%, 35%)" },
-  ], [allTasks, theme.palette.primary.main]);
+    { label: "Pendientes", value: kpiTasks.filter((t) => !t.completada).length, icon: <Assignment />, tone: theme.palette.primary.main },
+    { label: "Vencidas", value: kpiTasks.filter(isOverdue).length, icon: <WarningAmber />, tone: "hsl(350, 80%, 45%)" },
+    { label: "Para Hoy", value: kpiTasks.filter(isToday).length, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
+    { label: "Completadas", value: kpiTasks.filter((t) => t.completada).length, icon: <CheckCircle />, tone: "hsl(150, 80%, 35%)" },
+  ], [kpiTasks, theme.palette.primary.main]);
 
   function invalidateTareas() {
     queryClient.invalidateQueries({ queryKey: ["tareas"] });
@@ -331,7 +339,7 @@ export default function Tareas() {
 
       {tareasQuery.isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
-      ) : filteredTasks.length === 0 ? (
+      ) : totalCount === 0 && !tareasQuery.isFetching ? (
         <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
           <PlaylistAddCheck sx={{ fontSize: 58, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 900 }}>No hay tareas para mostrar</Typography>
@@ -340,7 +348,7 @@ export default function Tareas() {
       ) : view === "grid" || isMobile ? (
         <Stack spacing={1.5}>
           <Grid container spacing={2}>
-            {paginatedTasks.map((task) => (
+            {displayTasks.map((task) => (
               <Grid key={task.id} size={{ xs: 12, md: 6, xl: 4 }}>
                 <TaskCard
                   task={task}
@@ -362,7 +370,7 @@ export default function Tareas() {
           </Grid>
           <TablePagination
             component="div"
-            count={filteredTasks.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
@@ -378,8 +386,8 @@ export default function Tareas() {
         </Stack>
       ) : (
         <TaskTable
-          tasks={paginatedTasks}
-          totalCount={filteredTasks.length}
+          tasks={displayTasks}
+          totalCount={totalCount}
           page={page}
           setPage={setPage}
           rowsPerPage={rowsPerPage}

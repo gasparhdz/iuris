@@ -4,10 +4,19 @@ import type { CreateCasoInput, UpdateCasoInput, AddParticipanteInput } from "../
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 import { SoftDeleteService } from "./soft-delete.service.js";
 
+import type { CasoQueryInput } from "../schemas/casos.schema.js";
+
 export class CasosService {
-  static async findAll(estudioId: number, page: number = 1, limit: number = 20, search?: string) {
+  static async findAll(estudioId: number, query: CasoQueryInput) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
     const offset = (page - 1) * limit;
-    const { data, count } = await CasosQueries.findAll(estudioId, limit, offset, search);
+    const { data, count } = await CasosQueries.findAll(estudioId, limit, offset, {
+      search: query.search,
+      estadoId: query.estadoId,
+      ramaId: query.ramaId,
+      radicacionParentId: query.radicacionParentId,
+    });
 
     return {
       data: {

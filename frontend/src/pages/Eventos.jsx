@@ -6,6 +6,8 @@ import { usePermisos } from "../auth/usePermissions";
 import { alpha, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
+import { fetchAllPages, unwrapPaged } from "../api/pagination";
+import { useDebounced } from "../hooks/useDebounced";
 import {
   Avatar,
   Box,
@@ -63,7 +65,6 @@ import {
   sameDay,
   unwrapData,
   unwrapEntity,
-  unwrapItems,
 } from "./tareasUtils";
 
 export default function Eventos() {
@@ -88,13 +89,29 @@ export default function Eventos() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
+  const debouncedSearch = useDebounced(search);
+
+  const listParams = useMemo(() => {
+    const params = {
+      page: page + 1,
+      limit: rowsPerPage,
+      search: debouncedSearch.trim() || undefined,
+      tipoId: tipoFilter === "all" ? undefined : Number(tipoFilter),
+      estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
+    };
+    if (timeFilter === "proximos") params.upcoming = "true";
+    if (timeFilter === "pasados") params.upcoming = "false";
+    return params;
+  }, [page, rowsPerPage, debouncedSearch, tipoFilter, estadoFilter, timeFilter]);
+
   const eventosQuery = useQuery({
-    queryKey: ["eventos"],
+    queryKey: ["eventos", "list", listParams],
     queryFn: async () => {
-      const { data } = await api.get("/eventos", { params: { limit: 100 } });
-      return unwrapItems(data);
+      const { data } = await api.get("/eventos", { params: listParams });
+      return unwrapPaged(data);
     },
     staleTime: 1000 * 60,
+    placeholderData: (previous) => previous,
   });
 
   const tiposQuery = useQuery({
@@ -117,22 +134,14 @@ export default function Eventos() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
-    enabled: Boolean(eventosQuery.data && eventosQuery.data.length > 0),
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 1000 * 60 * 5,
-    enabled: Boolean(eventosQuery.data && eventosQuery.data.length > 0),
   });
 
   const tiposById = useMemo(() => new Map((tiposQuery.data ?? []).map((t) => [Number(t.id), t])), [tiposQuery.data]);
@@ -140,37 +149,8 @@ export default function Eventos() {
   const clientesById = useMemo(() => new Map((clientesQuery.data ?? []).map((c) => [Number(c.id), c])), [clientesQuery.data]);
   const expedientesById = useMemo(() => new Map((expedientesQuery.data ?? []).map((x) => [Number(x.id), x])), [expedientesQuery.data]);
 
-  const allEvents = eventosQuery.data ?? [];
-
-  const filteredEvents = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const now = new Date();
-
-    return allEvents.filter((event) => {
-      // Filtro de Texto
-      const searchable = [
-        event.descripcion,
-        event.observaciones,
-        event.ubicacion,
-        clienteLabel(clientesById.get(Number(event.clienteId))),
-        casoLabel(expedientesById.get(Number(event.casoId))),
-      ].filter(Boolean).join(" ").toLowerCase();
-      if (q && !searchable.includes(q)) return false;
-
-      // Filtro de Tipo
-      if (tipoFilter !== "all" && Number(event.tipoId) !== Number(tipoFilter)) return false;
-
-      // Filtro de Estado
-      if (estadoFilter !== "all" && Number(event.estadoId) !== Number(estadoFilter)) return false;
-
-      // Filtro de Tiempo
-      const eventStart = new Date(event.fechaInicio);
-      if (timeFilter === "proximos" && eventStart < now) return false;
-      if (timeFilter === "pasados" && eventStart >= now) return false;
-
-      return true;
-    });
-  }, [allEvents, clientesById, expedientesById, search, tipoFilter, estadoFilter, timeFilter]);
+  const allEvents = eventosQuery.data?.items ?? [];
+  const totalCount = eventosQuery.data?.meta?.total ?? 0;
 
   const sortedEvents = useMemo(() => {
     const comparator = (a, b) => {
@@ -208,15 +188,32 @@ export default function Eventos() {
       return valA < valB ? -1 : 1;
     };
 
-    return [...filteredEvents].sort((a, b) => {
+    return [...allEvents].sort((a, b) => {
       const cmp = comparator(a, b);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [filteredEvents, orderBy, order, tiposById, clientesById, expedientesById]);
+  }, [allEvents, orderBy, order, tiposById, clientesById, expedientesById]);
 
-  const paginatedEvents = useMemo(() => {
-    return sortedEvents.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [sortedEvents, page, rowsPerPage]);
+  const displayEvents = sortedEvents;
+
+  const kpiFilterParams = useMemo(() => {
+    const params = {
+      search: debouncedSearch.trim() || undefined,
+      tipoId: tipoFilter === "all" ? undefined : Number(tipoFilter),
+      estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
+    };
+    if (timeFilter === "proximos") params.upcoming = "true";
+    if (timeFilter === "pasados") params.upcoming = "false";
+    return params;
+  }, [debouncedSearch, tipoFilter, estadoFilter, timeFilter]);
+
+  const eventosKpiQuery = useQuery({
+    queryKey: ["eventos", "kpi", kpiFilterParams],
+    queryFn: () => fetchAllPages("/eventos", kpiFilterParams),
+    staleTime: 1000 * 60,
+  });
+
+  const kpiEvents = eventosKpiQuery.data ?? [];
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -227,17 +224,17 @@ export default function Eventos() {
 
   const kpis = useMemo(() => {
     const now = new Date();
-    const todayEvents = allEvents.filter((e) => e.fechaInicio && sameDay(new Date(e.fechaInicio), now)).length;
-    const upcomingEvents = allEvents.filter((e) => e.fechaInicio && new Date(e.fechaInicio) >= now).length;
-    const noLocationEvents = allEvents.filter((e) => !e.ubicacion).length;
+    const todayEvents = kpiEvents.filter((e) => e.fechaInicio && sameDay(new Date(e.fechaInicio), now)).length;
+    const upcomingEvents = kpiEvents.filter((e) => e.fechaInicio && new Date(e.fechaInicio) >= now).length;
+    const noLocationEvents = kpiEvents.filter((e) => !e.ubicacion).length;
 
     return [
-      { label: "Total Eventos", value: allEvents.length, icon: <CalendarMonth />, tone: theme.palette.primary.main },
+      { label: "Total Eventos", value: kpiEvents.length, icon: <CalendarMonth />, tone: theme.palette.primary.main },
       { label: "Para Hoy", value: todayEvents, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
       { label: "Próximos", value: upcomingEvents, icon: <CalendarMonth />, tone: "hsl(150, 80%, 35%)" },
       { label: "Sin Ubicación", value: noLocationEvents, icon: <LocationOn />, tone: "hsl(200, 80%, 45%)" },
     ];
-  }, [allEvents, theme.palette.primary.main]);
+  }, [kpiEvents, theme.palette.primary.main]);
 
   function invalidateEventos() {
     queryClient.invalidateQueries({ queryKey: ["eventos"] });
@@ -322,7 +319,7 @@ export default function Eventos() {
 
       {eventosQuery.isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
-      ) : filteredEvents.length === 0 ? (
+      ) : totalCount === 0 && !eventosQuery.isFetching ? (
         <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
           <CalendarMonth sx={{ fontSize: 58, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 900 }}>No hay eventos para mostrar</Typography>
@@ -331,7 +328,7 @@ export default function Eventos() {
       ) : view === "grid" || isMobile ? (
         <Stack spacing={1.5}>
           <Grid container spacing={2}>
-            {paginatedEvents.map((event) => (
+            {displayEvents.map((event) => (
               <Grid key={event.id} size={{ xs: 12, md: 6, xl: 4 }}>
                 <EventCard
                   event={event}
@@ -352,7 +349,7 @@ export default function Eventos() {
           </Grid>
           <TablePagination
             component="div"
-            count={filteredEvents.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
@@ -368,8 +365,8 @@ export default function Eventos() {
         </Stack>
       ) : (
         <EventTable
-          events={paginatedEvents}
-          totalCount={filteredEvents.length}
+          events={displayEvents}
+          totalCount={totalCount}
           page={page}
           setPage={setPage}
           rowsPerPage={rowsPerPage}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { Button, Tooltip, Typography, Box } from "@mui/material";
@@ -7,6 +7,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale/es";
 import { getSisfeStatus, startSisfeSync, startSisfeInteractiveLogin } from "../api/sisfe.api";
+import { invalidateSisfeQueries } from "../utils/sisfeInvalidation";
 
 const MotionBox = motion.div;
 
@@ -39,31 +40,42 @@ export default function SisfeSyncButton({
 }) {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-
-  const statusQuery = useQuery({
-    queryKey: ["sisfe", "status"],
-    queryFn: getSisfeStatus,
-    staleTime: 15_000,
-    // Mientras el scraper corre, re-consultar el estado hasta que el backend pase a
-    // "done"/"error". Sin esto el botón se queda en "Sincronizando..." para siempre.
-    refetchInterval: (query) => (query.state.data?.syncStatus === "running" ? 2000 : false),
-  });
+  const [syncKickoff, setSyncKickoff] = useState(false);
 
   const syncMutation = useMutation({
     mutationFn: startSisfeSync,
-    onSuccess: () => {
+    onMutate: () => setSyncKickoff(true),
+    onSuccess: async () => {
       enqueueSnackbar("Sincronización SISFE iniciada", { variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["sisfe"] });
-      queryClient.invalidateQueries({ queryKey: ["expedientes"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "expedientes"] });
+      await queryClient.invalidateQueries({ queryKey: ["sisfe"] });
+      invalidateSisfeQueries(queryClient, { casoId });
     },
     onError: (error) => {
+      setSyncKickoff(false);
       enqueueSnackbar(
         error.response?.data?.error?.message || "No se pudo iniciar la sincronización SISFE",
         { variant: "error" }
       );
     },
   });
+
+  const statusQuery = useQuery({
+    queryKey: ["sisfe", "status"],
+    queryFn: getSisfeStatus,
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.syncStatus;
+      return status === "running" || syncKickoff ? 2000 : false;
+    },
+  });
+
+  useEffect(() => {
+    const status = statusQuery.data?.syncStatus;
+    if (!syncKickoff) return;
+    if (status === "running" || status === "done" || status === "error") {
+      setSyncKickoff(false);
+    }
+  }, [syncKickoff, statusQuery.data?.syncStatus]);
 
   const interactiveMutation = useMutation({
     mutationFn: startSisfeInteractiveLogin,
@@ -86,13 +98,15 @@ export default function SisfeSyncButton({
   useEffect(() => {
     const current = statusQuery.data?.syncStatus;
     if (prevSyncStatus.current === "running" && (current === "done" || current === "error")) {
-      queryClient.invalidateQueries({ queryKey: ["expedientes"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard", "expedientes"] });
+      invalidateSisfeQueries(queryClient, { casoId });
+      if (current === "error" && statusQuery.data?.syncMessage) {
+        enqueueSnackbar(statusQuery.data.syncMessage, { variant: "error" });
+      }
     }
     prevSyncStatus.current = current;
-  }, [queryClient, statusQuery.data?.syncStatus]);
+  }, [queryClient, statusQuery.data?.syncStatus, statusQuery.data?.syncMessage, casoId, enqueueSnackbar]);
 
-  const isRunning   = statusQuery.data?.syncStatus === "running" || syncMutation.isPending;
+  const isRunning = statusQuery.data?.syncStatus === "running" || syncMutation.isPending || syncKickoff;
   const isConnecting = interactiveMutation.isPending;
   const isLoading   = statusQuery.isLoading;
   const isConnected = Boolean(statusQuery.data?.conectado);

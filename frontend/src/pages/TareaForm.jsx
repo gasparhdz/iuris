@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams, useLocation } from "react-rout
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
 import {
   Autocomplete,
@@ -86,19 +87,13 @@ export default function TareaForm() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 1000 * 60 * 5,
   });
 

@@ -19,6 +19,7 @@ export class GastosService {
         casoId: query.casoId,
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
+        search: query.search,
       },
       { limit, offset }
     );

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import api from "../../api/axios";
+import { fetchAllPages } from "../../api/pagination";
 import { getApiError, isOverdue, unwrapEntity, unwrapItems } from "../tareasUtils";
 import { eventDate, normalizeCode } from "./dashboardUtils";
 
@@ -11,19 +12,13 @@ export function useDashboardData() {
 
   const tareasQuery = useQuery({
     queryKey: ["dashboard", "tareas"],
-    queryFn: async () => {
-      const { data } = await api.get("/tareas", { params: { page: 1, limit: 100, completada: "false" } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/tareas", { completada: "false" }),
     staleTime: 60_000,
   });
 
   const eventosQuery = useQuery({
     queryKey: ["dashboard", "eventos"],
-    queryFn: async () => {
-      const { data } = await api.get("/eventos", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/eventos"),
     staleTime: 60_000,
   });
 

@@ -6,7 +6,13 @@ type NewCaso = typeof casos.$inferInsert;
 type NewParticipanteCaso = typeof participantesCaso.$inferInsert;
 
 export class CasosQueries {
-  static async findAll(estudioId: number, limit: number, offset: number, search?: string) {
+  static async findAll(
+    estudioId: number,
+    limit: number,
+    offset: number,
+    filters: { search?: string; estadoId?: number; ramaId?: number; radicacionParentId?: number } = {},
+  ) {
+    const { search, estadoId, ramaId, radicacionParentId } = filters;
     const conditions = [
       eq(casos.estudioId, estudioId),
       isNull(casos.deletedAt),
@@ -19,6 +25,14 @@ export class CasosQueries {
           ilike(casos.nroExpteNorm, `%${search.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()}%`)
         )!
       );
+    }
+
+    if (estadoId) conditions.push(eq(casos.estadoId, estadoId));
+    if (ramaId) {
+      conditions.push(sql`${casos.tipoId} IN (SELECT id FROM parametros WHERE parent_id = ${ramaId})`);
+    }
+    if (radicacionParentId) {
+      conditions.push(sql`${casos.radicacionId} IN (SELECT id FROM parametros WHERE parent_id = ${radicacionParentId})`);
     }
 
     const whereCondition = and(...conditions);

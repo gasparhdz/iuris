@@ -2,19 +2,23 @@ import { CasosQueries } from "../db/queries/casos.queries.js";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { EventosQueries } from "../db/queries/eventos.queries.js";
 import { serializeDates } from "../utils/serialize.js";
-import type { CreateEventoInput, UpdateEventoInput } from "../schemas/eventos.schema.js";
+import type { CreateEventoInput, EventoQueryInput, UpdateEventoInput } from "../schemas/eventos.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 
 export class EventosService {
-  static async findAll(estudioId: number, query: { from?: string; to?: string; page?: number; limit?: number }) {
+  static async findAll(estudioId: number, query: EventoQueryInput) {
     const page = query.page || 1;
     const limit = query.limit || 50;
     const offset = (page - 1) * limit;
 
-    const from = query.from ? new Date(query.from) : undefined;
-    const to = query.to ? new Date(query.to) : undefined;
-
-    const { data, count } = await EventosQueries.findAll(estudioId, limit, offset, from, to);
+    const { data, count } = await EventosQueries.findAll(estudioId, limit, offset, {
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
+      search: query.search,
+      tipoId: query.tipoId,
+      estadoId: query.estadoId,
+      upcoming: query.upcoming === "true" ? true : query.upcoming === "false" ? false : undefined,
+    });
 
     return {
       data: {

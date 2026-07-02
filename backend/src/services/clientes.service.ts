@@ -1,14 +1,25 @@
+import type { z } from "zod";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { serializeDates } from "../utils/serialize.js";
-import type { CreateClienteInput, CreateContactoClienteInput, UpdateClienteInput, UpdateContactoClienteInput } from "../schemas/clientes.schema.js";
+import type { CreateClienteInput, CreateContactoClienteInput, UpdateClienteInput, UpdateContactoClienteInput, clienteQuerySchema } from "../schemas/clientes.schema.js";
 import { ValorJusService } from "./valorjus.service.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 import { SoftDeleteService } from "./soft-delete.service.js";
 
+type ClienteListQuery = z.infer<typeof clienteQuerySchema>;
+
 export class ClientesService {
-  static async findAll(estudioId: number, page: number = 1, limit: number = 20, search?: string) {
+  static async findAll(estudioId: number, query: ClienteListQuery) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
     const offset = (page - 1) * limit;
-    const { data, count } = await ClientesQueries.findAll(estudioId, limit, offset, search);
+    const { data, count } = await ClientesQueries.findAll(estudioId, limit, offset, {
+      search: query.search,
+      tipo: query.tipo,
+      estado: query.estado,
+      orderBy: query.orderBy,
+      order: query.order,
+    });
 
     return {
       data: {

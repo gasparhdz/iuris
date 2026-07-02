@@ -1,14 +1,15 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ClientesService } from "../services/clientes.service.js";
 import { CuentaCorrienteService } from "../services/cuenta-corriente.service.js";
-import type { CreateClienteInput, CreateContactoClienteInput, UpdateClienteInput, UpdateContactoClienteInput } from "../schemas/clientes.schema.js";
+import type { CreateClienteInput, CreateContactoClienteInput, UpdateClienteInput, UpdateContactoClienteInput, clienteQuerySchema } from "../schemas/clientes.schema.js";
+import type { z } from "zod";
+
+type ClienteListQuery = z.infer<typeof clienteQuerySchema>;
 
 export class ClientesController {
-  static async findAll(request: FastifyRequest<{ Querystring: { page?: number; limit?: number; search?: string } }>, reply: FastifyReply) {
+  static async findAll(request: FastifyRequest<{ Querystring: ClienteListQuery }>, reply: FastifyReply) {
     try {
-      const page = request.query.page ?? 1;
-      const limit = request.query.limit ?? 20;
-      const result = await ClientesService.findAll(request.authUser.estudioId, page, limit, request.query.search);
+      const result = await ClientesService.findAll(request.authUser.estudioId, request.query);
       return reply.send(result);
     } catch (error) {
       throw error;

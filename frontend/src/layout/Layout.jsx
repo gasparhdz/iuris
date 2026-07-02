@@ -67,6 +67,7 @@ import { FinanzasModalsProvider } from "../components/finanzas/FinanzasModalsPro
 import { globalSearch } from "../api/search.api";
 import BrandLogo from "../components/BrandLogo";
 import ErrorBoundary from "../components/ErrorBoundary";
+import { useSisfeLiveUpdates } from "../hooks/useSisfeLiveUpdates";
 
 const drawerWidth = 240;
 const collapsedDrawerWidth = 72;
@@ -122,6 +123,7 @@ const searchGroups = [
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  useSisfeLiveUpdates(Boolean(user));
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const themeMode = useThemeMode();

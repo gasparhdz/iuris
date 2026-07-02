@@ -48,6 +48,10 @@ export const updateEventoSchema = withEventoRefinements(eventoBaseObjectSchema.p
 export const eventoQuerySchema = z.object({
   from: z.string().datetime().optional().describe("Fecha desde (ISO 8601)"),
   to: z.string().datetime().optional().describe("Fecha hasta (ISO 8601)"),
+  search: z.string().optional(),
+  tipoId: positiveIntSchema.optional(),
+  estadoId: positiveIntSchema.optional(),
+  upcoming: z.enum(["true", "false"]).optional(),
   ...paginationQuerySchema.shape,
 }).strict();
 
@@ -90,3 +94,4 @@ export const eventoListResponseSchema = z.object({
 
 export type CreateEventoInput = z.infer<typeof createEventoSchema>;
 export type UpdateEventoInput = z.infer<typeof updateEventoSchema>;
+export type EventoQueryInput = z.infer<typeof eventoQuerySchema>;

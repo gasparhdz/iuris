@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
 import { denseTableSx } from "../theme/tableStyles";
+import { unwrapPaged } from "./finanzasUtils";
 import {
   Avatar,
   Box,
@@ -107,6 +108,35 @@ function getAvatarColor(name = "") {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+function useDebounced(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
+function buildClienteListParams({
+  page,
+  rowsPerPage,
+  search,
+  typeFilter,
+  statusFilter,
+  orderBy,
+  order,
+}) {
+  return {
+    page: page + 1,
+    limit: rowsPerPage,
+    search: search.trim() || undefined,
+    tipo: typeFilter === "all" ? undefined : typeFilter,
+    estado: statusFilter === "all" ? undefined : (statusFilter === "active" ? "activo" : "inactivo"),
+    orderBy,
+    order,
+  };
+}
+
 export function mapDbToFrontend(c) {
   const isFisica = isPersonaFisicaId(c.tipoPersonaId);
   const nombre = isFisica
@@ -176,21 +206,43 @@ export default function Clientes() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState(null);
 
+  const debouncedSearch = useDebounced(search);
   const [orderBy, setOrderBy] = useState("nombre");
   const [order, setOrder] = useState("asc");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const { data: clientes = [], isLoading, isFetching } = useQuery({
-    queryKey: ["clientes"],
+  const listParams = useMemo(
+    () => buildClienteListParams({
+      page,
+      rowsPerPage,
+      search: debouncedSearch,
+      typeFilter,
+      statusFilter,
+      orderBy,
+      order,
+    }),
+    [page, rowsPerPage, debouncedSearch, typeFilter, statusFilter, orderBy, order],
+  );
+
+  const clientesQuery = useQuery({
+    queryKey: ["clientes", "list", listParams],
     queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      const rawItems = Array.isArray(data) ? data : (data?.data?.items ?? data?.data ?? []);
-      const itemsArray = Array.isArray(rawItems) ? rawItems : [];
-      return itemsArray.map(mapDbToFrontend);
+      const { data } = await api.get("/clientes", { params: listParams });
+      const { items, meta } = unwrapPaged(data);
+      return {
+        items: items.map(mapDbToFrontend),
+        meta,
+      };
     },
     staleTime: 1000 * 60 * 2,
+    placeholderData: (previous) => previous,
   });
+
+  const clientes = clientesQuery.data?.items ?? [];
+  const totalCount = clientesQuery.data?.meta?.total ?? 0;
+  const isLoading = clientesQuery.isLoading;
+  const isFetching = clientesQuery.isFetching;
 
   const deleteMutation = useMutation({
     mutationFn: async (id) => {
@@ -207,61 +259,6 @@ export default function Clientes() {
     },
   });
 
-  const filteredClientes = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return clientes.filter((cliente) => {
-      const searchable = [
-        cliente.nombre,
-        cliente.identificacion,
-        cliente.email,
-        cliente.telCelular,
-        cliente.telFijo,
-        cliente.telefono,
-      ].filter(Boolean).join(" ").toLowerCase();
-      const matchesSearch = !q || searchable.includes(q);
-      const matchesType = typeFilter === "all" || cliente.tipo === typeFilter;
-      const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? cliente.activo : !cliente.activo);
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  }, [clientes, search, statusFilter, typeFilter]);
-
-  const sortedClientes = useMemo(() => {
-    const comparator = (a, b) => {
-      let valA = a[orderBy];
-      let valB = b[orderBy];
-
-      if (orderBy === "activo") {
-        valA = a.activo ? 1 : 0;
-        valB = b.activo ? 1 : 0;
-      }
-      if (orderBy === "tipo") {
-        valA = a.tipo || "";
-        valB = b.tipo || "";
-      }
-
-      if (valA === valB) return 0;
-      if (valA === null || valA === undefined) return 1;
-      if (valB === null || valB === undefined) return -1;
-
-      if (typeof valA === "string") {
-        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      }
-
-      return valA < valB ? -1 : 1;
-    };
-
-    const stabilized = [...filteredClientes].sort((a, b) => {
-      const cmp = comparator(a, b);
-      return order === "desc" ? -cmp : cmp;
-    });
-
-    return stabilized;
-  }, [filteredClientes, orderBy, order]);
-
-  const paginatedClientes = useMemo(() => {
-    return sortedClientes.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  }, [sortedClientes, page, rowsPerPage]);
-
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
     setOrder(isAsc ? "desc" : "asc");
@@ -269,30 +266,35 @@ export default function Clientes() {
     setPage(0);
   };
 
-  const applyScreenFilters = (items) => {
-    const q = search.trim().toLowerCase();
-    return items.filter((cliente) => {
-      const searchable = [
-        cliente.nombre,
-        cliente.identificacion,
-        cliente.email,
-        cliente.telCelular,
-        cliente.telFijo,
-        cliente.telefono,
-      ].filter(Boolean).join(" ").toLowerCase();
-      const matchesSearch = !q || searchable.includes(q);
-      const matchesType = typeFilter === "all" || cliente.tipo === typeFilter;
-      const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? cliente.activo : !cliente.activo);
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  };
+  async function fetchAllClientesForExport() {
+    const baseParams = {
+      limit: 100,
+      search: search.trim() || undefined,
+      tipo: typeFilter === "all" ? undefined : typeFilter,
+      estado: statusFilter === "all" ? undefined : (statusFilter === "active" ? "activo" : "inactivo"),
+      orderBy,
+      order,
+    };
+
+    const all = [];
+    let currentPage = 1;
+    let total = Infinity;
+
+    while (all.length < total) {
+      const { data } = await api.get("/clientes", { params: { ...baseParams, page: currentPage } });
+      const { items, meta } = unwrapPaged(data);
+      all.push(...items.map(mapDbToFrontend));
+      total = meta.total ?? all.length;
+      if (!items.length) break;
+      currentPage += 1;
+    }
+
+    return all;
+  }
 
   async function handleExportExcel() {
     try {
-      const { data } = await api.get("/clientes", { params: { limit: 100, search: search.trim() || undefined } });
-      const rawItems = Array.isArray(data) ? data : (data?.data?.items ?? data?.data ?? []);
-      const itemsArray = Array.isArray(rawItems) ? rawItems : [];
-      const exportItems = applyScreenFilters(itemsArray.map(mapDbToFrontend));
+      const exportItems = await fetchAllClientesForExport();
       const rows = exportItems.map((cliente) => ({
         "Nombre/Apellido / Razón Social": cliente.nombre || "",
         "CUIT / Identificación": cliente.identificacion || "",
@@ -400,7 +402,7 @@ export default function Clientes() {
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
           <CircularProgress />
         </Box>
-      ) : filteredClientes.length === 0 ? (
+      ) : totalCount === 0 ? (
         <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
           <Person sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -412,7 +414,7 @@ export default function Clientes() {
         </Paper>
       ) : isMobile ? (
         <Stack spacing={1.5}>
-          {paginatedClientes.map((cliente) => (
+          {clientes.map((cliente) => (
             <Card 
               key={cliente.id} 
               elevation={0} 
@@ -468,7 +470,7 @@ export default function Clientes() {
           ))}
           <TablePagination
             component="div"
-            count={filteredClientes.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
@@ -531,7 +533,7 @@ export default function Clientes() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedClientes.map((cliente) => (
+                {clientes.map((cliente) => (
                   <TableRow
                     key={cliente.id}
                     hover
@@ -628,7 +630,7 @@ export default function Clientes() {
           </TableContainer>
           <TablePagination
             component="div"
-            count={filteredClientes.length}
+            count={totalCount}
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}

@@ -1,4 +1,4 @@
-import { and, desc, eq, getTableColumns, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, ilike, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, contactosClientes, eventos, gastos, honorarios, ingresoAplicaciones, ingresos, notasCliente, parametros, planesPago, tareas } from "../schema.js";
@@ -6,39 +6,92 @@ import { casos, clientes, contactosClientes, eventos, gastos, honorarios, ingres
 type NewCliente = typeof clientes.$inferInsert;
 type NewContactoCliente = typeof contactosClientes.$inferInsert;
 
+const TIPO_PERSONA_FISICA_ID = 143;
+const TIPO_PERSONA_JURIDICA_ID = 144;
+
+const CASOS_ACTIVOS_EXPR = sql<number>`(SELECT COUNT(*) FROM casos WHERE casos.cliente_id = clientes.id AND casos.deleted_at IS NULL AND casos.estudio_id = clientes.estudio_id)`;
+
+type ClienteListFilters = {
+  search?: string;
+  tipo?: "fisica" | "juridica";
+  estado?: "activo" | "inactivo";
+  orderBy?: "nombre" | "identificacion" | "telCelular" | "email" | "casosActivos" | "activo" | "tipo";
+  order?: "asc" | "desc";
+};
+
 export class ClientesQueries {
-  static async findAll(estudioId: number, limit: number, offset: number, search?: string) {
+  static async findAll(
+    estudioId: number,
+    limit: number,
+    offset: number,
+    filters: ClienteListFilters = {},
+  ) {
+    const { search, tipo, estado, orderBy = "nombre", order = "asc" } = filters;
     let whereCondition = and(
       eq(clientes.estudioId, estudioId),
       isNull(clientes.deletedAt)
     );
 
-    if (search) {
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`;
       whereCondition = and(
         whereCondition,
         or(
-          ilike(clientes.nombre, `%${search}%`),
-          ilike(clientes.apellido, `%${search}%`),
-          ilike(clientes.razonSocial, `%${search}%`),
-          ilike(clientes.dni, `%${search}%`)
+          ilike(clientes.nombre, term),
+          ilike(clientes.apellido, term),
+          ilike(clientes.razonSocial, term),
+          ilike(clientes.dni, term),
+          ilike(clientes.cuit, term),
+          ilike(clientes.email, term),
+          ilike(clientes.telCelular, term),
+          ilike(clientes.telFijo, term),
         )
       );
     }
 
+    if (tipo === "fisica") {
+      whereCondition = and(whereCondition, eq(clientes.tipoPersonaId, TIPO_PERSONA_FISICA_ID));
+    } else if (tipo === "juridica") {
+      whereCondition = and(whereCondition, eq(clientes.tipoPersonaId, TIPO_PERSONA_JURIDICA_ID));
+    }
+
+    if (estado === "activo") {
+      whereCondition = and(whereCondition, eq(clientes.activo, true));
+    } else if (estado === "inactivo") {
+      whereCondition = and(whereCondition, eq(clientes.activo, false));
+    }
+
+    const sortDir = order === "desc" ? desc : asc;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "identificacion":
+          return sortDir(sql`COALESCE(${clientes.cuit}, ${clientes.dni}, '')`);
+        case "telCelular":
+          return sortDir(clientes.telCelular);
+        case "email":
+          return sortDir(clientes.email);
+        case "casosActivos":
+          return sortDir(CASOS_ACTIVOS_EXPR);
+        case "activo":
+          return sortDir(clientes.activo);
+        case "tipo":
+          return sortDir(clientes.tipoPersonaId);
+        case "nombre":
+        default:
+          return sortDir(sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`);
+      }
+    })();
+
     const data = await db
       .select({
         ...getTableColumns(clientes),
-        // OJO: las columnas del cliente van calificadas explícitamente (clientes.id / clientes.estudio_id)
-        // y NO interpoladas como ${clientes.id}: Drizzle las renderiza sin el prefijo de tabla ("id"),
-        // y como casos también tiene columnas id/estudio_id, Postgres las liga a casos y rompe la
-        // correlación (contaba lo mismo para todos los clientes).
-        casosActivos: sql<number>`(SELECT COUNT(*) FROM casos WHERE casos.cliente_id = clientes.id AND casos.deleted_at IS NULL AND casos.estudio_id = clientes.estudio_id)`.mapWith(Number),
+        casosActivos: CASOS_ACTIVOS_EXPR.mapWith(Number),
       })
       .from(clientes)
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(clientes.id);
+      .orderBy(orderExpr);
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

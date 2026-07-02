@@ -216,6 +216,10 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         }
 
         stats.actualizados++;
+        emitirAUsuario(usuarioId, "sisfe_sync", {
+          casoId: caso.id,
+          movimientosNuevos: stats.movimientosNuevos,
+        });
         await page.waitForTimeout(2000);
       } catch (error: unknown) {
         if (error instanceof SisfeError && error.code === "SESION_EXPIRADA") {

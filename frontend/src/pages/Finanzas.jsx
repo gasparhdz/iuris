@@ -9,6 +9,7 @@ import { alpha, useTheme } from "@mui/material/styles";
 import Grid from "@mui/material/Grid";
 import { motion } from "framer-motion";
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 
 const MotionDiv = motion.div;
 import {
@@ -76,7 +77,7 @@ import {
   getItemCurrencyGeneral,
   mapCuentaCorrienteApiRows,
 } from "./finanzasUtils";
-import { clienteLabel as clienteLabelFromTareas, getApiError, unwrapItems } from "./tareasUtils";
+import { clienteLabel as clienteLabelFromTareas, getApiError } from "./tareasUtils";
 
 const TAB_KEYS = ["honorarios", "gastos", "ingresos", "planes", "cuentas_corrientes"];
 const TAB_LABELS = {
@@ -305,43 +306,92 @@ export default function Finanzas() {
     return getPresetRange(datePreset);
   }, [datePreset, customFrom, customTo]);
 
+  const finanzasDateParams = useMemo(() => {
+    const params = {};
+    if (dateRange.from) params.from = dateRange.from.toISOString();
+    if (dateRange.to) params.to = dateRange.to.toISOString();
+    return params;
+  }, [dateRange]);
+
+  const honorariosFilterParams = useMemo(() => ({
+    search: debouncedSearch.trim() || undefined,
+    ...finanzasDateParams,
+  }), [debouncedSearch, finanzasDateParams]);
+
+  const honorariosListParams = useMemo(() => ({
+    ...honorariosFilterParams,
+    page: page + 1,
+    limit: rowsPerPage,
+  }), [honorariosFilterParams, page, rowsPerPage]);
+
+  const gastosFilterParams = useMemo(() => ({
+    search: debouncedSearch.trim() || undefined,
+    ...finanzasDateParams,
+  }), [debouncedSearch, finanzasDateParams]);
+
+  const gastosListParams = useMemo(() => ({
+    ...gastosFilterParams,
+    page: page + 1,
+    limit: rowsPerPage,
+  }), [gastosFilterParams, page, rowsPerPage]);
+
+  const ingresosFilterParams = useMemo(() => ({
+    search: debouncedSearch.trim() || undefined,
+    ...finanzasDateParams,
+  }), [debouncedSearch, finanzasDateParams]);
+
+  const ingresosListParams = useMemo(() => ({
+    ...ingresosFilterParams,
+    page: page + 1,
+    limit: rowsPerPage,
+  }), [ingresosFilterParams, page, rowsPerPage]);
+
   useEffect(() => {
     setPage(0);
   }, [tabKey, debouncedSearch, orderBy, order, datePreset, customFrom, customTo]);
 
   const honorariosQuery = useQuery({
-    queryKey: ["honorarios", "global", debouncedSearch],
+    queryKey: ["honorarios", "list", honorariosListParams],
     queryFn: async () => {
-      const { data } = await api.get("/honorarios", {
-        params: { page: 1, limit: 100, search: debouncedSearch.trim() || undefined },
-      });
+      const { data } = await api.get("/honorarios", { params: honorariosListParams });
       return unwrapPaged(data);
     },
+    staleTime: 60_000,
+    placeholderData: (previous) => previous,
+  });
+
+  const honorariosKpiQuery = useQuery({
+    queryKey: ["honorarios", "kpi", honorariosFilterParams],
+    queryFn: () => fetchAllPages("/honorarios", honorariosFilterParams),
+    enabled: tabKey === "honorarios",
     staleTime: 60_000,
   });
 
   const gastosQuery = useQuery({
-    queryKey: ["gastos", "global", dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    queryKey: ["gastos", "list", gastosListParams],
     queryFn: async () => {
-      const params = { page: 1, limit: 100 };
-      if (dateRange.from) params.from = dateRange.from.toISOString();
-      if (dateRange.to) params.to = dateRange.to.toISOString();
-      const { data } = await api.get("/gastos", { params });
+      const { data } = await api.get("/gastos", { params: gastosListParams });
       return unwrapPaged(data);
     },
+    staleTime: 60_000,
+    placeholderData: (previous) => previous,
+  });
+
+  const gastosKpiQuery = useQuery({
+    queryKey: ["gastos", "kpi", gastosFilterParams],
+    queryFn: () => fetchAllPages("/gastos", gastosFilterParams),
+    enabled: tabKey === "gastos",
     staleTime: 60_000,
   });
 
   const ingresosQuery = useQuery({
-    queryKey: ["ingresos", "global", dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    queryKey: ["ingresos", "list", ingresosListParams],
     queryFn: async () => {
-      const params = { page: 1, limit: 100 };
-      if (dateRange.from) params.from = dateRange.from.toISOString();
-      if (dateRange.to) params.to = dateRange.to.toISOString();
-      const { data } = await api.get("/ingresos", { params });
+      const { data } = await api.get("/ingresos", { params: ingresosListParams });
       return unwrapPaged(data);
     },
     staleTime: 60_000,
+    placeholderData: (previous) => previous,
   });
 
   const planesQuery = useQuery({
@@ -387,19 +437,13 @@ export default function Finanzas() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup", "finanzas"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 300_000,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "lookup", "finanzas"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 300_000,
   });
 
@@ -441,6 +485,8 @@ export default function Finanzas() {
   const honorarios = honorariosQuery.data?.items ?? [];
   const gastos = gastosQuery.data?.items ?? [];
   const ingresos = ingresosQuery.data?.items ?? [];
+  const honorariosKpi = honorariosKpiQuery.data ?? [];
+  const gastosKpi = gastosKpiQuery.data ?? [];
 
   const processedHonorarios = useMemo(() => {
     const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
@@ -455,6 +501,20 @@ export default function Finanzas() {
       };
     });
   }, [honorarios, valorJusQuery.data, catalogQuery.data]);
+
+  const processedHonorariosKpi = useMemo(() => {
+    const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
+    const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
+    const catalogPoliticas = catalogQuery.data?.POLITICA_JUS ?? [];
+
+    return honorariosKpi.map((item) => {
+      const computed = computeHonorarioAmounts(item, valorJusActual, catalogMonedas, catalogPoliticas);
+      return {
+        ...item,
+        computed,
+      };
+    });
+  }, [honorariosKpi, valorJusQuery.data, catalogQuery.data]);
 
   const planesByHonorario = useMemo(() => {
     const map = new Map();
@@ -490,23 +550,8 @@ export default function Finanzas() {
   const kpis = useMemo(() => {
     const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
     const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
-    const q = debouncedSearch.trim().toLowerCase();
 
-    const honorariosFiltrados = processedHonorarios.filter((item) => {
-      if (dateRange.from || dateRange.to) {
-        if (!isInDateRange(item.fechaRegulacion, dateRange.from, dateRange.to)) return false;
-      }
-      if (!q) return true;
-      const haystack = [
-        conceptoLabel(item),
-        clienteLabel(item.cliente) || clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
-        casoLabel(item.caso) || casoLabel(expedientesById.get(Number(item.casoId))),
-        item.estado?.nombre,
-      ].join(" ").toLowerCase();
-      return haystack.includes(q);
-    });
-
-    const honorariosKpi = honorariosFiltrados.reduce(
+    const honorariosKpiCalc = processedHonorariosKpi.reduce(
       (acc, honorario) => {
         const computed = honorario.computed;
         const planData = planesByHonorario.get(Number(honorario.id));
@@ -524,19 +569,7 @@ export default function Finanzas() {
       { total: 0, cobrado: 0, pendiente: 0 },
     );
 
-    const gastosFiltrados = gastos.filter((item) => {
-      if (!q) return true;
-      const haystack = [
-        conceptoLabel(item, conceptosById),
-        clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
-        casoLabel(expedientesById.get(Number(item.casoId))),
-        item.descripcion,
-        estadosGastoById.get(Number(item.estadoId))?.nombre,
-      ].join(" ").toLowerCase();
-      return haystack.includes(q);
-    });
-
-    const gastosKpi = gastosFiltrados.reduce(
+    const gastosKpiCalc = gastosKpi.reduce(
       (acc, gasto) => {
         const amount = movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas);
         const estado = estadosGastoById.get(Number(gasto.estadoId));
@@ -559,27 +592,22 @@ export default function Finanzas() {
       { cargos: 0, cobrado: 0, pendiente: 0 },
     );
 
-    return { honorarios: honorariosKpi, gastos: gastosKpi, cuentas: cuentasKpi };
+    return { honorarios: honorariosKpiCalc, gastos: gastosKpiCalc, cuentas: cuentasKpi };
   }, [
-    processedHonorarios,
-    gastos,
-    dateRange,
-    debouncedSearch,
+    processedHonorariosKpi,
+    gastosKpi,
     catalogQuery.data,
     valorJusQuery.data,
     getHonorarioSaldoPendiente,
     estadosGastoById,
     planesByHonorario,
-    clientesById,
-    expedientesById,
-    conceptosById,
     ccResumenQuery.data,
   ]);
 
   const kpiLoading = tabKey === "honorarios"
-    ? honorariosQuery.isLoading || planesQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
+    ? honorariosKpiQuery.isLoading || planesQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
     : tabKey === "gastos"
-      ? gastosQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
+      ? gastosKpiQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
       : tabKey === "cuentas_corrientes"
         ? ccResumenQuery.isLoading
         : false;
@@ -631,18 +659,7 @@ export default function Finanzas() {
   };
 
   const sortedHonorarios = useMemo(() => {
-    let rows = filterBySearch(processedHonorarios, (item) => [
-      conceptoLabel(item),
-      clienteLabel(item.cliente) || clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
-      casoLabel(item.caso) || casoLabel(expedientesById.get(Number(item.casoId))),
-      item.estado?.nombre,
-    ].join(" "));
-
-    if (dateRange.from || dateRange.to) {
-      rows = rows.filter((item) => isInDateRange(item.fechaRegulacion, dateRange.from, dateRange.to));
-    }
-
-    return [...rows].sort((a, b) => {
+    return [...processedHonorarios].sort((a, b) => {
       let valA;
       let valB;
       switch (orderBy) {
@@ -686,18 +703,10 @@ export default function Finanzas() {
       const cmp = compareValues(valA, valB);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [processedHonorarios, debouncedSearch, orderBy, order, clientesById, expedientesById, dateRange, getHonorarioSaldoPendiente]);
+  }, [processedHonorarios, orderBy, order, clientesById, expedientesById, getHonorarioSaldoPendiente]);
 
   const sortedGastos = useMemo(() => {
-    const rows = filterBySearch(gastos, (item) => [
-      conceptoLabel(item, conceptosById),
-      clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
-      casoLabel(expedientesById.get(Number(item.casoId))),
-      item.descripcion,
-      estadosGastoById.get(Number(item.estadoId))?.nombre,
-    ].join(" "));
-
-    return [...rows].sort((a, b) => {
+    return [...gastos].sort((a, b) => {
       let valA;
       let valB;
       switch (orderBy) {
@@ -732,17 +741,10 @@ export default function Finanzas() {
       const cmp = compareValues(valA, valB);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [gastos, debouncedSearch, orderBy, order, clientesById, expedientesById, conceptosById, estadosGastoById, dateRange]);
+  }, [gastos, orderBy, order, clientesById, expedientesById, conceptosById, estadosGastoById]);
 
   const sortedIngresos = useMemo(() => {
-    const rows = filterBySearch(ingresos, (item) => [
-      conceptosIngresoById.get(Number(item.tipoId))?.nombre,
-      item.descripcion,
-      clienteLabelFromTareas(clientesById.get(Number(item.clienteId))),
-      casoLabel(expedientesById.get(Number(item.casoId))),
-    ].join(" "));
-
-    return [...rows].sort((a, b) => {
+    return [...ingresos].sort((a, b) => {
       let valA;
       let valB;
       switch (orderBy) {
@@ -770,7 +772,7 @@ export default function Finanzas() {
       const cmp = compareValues(valA, valB);
       return order === "desc" ? -cmp : cmp;
     });
-  }, [ingresos, debouncedSearch, orderBy, order, clientesById, expedientesById, conceptosIngresoById, dateRange]);
+  }, [ingresos, orderBy, order, clientesById, expedientesById, conceptosIngresoById]);
 
   const cuentasCorrientes = useMemo(() => {
     const rows = (ccResumenQuery.data ?? []).map(({ clienteId, totales }) => {
@@ -818,6 +820,16 @@ export default function Finanzas() {
     });
   }, [ccResumenQuery.data, clientesById, debouncedSearch, orderBy, order]);
 
+  const activeTotalCount = tabKey === "honorarios"
+    ? honorariosQuery.data?.meta?.total ?? 0
+    : tabKey === "gastos"
+      ? gastosQuery.data?.meta?.total ?? 0
+      : tabKey === "ingresos"
+        ? ingresosQuery.data?.meta?.total ?? 0
+        : tabKey === "planes"
+          ? (planesQuery.data ?? []).length
+          : cuentasCorrientes.length;
+
   const activeRows = tabKey === "honorarios"
     ? sortedHonorarios
     : tabKey === "gastos"
@@ -827,7 +839,7 @@ export default function Finanzas() {
         : tabKey === "planes"
           ? (planesQuery.data ?? [])
           : cuentasCorrientes;
-  const paginatedRows = activeRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const paginatedRows = activeRows;
 
   const activeQuery = tabKey === "honorarios"
     ? honorariosQuery
@@ -861,7 +873,7 @@ export default function Finanzas() {
   const tablePagination = (
     <TablePagination
       component="div"
-      count={activeRows.length}
+      count={activeTotalCount}
       page={page}
       onPageChange={(_, newPage) => setPage(newPage)}
       rowsPerPage={rowsPerPage}

@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago } from "../schema.js";
@@ -15,6 +15,8 @@ export interface HonorarioFilters {
   casoId?: number;
   estadoId?: number;
   search?: string;
+  from?: Date;
+  to?: Date;
 }
 
 export class HonorariosQueries {
@@ -27,6 +29,8 @@ export class HonorariosQueries {
     if (filters.clienteId) conditions.push(eq(honorarios.clienteId, filters.clienteId));
     if (filters.casoId) conditions.push(eq(honorarios.casoId, filters.casoId));
     if (filters.estadoId) conditions.push(eq(honorarios.estadoId, filters.estadoId));
+    if (filters.from) conditions.push(gte(honorarios.fechaRegulacion, filters.from));
+    if (filters.to) conditions.push(lte(honorarios.fechaRegulacion, filters.to));
     if (filters.search) {
       const term = `%${filters.search}%`;
       conditions.push(

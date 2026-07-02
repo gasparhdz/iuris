@@ -22,6 +22,8 @@ export class HonorariosService {
         casoId: query.casoId,
         estadoId: query.estadoId,
         search: query.search,
+        from: query.from ? new Date(query.from) : undefined,
+        to: query.to ? new Date(query.to) : undefined,
       },
       { limit, offset }
     );

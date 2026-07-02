@@ -19,6 +19,7 @@
     "security:audit:test": "tsx src/db/verifySecurityAuditChain.ts --concurrency=25",
     "test:soft-delete-rollback": "tsx scripts/soft-delete-cascade.rollback.test.ts",
     "test:imputacion-concurrencia": "tsx src/tests/imputacion-concurrencia.test.ts",
+    "drive:refresh-token": "tsx refresh-drive-token.ts",
     "test": "vitest run --pool=threads src/tests/decimal.test.ts src/tests/imputacion.test.ts src/tests/mora.test.ts src/tests/capital-interes.test.ts src/tests/cuenta-corriente.test.ts src/tests/security-audit-chain.test.ts src/tests/permissions.test.ts"
   },
   "keywords": [],

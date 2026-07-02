@@ -1,9 +1,4 @@
-export function unwrapPaged(data) {
-  const payload = data?.data ?? data;
-  const items = payload?.items ?? (Array.isArray(payload) ? payload : []);
-  const meta = payload?.meta ?? { total: items.length, page: 1, limit: items.length };
-  return { items: Array.isArray(items) ? items : [], meta };
-}
+export { unwrapPaged } from "../api/pagination";
 
 // Evita el "-$0,00": valores que redondean a cero (incluido -0) se normalizan a 0
 // para que Intl no les agregue el signo menos.

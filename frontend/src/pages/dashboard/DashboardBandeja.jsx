@@ -35,6 +35,7 @@ import {
   WbTwilight,
 } from "@mui/icons-material";
 import AgendarDialog from "../../components/AgendarDialog";
+import TareaDetalleDialog from "../../components/TareaDetalleDialog";
 import SisfeSyncButton from "../../components/SisfeSyncButton";
 import { useAuth } from "../../auth/AuthContext";
 import { casoLabel, clienteLabel, formatFriendlyDate } from "../tareasUtils";
@@ -56,6 +57,8 @@ const FILTERS = [
   { id: "tareas", label: "Tareas", dot: BANDEJA_TONES.tarea },
   { id: "eventos", label: "Eventos", dot: BANDEJA_TONES.evento },
 ];
+
+const BANDEJA_PREVIEW_LIMIT = 5;
 
 const QUICK_CREATE = [
   { label: "Nuevo cliente", path: "/clientes/nuevo", icon: PersonAdd },
@@ -146,71 +149,52 @@ function GroupHeader({ group, onMarkAll, collapsed, onToggle }) {
   );
 }
 
-function BandejaTaskRow({ task, overdue, onComplete, busy }) {
+const ROW_SX = {
+  px: { xs: 1.5, sm: 2 },
+  py: 1.1,
+  borderBottom: "1px solid",
+  borderColor: "divider",
+  "&:last-child": { borderBottom: "none" },
+};
+
+function BandejaActionButton({ title, onClick, disabled, children, color }) {
+  return (
+    <IconButton
+      size="small"
+      disabled={disabled}
+      onClick={onClick}
+      sx={{ border: "1px solid", borderColor: "divider", borderRadius: "8px", flexShrink: 0 }}
+      title={title}
+    >
+      {children ?? <Check sx={{ fontSize: 15, color: color ?? BANDEJA_TONES.success }} />}
+    </IconButton>
+  );
+}
+
+function BandejaTaskRow({ task, overdue, onComplete, onOpen, busy }) {
   const vinculacion = [clienteLabel(task.cliente), casoLabel(task.caso)].filter(Boolean).join(" · ") || "Sin vinculación";
   const overdueLabel = task.fechaLimite && overdue
     ? formatDistanceToNow(new Date(task.fechaLimite), { locale: es, addSuffix: true })
     : null;
 
-  const completarBtn = (
-    <Button
-      size="small"
-      disabled={busy}
-      onClick={() => onComplete(task)}
-      startIcon={<Check sx={{ fontSize: 13, color: BANDEJA_TONES.success }} />}
-      sx={{
-        height: 32,
-        px: 1.5,
-        borderRadius: "8px",
-        border: "1px solid",
-        borderColor: "divider",
-        bgcolor: "background.paper",
-        color: "text.primary",
-        fontWeight: 600,
-        fontSize: "0.75rem",
-        whiteSpace: "nowrap",
-        flexShrink: 0,
-      }}
-    >
-      Completar
-    </Button>
-  );
-
   return (
     <Box
       sx={{
-        px: { xs: 1.5, sm: 2.25 },
-        py: 1.75,
-        borderBottom: "1px solid",
-        borderColor: "divider",
-        "&:last-child": { borderBottom: "none" },
+        ...ROW_SX,
+        cursor: "pointer",
+        transition: "background-color 0.15s ease",
+        "&:hover": { bgcolor: "action.hover" },
       }}
+      onClick={() => onOpen?.(task)}
     >
-      <Stack direction="row" alignItems="flex-start" spacing={1.25}>
-        <Box
-          component="button"
-          type="button"
-          disabled={busy}
-          onClick={() => onComplete(task)}
-          sx={{
-            width: 20,
-            height: 20,
-            mt: 0.25,
-            borderRadius: "50%",
-            border: "2px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-            flexShrink: 0,
-            cursor: busy ? "progress" : "pointer",
-            p: 0,
-          }}
-        />
+      <Stack direction="row" alignItems="center" spacing={1}>
         <TypeBadge kind="tarea" overdue={overdue} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{
               fontWeight: 700,
-              fontSize: "0.875rem",
+              fontSize: "0.84rem",
+              lineHeight: 1.3,
               color: "text.primary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -223,9 +207,10 @@ function BandejaTaskRow({ task, overdue, onComplete, busy }) {
           </Typography>
           <Typography
             sx={{
-              mt: 0.4,
+              mt: 0.2,
               fontWeight: 500,
-              fontSize: "0.75rem",
+              fontSize: "0.72rem",
+              lineHeight: 1.3,
               color: "text.secondary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -248,25 +233,27 @@ function BandejaTaskRow({ task, overdue, onComplete, busy }) {
             </Typography>
           </Stack>
         )}
-        <Box sx={{ display: { xs: "none", sm: "block" } }}>{completarBtn}</Box>
+        <Box onClick={(e) => e.stopPropagation()}>
+          <BandejaActionButton
+            title="Completar"
+            disabled={busy}
+            onClick={() => onComplete(task)}
+          />
+        </Box>
       </Stack>
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        spacing={1}
-        sx={{ mt: 1, pl: 4.75, display: { xs: "flex", sm: "none" } }}
-      >
-        {overdue && overdueLabel && (
-          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ color: BANDEJA_TONES.overdue, minWidth: 0 }}>
-            <WarningAmber sx={{ fontSize: 12, flexShrink: 0 }} />
-            <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }} noWrap>
-              {overdueLabel}
-            </Typography>
-          </Stack>
-        )}
-        <Box sx={{ ml: "auto" }}>{completarBtn}</Box>
-      </Stack>
+      {overdue && overdueLabel && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={0.5}
+          sx={{ mt: 0.5, color: BANDEJA_TONES.overdue, display: { xs: "flex", sm: "none" } }}
+        >
+          <WarningAmber sx={{ fontSize: 12, flexShrink: 0 }} />
+          <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }} noWrap>
+            {overdueLabel}
+          </Typography>
+        </Stack>
+      )}
     </Box>
   );
 }
@@ -318,23 +305,16 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
   );
 
   return (
-    <Box
-      sx={{
-        px: { xs: 1.5, sm: 2.25 },
-        py: 1.75,
-        borderBottom: "1px solid",
-        borderColor: "divider",
-        "&:last-child": { borderBottom: "none" },
-      }}
-    >
-      <Stack direction="row" alignItems="flex-start" spacing={1.25}>
-        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: BANDEJA_TONES.novedad, flexShrink: 0, mt: 0.75 }} />
+    <Box sx={ROW_SX}>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: BANDEJA_TONES.novedad, flexShrink: 0 }} />
         <TypeBadge kind="novedad" />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{
               fontWeight: 600,
               fontSize: "0.84rem",
+              lineHeight: 1.3,
               color: "text.primary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -348,9 +328,10 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
           </Typography>
           <Typography
             sx={{
-              mt: 0.4,
+              mt: 0.2,
               fontWeight: 500,
-              fontSize: "0.75rem",
+              fontSize: "0.72rem",
+              lineHeight: 1.3,
               color: "text.secondary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -362,7 +343,7 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
         </Box>
         <Box sx={{ display: { xs: "none", md: "flex" } }}>{actions}</Box>
       </Stack>
-      <Box sx={{ mt: 1, pl: 4.75, display: { xs: "block", md: "none" } }}>
+      <Box sx={{ mt: 0.75, display: { xs: "block", md: "none" } }}>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
           {actions}
         </Stack>
@@ -377,69 +358,25 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
   const checked = realizadoEstadoId != null && Number(event.estadoId) === realizadoEstadoId;
   const vinculacion = casoLabel(event.caso || event.expediente) || "Sin vinculación";
 
-  const verEventoBtn = (
-    <Button
-      size="small"
-      onClick={() => navigate(`/eventos/${event.id}`)}
-      sx={{
-        height: 32,
-        px: 1.5,
-        borderRadius: "8px",
-        border: "1px solid",
-        borderColor: "divider",
-        bgcolor: "background.paper",
-        color: "text.primary",
-        fontWeight: 600,
-        fontSize: "0.75rem",
-        whiteSpace: "nowrap",
-        flexShrink: 0,
-      }}
-    >
-      Ver evento
-    </Button>
-  );
-
   const checkbox = eventoPaso && realizadoEstadoId != null ? (
-    <Box
-      component="button"
-      type="button"
+    <BandejaActionButton
+      title={checked ? "Marcar pendiente" : "Marcar realizado"}
       disabled={busy}
       onClick={() => onToggle(event)}
-      sx={{
-        width: 20,
-        height: 20,
-        mt: 0.25,
-        borderRadius: "50%",
-        border: "2px solid",
-        borderColor: checked ? BANDEJA_TONES.success : "divider",
-        bgcolor: checked ? BANDEJA_TONES.success : "background.paper",
-        flexShrink: 0,
-        cursor: busy ? "progress" : "pointer",
-        p: 0,
-      }}
+      color={checked ? BANDEJA_TONES.success : undefined}
     />
-  ) : (
-    <Box sx={{ width: 20, flexShrink: 0 }} />
-  );
+  ) : null;
 
   return (
-    <Box
-      sx={{
-        px: { xs: 1.5, sm: 2.25 },
-        py: 1.75,
-        borderBottom: "1px solid",
-        borderColor: "divider",
-        "&:last-child": { borderBottom: "none" },
-      }}
-    >
-      <Stack direction="row" alignItems="flex-start" spacing={1.25}>
-        {checkbox}
+    <Box sx={ROW_SX}>
+      <Stack direction="row" alignItems="center" spacing={1}>
         <TypeBadge kind="evento" />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{
               fontWeight: 700,
-              fontSize: "0.875rem",
+              fontSize: "0.84rem",
+              lineHeight: 1.3,
               color: "text.primary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -452,9 +389,10 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
           </Typography>
           <Typography
             sx={{
-              mt: 0.4,
+              mt: 0.2,
               fontWeight: 500,
-              fontSize: "0.75rem",
+              fontSize: "0.72rem",
+              lineHeight: 1.3,
               color: "text.secondary",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -477,14 +415,35 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
             </Typography>
           </Stack>
         )}
-        <Box sx={{ display: { xs: "none", sm: "block" } }}>{verEventoBtn}</Box>
+        <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+          {checkbox}
+          <Button
+            size="small"
+            onClick={() => navigate(`/eventos/${event.id}`)}
+            sx={{
+              height: 30,
+              px: 1.25,
+              borderRadius: "8px",
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              color: "text.primary",
+              fontWeight: 600,
+              fontSize: "0.72rem",
+              whiteSpace: "nowrap",
+              display: { xs: "none", sm: "inline-flex" },
+            }}
+          >
+            Ver evento
+          </Button>
+        </Stack>
       </Stack>
       <Stack
         direction="row"
         alignItems="center"
         justifyContent="space-between"
         spacing={1}
-        sx={{ mt: 1, pl: 4.75, display: { xs: "flex", sm: "none" } }}
+        sx={{ mt: 0.75, display: { xs: "flex", sm: "none" } }}
       >
         {overdue && (
           <Stack direction="row" alignItems="center" spacing={0.5} sx={{ color: BANDEJA_TONES.overdue }}>
@@ -492,7 +451,24 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
             <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }}>Pendiente</Typography>
           </Stack>
         )}
-        <Box sx={{ ml: "auto" }}>{verEventoBtn}</Box>
+        <Stack direction="row" spacing={0.75} sx={{ ml: "auto" }}>
+          {checkbox}
+          <Button
+            size="small"
+            onClick={() => navigate(`/eventos/${event.id}`)}
+            sx={{
+              height: 30,
+              px: 1.25,
+              borderRadius: "8px",
+              border: "1px solid",
+              borderColor: "divider",
+              fontWeight: 600,
+              fontSize: "0.72rem",
+            }}
+          >
+            Ver evento
+          </Button>
+        </Stack>
       </Stack>
     </Box>
   );
@@ -556,6 +532,28 @@ function EmptyGroup({ groupId }) {
         </Typography>
       </Box>
     </Paper>
+  );
+}
+
+function GroupShowMore({ hiddenCount, expanded, onToggle }) {
+  return (
+    <Button
+      fullWidth
+      onClick={onToggle}
+      sx={{
+        py: 0.85,
+        borderRadius: 0,
+        borderTop: "1px solid",
+        borderColor: "divider",
+        color: "text.secondary",
+        fontWeight: 600,
+        fontSize: "0.75rem",
+        textTransform: "none",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+    >
+      {expanded ? "Ver menos" : `Ver más (${hiddenCount})`}
+    </Button>
   );
 }
 
@@ -651,8 +649,11 @@ export default function DashboardBandeja({ view, onSwitchView }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuNovedad, setMenuNovedad] = useState(null);
   const [dialog, setDialog] = useState({ open: false, modo: "tarea", novedad: null });
+  const [tareaDialogId, setTareaDialogId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [expandedItemGroups, setExpandedItemGroups] = useState({});
   const toggleGroup = (id) => setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleGroupItemsExpand = (id) => setExpandedItemGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const { text: greetingText, slot: greetingSlot } = bandejaGreeting(user);
   const { Icon: GreetingIcon, color: greetingColor } = GREETING_ICON[greetingSlot];
@@ -741,10 +742,53 @@ export default function DashboardBandeja({ view, onSwitchView }) {
     setMenuNovedad(null);
   };
 
+  const renderBandejaItem = (item) => {
+    if (item.kind === "tarea") {
+      return (
+        <BandejaTaskRow
+          key={`tarea-${item.data.id}`}
+          task={item.data}
+          overdue={item.subkind === "atrasada"}
+          onComplete={(t) => toggleTaskMutation.mutate(t)}
+          onOpen={(t) => setTareaDialogId(t.id)}
+          busy={taskBusy}
+        />
+      );
+    }
+    if (item.kind === "novedad") {
+      return (
+        <BandejaNovedadRow
+          key={`novedad-${item.data.id}`}
+          novedad={item.data}
+          onVerExpediente={irAlExpediente}
+          onMarcarLeido={(n) => marcarUno.mutate(n.id)}
+          onAgendar={abrirMenuAgendar}
+          busy={marcarUno.isPending}
+        />
+      );
+    }
+    return (
+      <BandejaEventRow
+        key={`evento-${item.data.id}`}
+        event={item.data}
+        realizadoEstadoId={realizadoEstadoId}
+        onToggle={(e) => toggleEventMutation.mutate(e)}
+        busy={eventBusy}
+        navigate={navigate}
+        overdue={item.subkind === "atrasado"}
+      />
+    );
+  };
+
   const renderGroupItems = (group) => {
     if (group.id === "eventos" && group.items.length === 0) {
       return <EmptyGroup groupId="eventos" />;
     }
+
+    const expanded = Boolean(expandedItemGroups[group.id]);
+    const hasMore = group.items.length > BANDEJA_PREVIEW_LIMIT;
+    const visibleItems = expanded ? group.items : group.items.slice(0, BANDEJA_PREVIEW_LIMIT);
+    const hiddenCount = group.items.length - BANDEJA_PREVIEW_LIMIT;
 
     return (
       <Paper
@@ -756,42 +800,14 @@ export default function DashboardBandeja({ view, onSwitchView }) {
           overflow: "hidden",
         }}
       >
-        {group.items.map((item) => {
-          if (item.kind === "tarea") {
-            return (
-              <BandejaTaskRow
-                key={`tarea-${item.data.id}`}
-                task={item.data}
-                overdue={item.subkind === "atrasada"}
-                onComplete={(t) => toggleTaskMutation.mutate(t)}
-                busy={taskBusy}
-              />
-            );
-          }
-          if (item.kind === "novedad") {
-            return (
-              <BandejaNovedadRow
-                key={`novedad-${item.data.id}`}
-                novedad={item.data}
-                onVerExpediente={irAlExpediente}
-                onMarcarLeido={(n) => marcarUno.mutate(n.id)}
-                onAgendar={abrirMenuAgendar}
-                busy={marcarUno.isPending}
-              />
-            );
-          }
-          return (
-            <BandejaEventRow
-              key={`evento-${item.data.id}`}
-              event={item.data}
-              realizadoEstadoId={realizadoEstadoId}
-              onToggle={(e) => toggleEventMutation.mutate(e)}
-              busy={eventBusy}
-              navigate={navigate}
-              overdue={item.subkind === "atrasado"}
-            />
-          );
-        })}
+        {visibleItems.map(renderBandejaItem)}
+        {hasMore && (
+          <GroupShowMore
+            hiddenCount={hiddenCount}
+            expanded={expanded}
+            onToggle={() => toggleGroupItemsExpand(group.id)}
+          />
+        )}
       </Paper>
     );
   };
@@ -1023,6 +1039,12 @@ export default function DashboardBandeja({ view, onSwitchView }) {
         onCreated={(novedad) => {
           if (novedad?.id) marcarUno.mutate(novedad.id);
         }}
+      />
+
+      <TareaDetalleDialog
+        open={tareaDialogId != null}
+        taskId={tareaDialogId}
+        onClose={() => setTareaDialogId(null)}
       />
     </Box>
   );

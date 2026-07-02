@@ -36,6 +36,7 @@ import {
   cancelSisfeSync,
   startSisfeInteractiveLogin,
 } from "../api/sisfe.api";
+import { invalidateSisfeQueries } from "../utils/sisfeInvalidation";
 
 const statusKey = ["sisfe", "status"];
 const syncKey = ["sisfe", "sync-status"];
@@ -80,7 +81,7 @@ export default function SisfeSyncPanel() {
   useEffect(() => {
     if (syncQuery.data?.syncStatus === "done" || syncQuery.data?.syncStatus === "error") {
       queryClient.invalidateQueries({ queryKey: statusKey });
-      queryClient.invalidateQueries({ queryKey: ["expedientes"] });
+      invalidateSisfeQueries(queryClient);
     }
   }, [queryClient, syncQuery.data?.syncStatus]);
 
@@ -92,10 +93,10 @@ export default function SisfeSyncPanel() {
 
   const startMutation = useMutation({
     mutationFn: startSisfeSync,
-    onSuccess: () => {
+    onSuccess: async () => {
       enqueueSnackbar("Sincronización SISFE iniciada", { variant: "success" });
-      queryClient.invalidateQueries({ queryKey: statusKey });
-      queryClient.invalidateQueries({ queryKey: syncKey });
+      await queryClient.invalidateQueries({ queryKey: statusKey });
+      await queryClient.invalidateQueries({ queryKey: syncKey });
     },
     onError: (error) => enqueueSnackbar(error.response?.data?.error?.message || "No se pudo iniciar la sincronización", { variant: "error" }),
   });

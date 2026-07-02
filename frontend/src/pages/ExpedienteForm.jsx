@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
-import { fetchTerceros, fetchParticipantesCaso, addParticipanteCaso, updateParticipanteCaso, removeParticipanteCaso } from "../api/terceros";
+import { fetchAllPages } from "../api/pagination";
+import { fetchAllTerceros, fetchParticipantesCaso, addParticipanteCaso, updateParticipanteCaso, removeParticipanteCaso } from "../api/terceros";
 import {
   Autocomplete,
   Avatar,
@@ -102,10 +103,7 @@ export default function ExpedienteForm() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
   });
 
   const catalogQuery = (categoria) => useQuery({
@@ -124,7 +122,7 @@ export default function ExpedienteForm() {
 
   const tercerosQuery = useQuery({
     queryKey: ["terceros", "lookup"],
-    queryFn: fetchTerceros,
+    queryFn: fetchAllTerceros,
   });
 
   const miembrosQuery = useQuery({

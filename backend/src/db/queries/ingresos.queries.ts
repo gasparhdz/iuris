@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "../index.js";
 import { ingresoAplicaciones, ingresos } from "../schema.js";
 
@@ -12,6 +12,7 @@ export interface IngresosFilters {
   cuotaId?: number;
   from?: Date;
   to?: Date;
+  search?: string;
 }
 
 export interface Pagination {
@@ -32,6 +33,9 @@ export class IngresosQueries {
     if (filters.cuotaId) conditions.push(eq(ingresos.cuotaId, filters.cuotaId));
     if (filters.from) conditions.push(gte(ingresos.fechaIngreso, filters.from));
     if (filters.to) conditions.push(lte(ingresos.fechaIngreso, filters.to));
+    if (filters.search?.trim()) {
+      conditions.push(ilike(ingresos.descripcion, `%${filters.search.trim()}%`));
+    }
 
     const whereCondition = and(...conditions);
 

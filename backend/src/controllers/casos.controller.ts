@@ -1,12 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { CasosService } from "../services/casos.service.js";
-import type { AddParticipanteInput, CreateCasoInput, UpdateCasoInput } from "../schemas/casos.schema.js";
+import type { CasoQueryInput, AddParticipanteInput, CreateCasoInput, UpdateCasoInput } from "../schemas/casos.schema.js";
 
 export class CasosController {
-  static async findAll(request: FastifyRequest<{ Querystring: { page?: number; limit?: number; search?: string } }>, reply: FastifyReply) {
+  static async findAll(request: FastifyRequest<{ Querystring: CasoQueryInput }>, reply: FastifyReply) {
     try {
-      const { page, limit, search } = request.query;
-      const result = await CasosService.findAll(request.authUser.estudioId, page ?? 1, limit ?? 20, search);
+      const result = await CasosService.findAll(request.authUser.estudioId, request.query);
       return reply.send(result);
     } catch (error) {
       throw error;

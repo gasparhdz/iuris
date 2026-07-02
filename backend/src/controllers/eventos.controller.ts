@@ -1,17 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { EventosService } from "../services/eventos.service.js";
-import type { CreateEventoInput, UpdateEventoInput } from "../schemas/eventos.schema.js";
+import type { CreateEventoInput, EventoQueryInput, UpdateEventoInput } from "../schemas/eventos.schema.js";
 
 export class EventosController {
-  static async findAll(request: FastifyRequest<{ Querystring: { from?: string; to?: string; page?: number; limit?: number } }>, reply: FastifyReply) {
+  static async findAll(request: FastifyRequest<{ Querystring: EventoQueryInput }>, reply: FastifyReply) {
     try {
-      const { from, to, page, limit } = request.query;
-      const result = await EventosService.findAll(request.authUser.estudioId, {
-        from,
-        to,
-        page: page ?? 1,
-        limit: limit ?? 50,
-      });
+      const result = await EventosService.findAll(request.authUser.estudioId, request.query);
       return reply.send(result);
     } catch (error) {
       throw error;

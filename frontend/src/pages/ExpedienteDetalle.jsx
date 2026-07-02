@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 import { usePermisos } from "../auth/usePermissions";
-import { addParticipanteCaso, createTercero, fetchParticipantesCaso, fetchTerceros, removeParticipanteCaso } from "../api/terceros";
+import { addParticipanteCaso, createTercero, fetchAllTerceros, fetchParticipantesCaso, removeParticipanteCaso } from "../api/terceros";
 import { getAuditoriaExpediente } from "../api/auditoria.api";
 import SisfeSyncButton from "../components/SisfeSyncButton";
 import {
@@ -310,7 +311,7 @@ export default function ExpedienteDetalle() {
 
   const tercerosQuery = useQuery({
     queryKey: ["terceros", "lookup"],
-    queryFn: fetchTerceros,
+    queryFn: fetchAllTerceros,
   });
 
   const notasQuery = useQuery({
@@ -384,10 +385,7 @@ export default function ExpedienteDetalle() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
   });
 

@@ -1,17 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { TareasService } from "../services/tareas.service.js";
-import type { CreateTareaInput, UpdateTareaInput } from "../schemas/tareas.schema.js";
+import type { CreateTareaInput, TareaQueryInput, UpdateTareaInput } from "../schemas/tareas.schema.js";
 
 export class TareasController {
-  static async findAll(request: FastifyRequest<{ Querystring: { completada?: string; asignadoA?: number; page?: number; limit?: number } }>, reply: FastifyReply) {
+  static async findAll(request: FastifyRequest<{ Querystring: TareaQueryInput }>, reply: FastifyReply) {
     try {
-      const { completada, asignadoA, page, limit } = request.query;
-      const result = await TareasService.findAll(request.authUser.estudioId, {
-        completada: completada === "true" ? true : completada === "false" ? false : undefined,
-        asignadoA,
-        page: page ?? 1,
-        limit: limit ?? 50,
-      });
+      const result = await TareasService.findAll(request.authUser.estudioId, request.query);
       return reply.send(result);
     } catch (error) {
       throw error;

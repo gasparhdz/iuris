@@ -5,16 +5,27 @@ import { TareasQueries } from "../db/queries/tareas.queries.js";
 import { movimientosJudiciales, subTareas, tareas } from "../db/schema.js";
 import { serializeDates } from "../utils/serialize.js";
 import { and, eq, isNull } from "drizzle-orm";
-import type { CreateTareaInput, UpdateTareaInput } from "../schemas/tareas.schema.js";
+import type { CreateTareaInput, TareaQueryInput, UpdateTareaInput } from "../schemas/tareas.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 
 export class TareasService {
-  static async findAll(estudioId: number, query: { completada?: boolean; asignadoA?: number; page?: number; limit?: number }) {
+  static async findAll(estudioId: number, query: TareaQueryInput) {
     const page = query.page || 1;
     const limit = query.limit || 50;
     const offset = (page - 1) * limit;
 
-    const { data, count } = await TareasQueries.findAll(estudioId, limit, offset, query.completada, query.asignadoA);
+    const completada = query.completada === "true"
+      ? true
+      : query.completada === "false"
+        ? false
+        : undefined;
+
+    const { data, count } = await TareasQueries.findAll(estudioId, limit, offset, {
+      completada,
+      asignadoA: query.asignadoA,
+      search: query.search,
+      prioridadId: query.prioridadId,
+    });
 
     return {
       data: {

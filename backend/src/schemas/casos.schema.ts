@@ -28,6 +28,9 @@ export const addParticipanteSchema = z.object({
 export const casoQuerySchema = z.object({
   ...paginationQuerySchema.shape,
   search: z.string().optional(),
+  estadoId: positiveIntSchema.optional(),
+  ramaId: positiveIntSchema.optional(),
+  radicacionParentId: positiveIntSchema.optional(),
 }).strict();
 
 export const participanteParamsSchema = z.object({
@@ -124,3 +127,4 @@ export const casoEventosListResponseSchema = z.object({
 export type CreateCasoInput = z.infer<typeof createCasoSchema>;
 export type UpdateCasoInput = z.infer<typeof updateCasoSchema>;
 export type AddParticipanteInput = z.infer<typeof addParticipanteSchema>;
+export type CasoQueryInput = z.infer<typeof casoQuerySchema>;

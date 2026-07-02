@@ -1,13 +1,18 @@
 import api from "./axios";
+import { fetchAllPages, unwrapPaged } from "./pagination";
 
 function unwrapList(data) {
   const raw = data?.data?.items ?? data?.data ?? data;
   return Array.isArray(raw) ? raw : [];
 }
 
-export async function fetchTerceros() {
-  const r = await api.get("/terceros", { params: { limit: 100 } });
-  return unwrapList(r.data);
+export async function fetchTerceros(params = {}) {
+  const { data } = await api.get("/terceros", { params });
+  return unwrapPaged(data);
+}
+
+export async function fetchAllTerceros(baseParams = {}) {
+  return fetchAllPages("/terceros", baseParams);
 }
 
 export async function createTercero(data) {
@@ -47,3 +52,5 @@ export async function removeParticipanteCaso(casoId, participanteId) {
   await api.delete(`/expedientes/${casoId}/participantes/${participanteId}`);
   return { success: true };
 }
+
+export { unwrapList };

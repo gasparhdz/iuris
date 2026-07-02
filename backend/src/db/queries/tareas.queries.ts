@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "../index.js";
 import { subTareas, tareas } from "../schema.js";
 
@@ -8,7 +8,13 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbExecutor = typeof db | DbTransaction;
 
 export class TareasQueries {
-  static async findAll(estudioId: number, limit: number, offset: number, completada?: boolean, asignadoA?: number) {
+  static async findAll(
+    estudioId: number,
+    limit: number,
+    offset: number,
+    filters: { completada?: boolean; asignadoA?: number; search?: string; prioridadId?: number } = {},
+  ) {
+    const { completada, asignadoA, search, prioridadId } = filters;
     const conditions = [
       eq(tareas.estudioId, estudioId),
       isNull(tareas.deletedAt),
@@ -16,6 +22,11 @@ export class TareasQueries {
 
     if (completada !== undefined) conditions.push(eq(tareas.completada, completada));
     if (asignadoA) conditions.push(eq(tareas.asignadoA, asignadoA));
+    if (prioridadId) conditions.push(eq(tareas.prioridadId, prioridadId));
+    if (search?.trim()) {
+      const term = `%${search.trim()}%`;
+      conditions.push(or(ilike(tareas.titulo, term), ilike(tareas.descripcion, term))!);
+    }
 
     const whereCondition = and(...conditions);
 

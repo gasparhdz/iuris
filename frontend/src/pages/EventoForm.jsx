@@ -7,6 +7,7 @@ import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { es } from "date-fns/locale/es";
 import api from "../api/axios";
+import { fetchAllPages } from "../api/pagination";
 import {
   Autocomplete,
   Box,
@@ -113,19 +114,13 @@ export default function EventoForm() {
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/clientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 1000 * 60 * 5,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "autocomplete"],
-    queryFn: async () => {
-      const { data } = await api.get("/expedientes", { params: { limit: 100 } });
-      return unwrapItems(data);
-    },
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 1000 * 60 * 5,
   });
 
