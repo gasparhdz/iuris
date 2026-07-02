@@ -28,7 +28,11 @@ export class ClientesQueries {
     const data = await db
       .select({
         ...getTableColumns(clientes),
-        casosActivos: sql<number>`(SELECT COUNT(*) FROM casos WHERE casos.cliente_id = ${clientes.id} AND casos.deleted_at IS NULL AND casos.estudio_id = ${clientes.estudioId})`.mapWith(Number),
+        // OJO: las columnas del cliente van calificadas explícitamente (clientes.id / clientes.estudio_id)
+        // y NO interpoladas como ${clientes.id}: Drizzle las renderiza sin el prefijo de tabla ("id"),
+        // y como casos también tiene columnas id/estudio_id, Postgres las liga a casos y rompe la
+        // correlación (contaba lo mismo para todos los clientes).
+        casosActivos: sql<number>`(SELECT COUNT(*) FROM casos WHERE casos.cliente_id = clientes.id AND casos.deleted_at IS NULL AND casos.estudio_id = clientes.estudio_id)`.mapWith(Number),
       })
       .from(clientes)
       .where(whereCondition)

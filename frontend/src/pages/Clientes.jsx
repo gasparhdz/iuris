@@ -183,7 +183,7 @@ export default function Clientes() {
   const { data: clientes = [], isLoading, isFetching } = useQuery({
     queryKey: ["clientes"],
     queryFn: async () => {
-      const { data } = await api.get("/clientes");
+      const { data } = await api.get("/clientes", { params: { limit: 100 } });
       const rawItems = Array.isArray(data) ? data : (data?.data?.items ?? data?.data ?? []);
       const itemsArray = Array.isArray(rawItems) ? rawItems : [];
       return itemsArray.map(mapDbToFrontend);
