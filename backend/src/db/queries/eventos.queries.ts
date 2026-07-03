@@ -70,7 +70,9 @@ export class EventosQueries {
     const data = await db
       .select(getTableColumns(eventos))
       .from(eventos)
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(clientes, eq(eventos.clienteId, clientes.id))
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(casos, eq(eventos.casoId, casos.id))
       .leftJoin(tipoParam, eq(eventos.tipoId, tipoParam.id))
       .leftJoin(estadoParam, eq(eventos.estadoId, estadoParam.id))

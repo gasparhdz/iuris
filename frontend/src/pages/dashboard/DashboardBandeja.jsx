@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import dayjs from "dayjs";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale/es";
 import { alpha, lighten, useTheme } from "@mui/material/styles";
@@ -39,10 +38,9 @@ import TareaDetalleDialog from "../../components/TareaDetalleDialog";
 import EventoDetalleDialog from "../../components/EventoDetalleDialog";
 import SisfeSyncButton from "../../components/SisfeSyncButton";
 import { useAuth } from "../../auth/AuthContext";
-import { casoLabel, clienteLabel, formatFriendlyDate } from "../tareasUtils";
+import { clienteLabel, formatFriendlyDate } from "../tareasUtils";
 import { bandejaFilterCounts, buildBandejaGroups } from "./bandejaGrouping";
-import { BANDEJA_TONES, bandejaGreeting, displayDate, eventDate } from "./dashboardUtils";
-import DashboardViewToggle from "./DashboardViewToggle";
+import { BANDEJA_TONES, bandejaGreeting, displayDate, eventDate, tipoMovimientoInfo } from "./dashboardUtils";
 import { useDashboardData } from "./useDashboardData";
 import { useNovedadesData } from "./useNovedadesData";
 
@@ -54,12 +52,13 @@ const GREETING_ICON = {
 
 const FILTERS = [
   { id: "todo", label: "Todo" },
-  { id: "novedades", label: "Novedades", dot: BANDEJA_TONES.novedad },
+  { id: "novedades", label: "Movimientos SISFE", dot: BANDEJA_TONES.novedad },
   { id: "tareas", label: "Tareas", dot: BANDEJA_TONES.tarea },
   { id: "eventos", label: "Eventos", dot: BANDEJA_TONES.evento },
 ];
 
 const BANDEJA_PREVIEW_LIMIT = 5;
+const BANDEJA_COLLAPSED_GROUPS_KEY = "bandeja_collapsed_groups";
 
 const QUICK_CREATE = [
   { label: "Nuevo cliente", path: "/clientes/nuevo", icon: PersonAdd },
@@ -68,13 +67,15 @@ const QUICK_CREATE = [
   { label: "Cargar finanza", path: "/finanzas/nuevo", icon: Payments },
 ];
 
-function TypeBadge({ kind, overdue, label }) {
+function TypeBadge({ kind, overdue, label, icon, color: colorOverride }) {
   const config = {
     tarea: { label: "Tarea", bg: overdue ? alpha(BANDEJA_TONES.overdue, 0.1) : alpha(BANDEJA_TONES.novedad, 0.1), color: overdue ? BANDEJA_TONES.overdue : BANDEJA_TONES.novedad, Icon: AssignmentTurnedIn },
-    novedad: { label: "Novedad", bg: alpha(BANDEJA_TONES.novedad, 0.1), color: BANDEJA_TONES.novedad, Icon: Gavel },
+    novedad: { label: "Movimiento", bg: alpha(BANDEJA_TONES.novedad, 0.1), color: BANDEJA_TONES.novedad, Icon: Gavel },
     evento: { label: "Evento", bg: alpha(BANDEJA_TONES.evento, 0.1), color: BANDEJA_TONES.evento, Icon: CalendarMonth },
   }[kind];
-  const { bg, color, Icon } = config;
+  const color = colorOverride || config.color;
+  const bg = colorOverride ? alpha(colorOverride, 0.1) : config.bg;
+  const Icon = icon || config.Icon;
   const text = label || config.label;
   return (
     <Box
@@ -159,6 +160,15 @@ const ROW_SX = {
   "&:last-child": { borderBottom: "none" },
 };
 
+// Segunda línea uniforme para tareas, movimientos y eventos: FECHA - Expte: NNNNNN - Carátula: XXXX.
+function metaLine({ fecha, nroExpte, caratula, extra = [] }) {
+  const parts = [fecha || "Sin fecha"];
+  if (nroExpte) parts.push(`Expte: ${nroExpte}`);
+  if (caratula) parts.push(`Carátula: ${caratula}`);
+  parts.push(...extra.filter(Boolean));
+  return parts.join(" - ");
+}
+
 function BandejaActionButton({ title, onClick, disabled, children, color }) {
   return (
     <IconButton
@@ -173,8 +183,12 @@ function BandejaActionButton({ title, onClick, disabled, children, color }) {
   );
 }
 
-function BandejaTaskRow({ task, overdue, onComplete, onOpen, busy }) {
-  const vinculacion = [clienteLabel(task.cliente), casoLabel(task.caso)].filter(Boolean).join(" · ") || "Sin vinculación";
+function BandejaTaskRow({ task, caso, overdue, onComplete, onOpen, busy }) {
+  const meta = metaLine({
+    fecha: formatFriendlyDate(task.fechaLimite),
+    nroExpte: caso?.nroExpte,
+    caratula: caso?.caratula,
+  });
   const overdueLabel = task.fechaLimite && overdue
     ? formatDistanceToNow(new Date(task.fechaLimite), { locale: es, addSuffix: true })
     : null;
@@ -219,7 +233,7 @@ function BandejaTaskRow({ task, overdue, onComplete, onOpen, busy }) {
               whiteSpace: { xs: "normal", sm: "nowrap" },
             }}
           >
-            {formatFriendlyDate(task.fechaLimite)} · {vinculacion}
+            {meta}
           </Typography>
         </Box>
         {overdue && overdueLabel && (
@@ -262,9 +276,12 @@ function BandejaTaskRow({ task, overdue, onComplete, onOpen, busy }) {
 
 function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar, busy }) {
   const titulo = novedad.novedad || novedad.tipo || "Movimiento";
-  const caratula = novedad.descripcion || novedad.caratula || "";
-  const expte = novedad.nroExpte ? `Expte ${novedad.nroExpte}` : null;
-  const fecha = novedad.fecha ? dayjs(novedad.fecha).format("DD/MM/YYYY") : null;
+  const tipoInfo = tipoMovimientoInfo(novedad.tipo);
+  const meta = metaLine({
+    fecha: formatFriendlyDate(novedad.fecha, false),
+    nroExpte: novedad.nroExpte,
+    caratula: novedad.caratula,
+  });
 
   const actions = (
     <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
@@ -300,8 +317,8 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
       onClick={() => onVerExpediente(novedad)}
     >
       <Stack direction="row" alignItems="center" spacing={1}>
-        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: BANDEJA_TONES.novedad, flexShrink: 0 }} />
-        <TypeBadge kind="novedad" />
+        <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: tipoInfo.color, flexShrink: 0 }} />
+        <TypeBadge kind="novedad" label={tipoInfo.label} icon={tipoInfo.Icon} color={tipoInfo.color} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{
@@ -316,8 +333,7 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
               WebkitBoxOrient: "vertical",
             }}
           >
-            <Box component="span" sx={{ fontWeight: 700 }}>{titulo}</Box>
-            {caratula ? ` · ${caratula}` : ""}
+            {titulo}
           </Typography>
           <Typography
             sx={{
@@ -331,7 +347,7 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
               whiteSpace: { xs: "normal", sm: "nowrap" },
             }}
           >
-            {[expte, fecha].filter(Boolean).join(" · ") || "Sin detalle"}
+            {meta}
           </Typography>
         </Box>
         <Box sx={{ display: { xs: "none", md: "flex" } }}>{actions}</Box>
@@ -350,8 +366,12 @@ function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, 
   const eventoPaso = fecha && new Date(fecha).getTime() < Date.now();
   const checked = realizadoEstadoId != null && Number(event.estadoId) === realizadoEstadoId;
   const titulo = event.descripcion || tipoEvento?.nombre || "Evento";
-  const vinc = [cliente ? clienteLabel(cliente) : "", caso ? casoLabel(caso) : ""].filter(Boolean).join(" · ");
-  const subtitle = [fecha ? formatFriendlyDate(fecha) : "Sin fecha", vinc, event.ubicacion].filter(Boolean).join(" · ");
+  const subtitle = metaLine({
+    fecha: fecha ? formatFriendlyDate(fecha) : null,
+    nroExpte: caso?.nroExpte,
+    caratula: caso?.caratula,
+    extra: [!caso && cliente ? clienteLabel(cliente) : null, event.ubicacion],
+  });
 
   const checkbox = eventoPaso && realizadoEstadoId != null ? (
     <BandejaActionButton
@@ -414,7 +434,7 @@ function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, 
           >
             <WarningAmber sx={{ fontSize: 12 }} />
             <Typography sx={{ fontWeight: 700, fontSize: "0.69rem", whiteSpace: "nowrap" }}>
-              Pendiente
+              Atrasado
             </Typography>
           </Stack>
         )}
@@ -434,7 +454,7 @@ function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, 
         {overdue && (
           <Stack direction="row" alignItems="center" spacing={0.5} sx={{ color: BANDEJA_TONES.overdue }}>
             <WarningAmber sx={{ fontSize: 12 }} />
-            <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }}>Pendiente</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }}>Atrasado</Typography>
           </Stack>
         )}
         {checkbox && (
@@ -451,7 +471,7 @@ function EmptyGroup({ groupId }) {
   const config = {
     eventos: {
       Icon: Check,
-      title: "Sin eventos pendientes",
+      title: "Sin próximos eventos",
       subtitle: "Estás al día con la agenda. Los próximos aparecerán acá.",
       iconColor: BANDEJA_TONES.success,
     },
@@ -463,7 +483,7 @@ function EmptyGroup({ groupId }) {
     },
     novedades: {
       Icon: Check,
-      title: "Sin novedades sin leer",
+      title: "Sin movimientos SISFE sin leer",
       subtitle: "Todos los movimientos judiciales están al día.",
       iconColor: BANDEJA_TONES.success,
     },
@@ -581,7 +601,7 @@ function SisfeBanner({ lastSyncAt, frescura }) {
         >
           {syncText}
         </Box>{" "}
-        Sincronizá para traer las novedades más recientes.
+        Sincronizá para traer los movimientos SISFE más recientes.
       </Typography>
       <SisfeSyncButton
         variant="contained"
@@ -614,7 +634,7 @@ function SisfeBanner({ lastSyncAt, frescura }) {
   );
 }
 
-export default function DashboardBandeja({ view, onSwitchView }) {
+export default function DashboardBandeja() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [filter, setFilter] = useState("todo");
@@ -624,8 +644,17 @@ export default function DashboardBandeja({ view, onSwitchView }) {
   const [dialog, setDialog] = useState({ open: false, modo: "tarea", novedad: null });
   const [tareaDialogId, setTareaDialogId] = useState(null);
   const [eventoDialogId, setEventoDialogId] = useState(null);
-  const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [collapsedGroups, setCollapsedGroups] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(BANDEJA_COLLAPSED_GROUPS_KEY)) || {};
+    } catch {
+      return {};
+    }
+  });
   const [expandedItemGroups, setExpandedItemGroups] = useState({});
+  useEffect(() => {
+    localStorage.setItem(BANDEJA_COLLAPSED_GROUPS_KEY, JSON.stringify(collapsedGroups));
+  }, [collapsedGroups]);
   const toggleGroup = (id) => setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   const toggleGroupItemsExpand = (id) => setExpandedItemGroups((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -677,30 +706,31 @@ export default function DashboardBandeja({ view, onSwitchView }) {
     [overdueTasks, upcomingTasks, novedades, pastPendingEvents, futureEvents, filter],
   );
 
+  const overdueCount = overdueTasks.length + pastPendingEvents.length;
+
   const allClear =
-    overdueTasks.length === 0 &&
+    overdueCount === 0 &&
     totalNovedades === 0 &&
     upcomingTasks.length === 0 &&
-    eventCount === 0;
+    futureEvents.length === 0;
 
   const urgencyText = useMemo(() => {
-    if (overdueTasks.length > 0) {
-      const n = overdueTasks.length;
+    if (overdueCount > 0) {
       return (
         <>
           <Box component="span" sx={{ color: BANDEJA_TONES.overdue, fontWeight: 600 }}>
-            {n} {n === 1 ? "tarea atrasada" : "tareas atrasadas"}
+            {overdueCount} {overdueCount === 1 ? "atrasado" : "atrasados"}
           </Box>{" "}
           requieren tu atención.
         </>
       );
     }
     if (totalNovedades > 0) {
-      return `${totalNovedades} ${totalNovedades === 1 ? "novedad sin leer" : "novedades sin leer"}.`;
+      return `${totalNovedades} ${totalNovedades === 1 ? "movimiento SISFE sin leer" : "movimientos SISFE sin leer"}.`;
     }
     if (allClear) return "Estás al día. No hay pendientes urgentes.";
     return "Revisá tu bandeja del día.";
-  }, [overdueTasks.length, totalNovedades, allClear]);
+  }, [overdueCount, totalNovedades, allClear]);
 
   const irAlExpediente = (novedad) => {
     marcarUno.mutate(novedad.id);
@@ -725,6 +755,7 @@ export default function DashboardBandeja({ view, onSwitchView }) {
         <BandejaTaskRow
           key={`tarea-${item.data.id}`}
           task={item.data}
+          caso={expedientesById.get(Number(item.data.casoId))}
           overdue={item.subkind === "atrasada"}
           onComplete={(t) => toggleTaskMutation.mutate(t)}
           onOpen={(t) => setTareaDialogId(t.id)}
@@ -832,7 +863,6 @@ export default function DashboardBandeja({ view, onSwitchView }) {
             {displayDate()} — {urgencyText}
           </Typography>
         </Box>
-        <DashboardViewToggle view={view} onSwitch={onSwitchView} />
       </Stack>
 
       <SisfeBanner lastSyncAt={lastSyncAt} frescura={frescura} />
@@ -959,7 +989,7 @@ export default function DashboardBandeja({ view, onSwitchView }) {
           <Check sx={{ fontSize: 36, color: BANDEJA_TONES.success, mb: 1 }} />
           <Typography sx={{ fontWeight: 700, fontSize: "1rem" }}>Estás al día</Typography>
           <Typography sx={{ mt: 0.5, color: "text.secondary", fontSize: "0.875rem" }}>
-            No hay tareas atrasadas, novedades sin leer ni eventos pendientes.
+            No hay tareas atrasadas, movimientos SISFE sin leer ni eventos pendientes.
           </Typography>
         </Paper>
       ) : (

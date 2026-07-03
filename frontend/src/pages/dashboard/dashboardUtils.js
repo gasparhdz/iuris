@@ -1,5 +1,6 @@
 import dayjs from "dayjs";
 import "dayjs/locale/es";
+import { Description, Gavel, InsertDriveFile, MarkEmailRead, Shield } from "@mui/icons-material";
 
 dayjs.locale("es");
 
@@ -19,6 +20,24 @@ export const BANDEJA_TONES = {
   tarea: "#D64038",
   success: "#1E9E6A",
 };
+
+// Mapeo de tipos de movimiento SISFE (ver sisfe-scraper.service.ts) a ícono/color,
+// consistente con getTipoMovimientoColor de ExpedienteDetalle.
+const TIPO_MOVIMIENTO_ICONS = [
+  { match: /escrito/i, Icon: Description, color: CARD_TONES.blue },
+  { match: /resoluci|sentencia/i, Icon: Gavel, color: CARD_TONES.green },
+  { match: /notificaci/i, Icon: MarkEmailRead, color: CARD_TONES.red },
+  { match: /tr[aá]mite/i, Icon: Shield, color: BANDEJA_TONES.novedad },
+];
+
+export function tipoMovimientoInfo(tipo) {
+  const found = TIPO_MOVIMIENTO_ICONS.find((t) => t.match.test(tipo || ""));
+  return {
+    label: tipo || "Movimiento",
+    Icon: found?.Icon || InsertDriveFile,
+    color: found?.color || BANDEJA_TONES.novedad,
+  };
+}
 
 export const PRIORITY_TONES = {
   CRITICA: "#EF5350",

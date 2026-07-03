@@ -217,6 +217,7 @@ export default function Terceros() {
       setDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: ["terceros"] });
     },
+    onError: (error) => enqueueSnackbar(apiError(error, "No se pudo eliminar el tercero"), { variant: "error" }),
   });
 
   const setField = (field) => (event) => {

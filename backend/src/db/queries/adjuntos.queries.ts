@@ -36,11 +36,6 @@ export class AdjuntosQueries {
     return row ?? null;
   }
 
-  static async findAdjuntoByDriveId(driveFileId: string) {
-    const [row] = await db.select().from(adjuntos).where(eq(adjuntos.driveFileId, driveFileId)).limit(1);
-    return row ?? null;
-  }
-
   static async softDeleteMissingFromFolder(estudioId: number, scope: AdjuntoScope, scopeId: number, driveFileId: string) {
     await db
       .update(adjuntos)

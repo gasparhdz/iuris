@@ -164,7 +164,7 @@ export default function NovedadesExpedientesCard() {
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <NotificationsActive sx={{ color: "primary.main" }} fontSize="small" />
           <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-            Novedades de expedientes
+            Movimientos SISFE de expedientes
           </Typography>
           <Chip size="small" color="primary" label={total} />
           <Stack direction="row" alignItems="center" spacing={0.7} sx={{ ml: 0.5 }}>

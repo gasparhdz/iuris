@@ -1,6 +1,12 @@
+import { eventDate } from "./dashboardUtils";
+
 /** @typedef {'todo' | 'novedades' | 'tareas' | 'eventos'} BandejaFilter */
 
 /** @typedef {'atrasado' | 'novedades' | 'tareas' | 'eventos'} BandejaGroupId */
+
+function overdueItemDate(item) {
+  return new Date(item.kind === "tarea" ? item.data.fechaLimite : eventDate(item.data)).getTime();
+}
 
 /**
  * @param {object} params
@@ -25,20 +31,25 @@ export function buildBandejaGroups({
   const showNovedades = filter === "todo" || filter === "novedades";
   const showEventos = filter === "todo" || filter === "eventos";
 
-  if (showTareas && overdueTasks.length > 0) {
+  const overdueItems = [
+    ...(showTareas ? overdueTasks.map((task) => ({ kind: "tarea", data: task, subkind: "atrasada" })) : []),
+    ...(showEventos ? pastPendingEvents.map((e) => ({ kind: "evento", data: e, subkind: "atrasado" })) : []),
+  ].sort((a, b) => overdueItemDate(a) - overdueItemDate(b));
+
+  if (overdueItems.length > 0) {
     groups.push({
       id: "atrasado",
       label: "Atrasado",
       tone: "#C13A33",
       dot: "#D64038",
-      items: overdueTasks.map((task) => ({ kind: "tarea", data: task, subkind: "atrasada" })),
+      items: overdueItems,
     });
   }
 
   if (showNovedades && novedades.length > 0) {
     groups.push({
       id: "novedades",
-      label: "Novedades sin leer",
+      label: "Movimientos SISFE sin leer",
       tone: "#1A66C9",
       dot: "#1A66C9",
       showMarkAll: true,
@@ -57,16 +68,12 @@ export function buildBandejaGroups({
   }
 
   if (showEventos) {
-    const eventItems = [
-      ...pastPendingEvents.map((e) => ({ kind: "evento", data: e, subkind: "atrasado" })),
-      ...futureEvents.map((e) => ({ kind: "evento", data: e, subkind: "proximo" })),
-    ];
     groups.push({
       id: "eventos",
-      label: pastPendingEvents.length > 0 ? "Eventos pendientes" : "Próximos eventos",
+      label: "Próximos eventos",
       tone: "#7C5CFC",
       dot: "#7C5CFC",
-      items: eventItems,
+      items: futureEvents.map((e) => ({ kind: "evento", data: e, subkind: "proximo" })),
     });
   }
 

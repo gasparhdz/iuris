@@ -68,7 +68,9 @@ export class GastosQueries {
     const data = await db
       .select(getTableColumns(gastos))
       .from(gastos)
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(clientes, eq(gastos.clienteId, clientes.id))
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(casos, eq(gastos.casoId, casos.id))
       .leftJoin(conceptoParam, eq(gastos.conceptoId, conceptoParam.id))
       .leftJoin(estadoParam, eq(gastos.estadoId, estadoParam.id))

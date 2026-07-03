@@ -91,7 +91,9 @@ export class IngresosQueries {
         montoAplicadoGastoPesos: sql<number>`coalesce(sum(case when ${ingresoAplicaciones.gastoId} is not null then ${ingresoAplicaciones.montoCapital} else 0 end), 0)`.mapWith(Number),
       })
       .from(ingresos)
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(clientes, eq(ingresos.clienteId, clientes.id))
+      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(casos, eq(ingresos.casoId, casos.id))
       .leftJoin(tipoParam, eq(ingresos.tipoId, tipoParam.id))
       .leftJoin(ingresoAplicaciones, and(eq(ingresoAplicaciones.ingresoId, ingresos.id), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)))
