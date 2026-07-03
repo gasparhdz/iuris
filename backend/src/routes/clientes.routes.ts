@@ -8,7 +8,7 @@ import {
   clienteQuerySchema, idParamSchema, contactoClienteParamsSchema,
   clienteResponseSchema, clienteListResponseSchema,
   clienteDetalleResponseSchema, contactoClienteResponseSchema,
-  cuentaCorrienteResponseSchema, cuentaCorrienteResumenResponseSchema,
+  cuentaCorrienteResponseSchema, cuentaCorrienteResumenResponseSchema, cuentaCorrienteResumenQuerySchema,
   createContactoClienteSchema, updateContactoClienteSchema,
 } from "../schemas/clientes.schema.js";
 
@@ -69,6 +69,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
       tags: ["Clientes"],
       summary: "Resumen de cuenta corriente por cliente (todo el estudio)",
       security: [{ bearerAuth: [] }],
+      querystring: cuentaCorrienteResumenQuerySchema,
       response: documentedResponses(200, cuentaCorrienteResumenResponseSchema),
     },
   }, ClientesController.findCuentasCorrientesResumen);

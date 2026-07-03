@@ -27,6 +27,8 @@ export const ingresoQuerySchema = z.object({
   from: dateStringSchema.optional(),
   to: dateStringSchema.optional(),
   search: z.string().optional(),
+  orderBy: z.enum(["fecha", "concepto", "cliente", "expediente", "monto"]).default("fecha"),
+  order: z.enum(["asc", "desc"]).default("desc"),
 }).strict();
 
 export const ingresoListResponseSchema = z.object({

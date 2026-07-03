@@ -91,7 +91,7 @@ export class ClientesQueries {
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(orderExpr);
+      .orderBy(orderExpr, asc(clientes.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

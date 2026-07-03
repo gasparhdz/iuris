@@ -84,7 +84,7 @@ export default function Eventos() {
   const [view, setView] = useState("list");
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const [orderBy, setOrderBy] = useState("fechaInicio");
+  const [orderBy, setOrderBy] = useState("fechas");
   const [order, setOrder] = useState("asc");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -98,11 +98,13 @@ export default function Eventos() {
       search: debouncedSearch.trim() || undefined,
       tipoId: tipoFilter === "all" ? undefined : Number(tipoFilter),
       estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
+      orderBy,
+      order,
     };
     if (timeFilter === "proximos") params.upcoming = "true";
     if (timeFilter === "pasados") params.upcoming = "false";
     return params;
-  }, [page, rowsPerPage, debouncedSearch, tipoFilter, estadoFilter, timeFilter]);
+  }, [page, rowsPerPage, debouncedSearch, tipoFilter, estadoFilter, timeFilter, orderBy, order]);
 
   const eventosQuery = useQuery({
     queryKey: ["eventos", "list", listParams],
@@ -151,50 +153,7 @@ export default function Eventos() {
 
   const allEvents = eventosQuery.data?.items ?? [];
   const totalCount = eventosQuery.data?.meta?.total ?? 0;
-
-  const sortedEvents = useMemo(() => {
-    const comparator = (a, b) => {
-      let valA = a[orderBy];
-      let valB = b[orderBy];
-
-      if (orderBy === "tipoEstado") {
-        const tA = tiposById.get(Number(a.tipoId))?.nombre || "";
-        const tB = tiposById.get(Number(b.tipoId))?.nombre || "";
-        valA = tA;
-        valB = tB;
-      } else if (orderBy === "fechas") {
-        valA = a.fechaInicio || "";
-        valB = b.fechaInicio || "";
-      } else if (orderBy === "vinculaciones") {
-        const cliA = clientesById.get(Number(a.clienteId));
-        const casoA = expedientesById.get(Number(a.casoId));
-        valA = [clienteLabel(cliA), casoLabel(casoA)].filter(Boolean).join(" ");
-        const cliB = clientesById.get(Number(b.clienteId));
-        const casoB = expedientesById.get(Number(b.casoId));
-        valB = [clienteLabel(cliB), casoLabel(casoB)].filter(Boolean).join(" ");
-      } else if (orderBy === "evento") {
-        valA = a.descripcion || "";
-        valB = b.descripcion || "";
-      }
-
-      if (valA === valB) return 0;
-      if (valA === null || valA === undefined) return 1;
-      if (valB === null || valB === undefined) return -1;
-
-      if (typeof valA === "string") {
-        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      }
-
-      return valA < valB ? -1 : 1;
-    };
-
-    return [...allEvents].sort((a, b) => {
-      const cmp = comparator(a, b);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [allEvents, orderBy, order, tiposById, clientesById, expedientesById]);
-
-  const displayEvents = sortedEvents;
+  const displayEvents = allEvents;
 
   const kpiFilterParams = useMemo(() => {
     const params = {

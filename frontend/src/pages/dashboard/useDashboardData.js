@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import api from "../../api/axios";
 import { fetchAllPages } from "../../api/pagination";
-import { getApiError, isOverdue, unwrapEntity, unwrapItems } from "../tareasUtils";
+import { getApiError, isOverdue, unwrapEntity } from "../tareasUtils";
 import { eventDate, normalizeCode } from "./dashboardUtils";
 
 export function useDashboardData() {
@@ -22,12 +22,30 @@ export function useDashboardData() {
     staleTime: 60_000,
   });
 
+  const clientesQuery = useQuery({
+    queryKey: ["clientes", "lookup"],
+    queryFn: () => fetchAllPages("/clientes"),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const expedientesQuery = useQuery({
+    queryKey: ["expedientes", "lookup"],
+    queryFn: () => fetchAllPages("/expedientes"),
+    staleTime: 1000 * 60 * 5,
+  });
+
   const catalogQuery = useQuery({
     queryKey: ["dashboard", "catalogos"],
     queryFn: async () => {
-      const { data } = await api.get("/catalogos/parametros", { params: { categoria: "ESTADO_EVENTO" } });
-      const raw = data?.data ?? data;
-      return { ESTADO_EVENTO: Array.isArray(raw) ? raw : [] };
+      const unwrap = (res) => {
+        const raw = res.data?.data ?? res.data;
+        return Array.isArray(raw) ? raw : [];
+      };
+      const [estados, tipos] = await Promise.all([
+        api.get("/catalogos/parametros", { params: { categoria: "ESTADO_EVENTO" } }),
+        api.get("/catalogos/parametros", { params: { categoria: "TIPO_EVENTO" } }),
+      ]);
+      return { ESTADO_EVENTO: unwrap(estados), TIPO_EVENTO: unwrap(tipos) };
     },
     staleTime: 300_000,
   });
@@ -41,6 +59,20 @@ export function useDashboardData() {
   const tareas = tareasQuery.data ?? [];
   const eventos = eventosQuery.data ?? [];
   const catalogEstadosEvento = catalogQuery.data?.ESTADO_EVENTO ?? [];
+  const catalogTiposEvento = catalogQuery.data?.TIPO_EVENTO ?? [];
+
+  const tiposEventoById = useMemo(
+    () => new Map(catalogTiposEvento.map((t) => [Number(t.id), t])),
+    [catalogTiposEvento],
+  );
+  const clientesById = useMemo(
+    () => new Map((clientesQuery.data ?? []).map((c) => [Number(c.id), c])),
+    [clientesQuery.data],
+  );
+  const expedientesById = useMemo(
+    () => new Map((expedientesQuery.data ?? []).map((c) => [Number(c.id), c])),
+    [expedientesQuery.data],
+  );
 
   const estadoEventoIdByCodigo = useMemo(() => {
     const map = new Map();
@@ -155,6 +187,9 @@ export function useDashboardData() {
     catalogQuery,
     tareas,
     eventos,
+    tiposEventoById,
+    clientesById,
+    expedientesById,
     realizadoEstadoId,
     pendienteEstadoId,
     pendingTasks,

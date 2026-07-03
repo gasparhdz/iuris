@@ -47,6 +47,8 @@ export const honorarioQuerySchema = z.object({
   search: z.string().optional(),
   from: dateStringSchema.optional(),
   to: dateStringSchema.optional(),
+  orderBy: z.enum(["fecha", "concepto", "cliente", "expediente", "vencimiento", "monto", "interes", "saldo", "estado"]).default("fecha"),
+  order: z.enum(["asc", "desc"]).default("desc"),
 }).strict();
 
 const honorarioRelationSchema = z.object({

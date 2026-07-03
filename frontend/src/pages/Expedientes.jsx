@@ -106,7 +106,9 @@ export default function Expedientes() {
     ramaId: ramaFilter === "all" ? undefined : Number(ramaFilter),
     estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
     radicacionParentId: radicacionFilter === "all" ? undefined : Number(radicacionFilter),
-  }), [page, rowsPerPage, debouncedSearch, ramaFilter, estadoFilter, radicacionFilter]);
+    orderBy,
+    order,
+  }), [page, rowsPerPage, debouncedSearch, ramaFilter, estadoFilter, radicacionFilter, orderBy, order]);
 
   const casosQuery = useQuery({
     queryKey: ["expedientes", "list", listParams],
@@ -145,52 +147,7 @@ export default function Expedientes() {
 
   const casos = casosQuery.data?.items ?? [];
   const totalCount = casosQuery.data?.meta?.total ?? 0;
-
-  const sortedRows = useMemo(() => {
-    const comparator = (a, b) => {
-      let valA = a[orderBy];
-      let valB = b[orderBy];
-
-      if (orderBy === "cliente") {
-        const clA = clientesById.get(a.clienteId);
-        const clB = clientesById.get(b.clienteId);
-        valA = clienteNombre(clA);
-        valB = clienteNombre(clB);
-      } else if (orderBy === "tipo") {
-        valA = tiposById.get(a.tipoId)?.nombre || "";
-        valB = tiposById.get(b.tipoId)?.nombre || "";
-      } else if (orderBy === "juzgado") {
-        const radA = radicacionesById.get(a.radicacionId);
-        const radB = radicacionesById.get(b.radicacionId);
-        valA = radA?.nombre || "";
-        valB = radB?.nombre || "";
-      } else if (orderBy === "estado") {
-        const estA = estadosById.get(a.estadoId);
-        const estB = estadosById.get(b.estadoId);
-        valA = estA?.nombre || "";
-        valB = estB?.nombre || "";
-      }
-
-      if (valA === valB) return 0;
-      if (valA === null || valA === undefined) return 1;
-      if (valB === null || valB === undefined) return -1;
-
-      if (typeof valA === "string") {
-        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      }
-
-      return valA < valB ? -1 : 1;
-    };
-
-    const stabilized = [...casos].sort((a, b) => {
-      const cmp = comparator(a, b);
-      return order === "desc" ? -cmp : cmp;
-    });
-
-    return stabilized;
-  }, [casos, orderBy, order, clientesById, tiposById, estadosById, radicacionesById]);
-
-  const displayRows = sortedRows;
+  const displayRows = casos;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";

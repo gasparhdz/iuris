@@ -6,6 +6,7 @@ import { IngresosQueries } from "../db/queries/ingresos.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
 import { ValorJusService } from "./valorjus.service.js";
 import { buildCuentaCorriente, type CCAplicacion, type CCGasto, type CCHonorario, type CCIngreso, type CCResult } from "./cuenta-corriente.js";
+import type { CuentaCorrienteResumenQueryInput } from "../schemas/clientes.schema.js";
 
 export type CCResumenCliente = {
   clienteId: number;
@@ -33,7 +34,10 @@ export class CuentaCorrienteService {
   }
 
   /** Resumen de cuenta corriente por cliente para todo el estudio (una sola pasada). */
-  static async getResumenPorCliente(estudioId: number): Promise<CCResumenCliente[]> {
+  static async getResumenPorCliente(estudioId: number, query: CuentaCorrienteResumenQueryInput) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const { orderBy = "saldo", order = "desc", search } = query;
     const datos = await this.loadDatos(estudioId, {});
 
     const grupos = new Map<number, { honorarios: CCHonorario[]; gastos: CCGasto[]; ingresos: CCIngreso[] }>();
@@ -46,16 +50,82 @@ export class CuentaCorrienteService {
     datos.gastos.forEach((g) => ensure(g.clienteId)?.gastos.push(g));
     datos.ingresos.forEach((i) => ensure(i.clienteId)?.ingresos.push(i));
 
-    return [...grupos.entries()].map(([clienteId, grupo]) => ({
-      clienteId,
-      totales: buildCuentaCorriente({
+    const { data: clientes } = await ClientesQueries.findAll(estudioId, 10000, 0, {});
+    const clientesById = new Map(clientes.map((c) => [c.id, c]));
+
+    const rows = [...grupos.entries()].map(([clienteId, grupo]) => {
+      const totales = buildCuentaCorriente({
         fechaCorte: datos.fechaCorte,
         valorJusActual: datos.valorJusActual,
         honorarios: grupo.honorarios,
         gastos: grupo.gastos,
         ingresos: grupo.ingresos,
-      }).totales,
-    }));
+      }).totales;
+      const cliente = clientesById.get(clienteId);
+      const clienteNombre = cliente?.razonSocial
+        || [cliente?.apellido, cliente?.nombre].filter(Boolean).join(", ")
+        || `Cliente #${clienteId}`;
+      const totalCargos = Number(totales.honorariosPesos ?? 0) + Number(totales.gastosPesos ?? 0);
+      const totalCobrado = Number(totales.ingresosPesos ?? 0);
+      const saldoPendiente = Number(totales.saldoPesos ?? 0);
+      return {
+        clienteId,
+        totales,
+        clienteNombre,
+        totalCargos,
+        totalCobrado,
+        saldoPendiente,
+        estadoFinanciero: saldoPendiente > 0 ? "Deudor" : "Al Dia",
+      };
+    });
+
+    const searchTerm = search?.trim().toLowerCase();
+    const filtered = searchTerm
+      ? rows.filter((row) => [row.clienteNombre, row.estadoFinanciero].join(" ").toLowerCase().includes(searchTerm))
+      : rows;
+
+    const compare = (a: number | string, b: number | string) => {
+      if (typeof a === "number" && typeof b === "number") return a - b;
+      return String(a).localeCompare(String(b), "es", { sensitivity: "base" });
+    };
+
+    const sorted = [...filtered].sort((a, b) => {
+      let valA: number | string;
+      let valB: number | string;
+      switch (orderBy) {
+        case "cliente":
+          valA = a.clienteNombre;
+          valB = b.clienteNombre;
+          break;
+        case "cargos":
+          valA = a.totalCargos;
+          valB = b.totalCargos;
+          break;
+        case "cobrado":
+          valA = a.totalCobrado;
+          valB = b.totalCobrado;
+          break;
+        case "estado":
+          valA = a.estadoFinanciero;
+          valB = b.estadoFinanciero;
+          break;
+        case "saldo":
+        default:
+          valA = a.saldoPendiente;
+          valB = b.saldoPendiente;
+      }
+      const cmp = compare(valA, valB);
+      if (cmp !== 0) return order === "desc" ? -cmp : cmp;
+      return a.clienteId - b.clienteId;
+    });
+
+    const offset = (page - 1) * limit;
+    const items = sorted.slice(offset, offset + limit).map(({ clienteId, totales }) => ({ clienteId, totales }));
+
+    return {
+      items,
+      meta: { total: filtered.length, page, limit },
+    };
   }
 
   private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {

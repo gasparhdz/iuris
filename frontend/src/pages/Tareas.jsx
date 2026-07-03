@@ -106,11 +106,13 @@ export default function Tareas() {
       limit: rowsPerPage,
       search: debouncedSearch.trim() || undefined,
       prioridadId: priorityFilter === "all" ? undefined : Number(priorityFilter),
+      orderBy,
+      order,
     };
     if (statusFilter === "pendientes") params.completada = "false";
     if (statusFilter === "completadas") params.completada = "true";
     return params;
-  }, [page, rowsPerPage, debouncedSearch, priorityFilter, statusFilter]);
+  }, [page, rowsPerPage, debouncedSearch, priorityFilter, statusFilter, orderBy, order]);
 
   const tareasQuery = useQuery({
     queryKey: ["tareas", "list", listParams],
@@ -148,50 +150,7 @@ export default function Tareas() {
   const expedientesById = useMemo(() => new Map((expedientesQuery.data ?? []).map((c) => [Number(c.id), c])), [expedientesQuery.data]);
   const allTasks = tareasQuery.data?.items ?? [];
   const totalCount = tareasQuery.data?.meta?.total ?? 0;
-
-  const sortedTasks = useMemo(() => {
-    const comparator = (a, b) => {
-      let valA = a[orderBy];
-      let valB = b[orderBy];
-
-      if (orderBy === "prioridad") {
-        const pA = prioridadesById.get(Number(a.prioridadId))?.nombre || "";
-        const pB = prioridadesById.get(Number(b.prioridadId))?.nombre || "";
-        valA = pA;
-        valB = pB;
-      } else if (orderBy === "vencimiento") {
-        valA = a.fechaLimite || "";
-        valB = b.fechaLimite || "";
-      } else if (orderBy === "vinculacion") {
-        const cliA = clientesById.get(Number(a.clienteId));
-        const casoA = expedientesById.get(Number(a.casoId));
-        valA = [clienteLabel(cliA), casoLabel(casoA)].filter(Boolean).join(" ");
-        const cliB = clientesById.get(Number(b.clienteId));
-        const casoB = expedientesById.get(Number(b.casoId));
-        valB = [clienteLabel(cliB), casoLabel(casoB)].filter(Boolean).join(" ");
-      } else if (orderBy === "checklist") {
-        valA = checklistStats(a).percent;
-        valB = checklistStats(b).percent;
-      }
-
-      if (valA === valB) return 0;
-      if (valA === null || valA === undefined) return 1;
-      if (valB === null || valB === undefined) return -1;
-
-      if (typeof valA === "string") {
-        return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
-      }
-
-      return valA < valB ? -1 : 1;
-    };
-
-    return [...allTasks].sort((a, b) => {
-      const cmp = comparator(a, b);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [allTasks, orderBy, order, prioridadesById, clientesById, expedientesById]);
-
-  const displayTasks = sortedTasks;
+  const displayTasks = allTasks;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";

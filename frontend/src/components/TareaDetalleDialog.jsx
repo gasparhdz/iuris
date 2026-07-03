@@ -14,7 +14,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
   LinearProgress,
   Link,
@@ -48,27 +47,60 @@ import {
   unwrapEntity,
 } from "../pages/tareasUtils";
 
-function MetaRow({ icon, label, value, link }) {
+const OVERDUE_TONE = "#C13A33";
+
+// Campo compacto de metadato: icono + label chico + valor. Reemplaza las filas
+// con avatares gigantes por algo mucho más liviano y escaneable.
+function MetaField({ icon, label, value, tone }) {
   return (
-    <Stack direction="row" spacing={1.25} alignItems="flex-start">
-      <Avatar sx={{ width: 32, height: 32, bgcolor: "action.hover", color: "text.secondary" }}>
-        {icon}
-      </Avatar>
+    <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ minWidth: 0 }}>
+      <Box sx={{ color: tone ?? "text.disabled", mt: "1px", display: "flex", flexShrink: 0 }}>{icon}</Box>
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="caption" sx={{ display: "block", color: "text.disabled", fontWeight: 700, textTransform: "uppercase" }}>
+        <Typography variant="caption" sx={{ display: "block", color: "text.disabled", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.3 }}>
           {label}
         </Typography>
-        {link ? (
-          <Link component={RouterLink} to={link} sx={{ fontWeight: 700, fontSize: "0.84rem", textDecoration: "none" }}>
-            {value}
-          </Link>
-        ) : (
-          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.84rem" }}>
-            {value}
-          </Typography>
-        )}
+        <Typography variant="body2" sx={{ fontWeight: 700, lineHeight: 1.35, color: tone ?? "text.primary", wordBreak: "break-word" }}>
+          {value}
+        </Typography>
       </Box>
     </Stack>
+  );
+}
+
+// Vinculación (cliente / expediente) como tarjeta clickeable.
+function LinkRow({ icon, label, value, to }) {
+  const inner = (
+    <Stack
+      direction="row"
+      spacing={1.25}
+      alignItems="center"
+      sx={{
+        p: 1,
+        borderRadius: "10px",
+        border: "1px solid",
+        borderColor: "divider",
+        transition: "border-color 0.15s ease, background-color 0.15s ease",
+        ...(to && { "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }),
+      }}
+    >
+      <Avatar sx={{ width: 30, height: 30, bgcolor: "action.hover", color: "text.secondary" }}>{icon}</Avatar>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="caption" sx={{ display: "block", color: "text.disabled", fontWeight: 800, textTransform: "uppercase", lineHeight: 1.2 }}>
+          {label}
+        </Typography>
+        <Typography variant="body2" noWrap sx={{ fontWeight: 700, color: to ? "primary.main" : "text.secondary" }}>
+          {value}
+        </Typography>
+      </Box>
+    </Stack>
+  );
+
+  return to ? (
+    <Link component={RouterLink} to={to} sx={{ textDecoration: "none", display: "block" }}>
+      {inner}
+    </Link>
+  ) : (
+    inner
   );
 }
 
@@ -185,6 +217,7 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
   const items = Array.isArray(tarea?.items) ? tarea.items : [];
   const stats = checklistStats(tarea);
   const overdue = isOverdue(tarea);
+  const overdueActive = overdue && !tarea?.completada;
   const incompleteSubtasksCount = items.filter((item) => !item.completada).length;
   const asignadoLabel = asignado
     ? [asignado.nombre, asignado.apellido].filter(Boolean).join(" ") || asignado.email || `Usuario #${asignado.id}`
@@ -238,6 +271,8 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
   }
 
   const busy = toggleTaskMutation.isPending || toggleSubtaskMutation.isPending;
+  const accentColor = prioritySx.color || theme.palette.primary.main;
+  const hasSubtareas = items.length > 0 || stats.total > 0;
 
   return (
     <>
@@ -247,15 +282,57 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
         fullWidth
         maxWidth="sm"
         scroll="paper"
-        PaperProps={{ sx: { borderRadius: "16px" } }}
+        PaperProps={{ sx: { borderRadius: "18px", overflow: "hidden" } }}
       >
-        <DialogTitle sx={{ pr: 6, pb: 1 }}>
-          <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 700, letterSpacing: "0.08em" }}>
-            Detalle de tarea
-          </Typography>
-          <IconButton onClick={onClose} sx={{ position: "absolute", right: 12, top: 12 }} aria-label="Cerrar">
+        {/* Barra de acento con el color de la prioridad */}
+        <Box sx={{ height: 4, bgcolor: accentColor, flexShrink: 0 }} />
+
+        <DialogTitle component="div" sx={{ pr: 6, pt: 2, pb: 1.5 }}>
+          <IconButton onClick={onClose} sx={{ position: "absolute", right: 12, top: 14 }} aria-label="Cerrar">
             <Close />
           </IconButton>
+          <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 800, letterSpacing: "0.1em" }}>
+            Detalle de tarea
+          </Typography>
+          {tarea && (
+            <>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 900,
+                  lineHeight: 1.3,
+                  mt: 0.25,
+                  wordBreak: "break-word",
+                  textDecoration: tarea.completada ? "line-through" : "none",
+                  color: tarea.completada ? "text.secondary" : "text.primary",
+                }}
+              >
+                {tarea.titulo || "Tarea sin título"}
+              </Typography>
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                <Chip
+                  label={priority?.nombre ?? "Sin prioridad"}
+                  size="small"
+                  sx={{ bgcolor: prioritySx.bg, color: prioritySx.color, border: "1px solid", borderColor: prioritySx.border, fontWeight: 800, height: 22 }}
+                />
+                <Chip
+                  icon={<CheckCircle sx={{ fontSize: "14px !important" }} />}
+                  label={tarea.completada ? "Completada" : "Pendiente"}
+                  size="small"
+                  color={tarea.completada ? "success" : "warning"}
+                  sx={{ fontWeight: 800, height: 22 }}
+                />
+                {overdueActive && (
+                  <Chip
+                    icon={<WarningAmber sx={{ fontSize: "14px !important" }} />}
+                    label="Atrasada"
+                    size="small"
+                    sx={{ bgcolor: alpha(OVERDUE_TONE, 0.1), color: OVERDUE_TONE, border: "1px solid", borderColor: alpha(OVERDUE_TONE, 0.3), fontWeight: 800, height: 22 }}
+                  />
+                )}
+              </Stack>
+            </>
+          )}
         </DialogTitle>
 
         <DialogContent dividers sx={{ px: { xs: 2, sm: 2.5 }, py: 2 }}>
@@ -269,124 +346,58 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
             </Typography>
           ) : (
             <Stack spacing={2.25}>
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Chip
-                  label={priority?.nombre ?? "Sin prioridad"}
-                  size="small"
-                  sx={{
-                    bgcolor: prioritySx.bg,
-                    color: prioritySx.color,
-                    border: "1px solid",
-                    borderColor: prioritySx.border,
-                    fontWeight: 800,
-                  }}
-                />
-                <Chip
-                  icon={<CheckCircle sx={{ fontSize: "14px !important" }} />}
-                  label={tarea.completada ? "Completada" : "Pendiente"}
-                  size="small"
-                  color={tarea.completada ? "success" : "warning"}
-                  sx={{ fontWeight: 800 }}
-                />
-                {overdue && (
-                  <Chip
-                    icon={<WarningAmber sx={{ fontSize: "14px !important" }} />}
-                    label="Atrasada"
-                    size="small"
-                    sx={{
-                      bgcolor: alpha("#C13A33", 0.1),
-                      color: "#C13A33",
-                      border: "1px solid",
-                      borderColor: alpha("#C13A33", 0.3),
-                      fontWeight: 800,
-                    }}
-                  />
-                )}
-              </Stack>
-
-              <Typography
-                variant="h6"
-                sx={{
-                  fontWeight: 900,
-                  lineHeight: 1.35,
-                  textDecoration: tarea.completada ? "line-through" : "none",
-                  color: tarea.completada ? "text.secondary" : "text.primary",
-                }}
-              >
-                {tarea.titulo || "Tarea sin título"}
-              </Typography>
-
               {tarea.descripcion && (
-                <Box>
-                  <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 800, textTransform: "uppercase" }}>
-                    Descripción
-                  </Typography>
-                  <Typography variant="body2" sx={{ mt: 0.6, whiteSpace: "pre-wrap", lineHeight: 1.7, color: "text.secondary" }}>
+                <Box sx={{ p: 1.5, borderRadius: "12px", bgcolor: "action.hover" }}>
+                  <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", lineHeight: 1.65, color: "text.secondary" }}>
                     {tarea.descripcion}
                   </Typography>
                 </Box>
               )}
 
-              <Stack spacing={1.5}>
-                <MetaRow icon={<CalendarToday sx={{ fontSize: 17 }} />} label="Fecha límite" value={formatFriendlyDate(tarea.fechaLimite)} />
-                <MetaRow icon={<NotificationsActive sx={{ fontSize: 17 }} />} label="Recordatorio" value={formatFriendlyDate(tarea.recordatorio)} />
-                <MetaRow icon={<Person sx={{ fontSize: 17 }} />} label="Asignado a" value={asignadoLabel} />
-                <MetaRow
-                  icon={<Person sx={{ fontSize: 17 }} />}
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.75 }}>
+                <MetaField
+                  icon={<CalendarToday sx={{ fontSize: 18 }} />}
+                  label="Fecha límite"
+                  value={formatFriendlyDate(tarea.fechaLimite)}
+                  tone={overdueActive ? OVERDUE_TONE : undefined}
+                />
+                <MetaField icon={<NotificationsActive sx={{ fontSize: 18 }} />} label="Recordatorio" value={formatFriendlyDate(tarea.recordatorio)} />
+                <MetaField icon={<Person sx={{ fontSize: 18 }} />} label="Asignado a" value={asignadoLabel} />
+              </Box>
+
+              <Stack spacing={1}>
+                <LinkRow
+                  icon={<Person sx={{ fontSize: 16 }} />}
                   label="Cliente"
                   value={cliente ? clienteLabel(cliente) : "Sin cliente"}
-                  link={cliente ? `/clientes/${cliente.id}` : undefined}
+                  to={cliente ? `/clientes/${cliente.id}` : undefined}
                 />
-                <MetaRow
-                  icon={<FolderOpen sx={{ fontSize: 17 }} />}
+                <LinkRow
+                  icon={<FolderOpen sx={{ fontSize: 16 }} />}
                   label="Expediente"
                   value={caso ? casoLabel(caso) : "Sin expediente"}
-                  link={caso ? `/expedientes/${caso.id}` : undefined}
+                  to={caso ? `/expedientes/${caso.id}` : undefined}
                 />
               </Stack>
 
-              <Divider />
-
-              <Stack direction="row" alignItems="center" spacing={1.25}>
-                <Checkbox
-                  checked={Boolean(tarea.completada)}
-                  onChange={handleMainToggle}
-                  disabled={busy}
-                />
+              {hasSubtareas && (
                 <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                    {tarea.completada ? "Tarea completada" : "Marcar como completada"}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    {tarea.completadaAt ? `Completada el ${formatDateTime(tarea.completadaAt)}` : "Podés actualizar el estado desde acá."}
-                  </Typography>
-                </Box>
-              </Stack>
-
-              <Box>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                  <Box>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>Subtareas</Typography>
-                    <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 700 }}>
-                      {stats.done}/{stats.total} completadas
+                  <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ mb: 0.75 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                      Subtareas{" "}
+                      <Box component="span" sx={{ color: "text.secondary", fontWeight: 700 }}>· {stats.done}/{stats.total}</Box>
                     </Typography>
-                  </Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 900, color: "primary.main" }}>
-                    {stats.percent}%
-                  </Typography>
-                </Stack>
-                <LinearProgress variant="determinate" value={stats.percent} sx={{ height: 6, borderRadius: 99, mb: 1.25 }} />
-                {items.length === 0 ? (
-                  <Typography variant="body2" sx={{ color: "text.secondary" }}>Sin subtareas.</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
+                    <Typography variant="caption" sx={{ fontWeight: 900, color: "primary.main" }}>{stats.percent}%</Typography>
+                  </Stack>
+                  <LinearProgress variant="determinate" value={stats.percent} sx={{ height: 6, borderRadius: 99, mb: 1 }} />
+                  <Stack spacing={0.15}>
                     {items.map((item) => (
                       <Stack
                         key={item.id}
                         direction="row"
-                        spacing={1}
+                        spacing={0.75}
                         alignItems="center"
-                        sx={{ py: 0.35, borderRadius: "8px", "&:hover": { bgcolor: "action.hover" } }}
+                        sx={{ borderRadius: "8px", "&:hover": { bgcolor: "action.hover" } }}
                       >
                         <Checkbox
                           size="small"
@@ -397,7 +408,7 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
                         <Typography
                           variant="body2"
                           sx={{
-                            fontWeight: 700,
+                            fontWeight: 600,
                             textDecoration: item.completada ? "line-through" : "none",
                             color: item.completada ? "text.secondary" : "text.primary",
                           }}
@@ -407,29 +418,34 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
                       </Stack>
                     ))}
                   </Stack>
-                )}
-              </Box>
+                </Box>
+              )}
 
-              <Stack spacing={0.35}>
-                <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                  Creada el {formatDateTime(tarea.createdAt)}
-                </Typography>
-                <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                  Última modificación el {formatDateTime(tarea.updatedAt)}
-                </Typography>
-              </Stack>
+              <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                Creada el {formatDateTime(tarea.createdAt)}
+                {tarea.updatedAt ? ` · Modificada el ${formatDateTime(tarea.updatedAt)}` : ""}
+              </Typography>
             </Stack>
           )}
         </DialogContent>
 
         <DialogActions sx={{ px: 2.5, py: 1.75, gap: 1, flexWrap: "wrap" }}>
-          <Button onClick={onClose} color="inherit" sx={{ fontWeight: 700 }}>
-            Cerrar
-          </Button>
+          {tarea && (
+            <Button
+              variant={tarea.completada ? "outlined" : "contained"}
+              color="success"
+              startIcon={<CheckCircle />}
+              onClick={handleMainToggle}
+              disabled={busy}
+              sx={{ borderRadius: "10px", fontWeight: 800 }}
+            >
+              {tarea.completada ? "Reabrir" : "Completar"}
+            </Button>
+          )}
           <Box sx={{ flex: 1 }} />
           {canEditar && tarea && (
             <Button
-              variant="outlined"
+              variant="text"
               startIcon={<Edit />}
               onClick={() => {
                 onClose();
@@ -441,13 +457,13 @@ export default function TareaDetalleDialog({ open, taskId, onClose }) {
             </Button>
           )}
           <Button
-            variant="contained"
+            variant="outlined"
             endIcon={<OpenInNew />}
             onClick={goToFullPage}
             disabled={!tarea}
             sx={{ borderRadius: "10px", fontWeight: 800 }}
           >
-            Ver ficha completa
+            Ficha completa
           </Button>
         </DialogActions>
       </Dialog>

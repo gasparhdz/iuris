@@ -18,6 +18,8 @@ export class EventosService {
       tipoId: query.tipoId,
       estadoId: query.estadoId,
       upcoming: query.upcoming === "true" ? true : query.upcoming === "false" ? false : undefined,
+      orderBy: query.orderBy,
+      order: query.order,
     });
 
     return {

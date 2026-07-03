@@ -36,6 +36,7 @@ import {
 } from "@mui/icons-material";
 import AgendarDialog from "../../components/AgendarDialog";
 import TareaDetalleDialog from "../../components/TareaDetalleDialog";
+import EventoDetalleDialog from "../../components/EventoDetalleDialog";
 import SisfeSyncButton from "../../components/SisfeSyncButton";
 import { useAuth } from "../../auth/AuthContext";
 import { casoLabel, clienteLabel, formatFriendlyDate } from "../tareasUtils";
@@ -67,13 +68,14 @@ const QUICK_CREATE = [
   { label: "Cargar finanza", path: "/finanzas/nuevo", icon: Payments },
 ];
 
-function TypeBadge({ kind, overdue }) {
+function TypeBadge({ kind, overdue, label }) {
   const config = {
     tarea: { label: "Tarea", bg: overdue ? alpha(BANDEJA_TONES.overdue, 0.1) : alpha(BANDEJA_TONES.novedad, 0.1), color: overdue ? BANDEJA_TONES.overdue : BANDEJA_TONES.novedad, Icon: AssignmentTurnedIn },
     novedad: { label: "Novedad", bg: alpha(BANDEJA_TONES.novedad, 0.1), color: BANDEJA_TONES.novedad, Icon: Gavel },
     evento: { label: "Evento", bg: alpha(BANDEJA_TONES.evento, 0.1), color: BANDEJA_TONES.evento, Icon: CalendarMonth },
   }[kind];
-  const { label, bg, color, Icon } = config;
+  const { bg, color, Icon } = config;
+  const text = label || config.label;
   return (
     <Box
       sx={{
@@ -91,7 +93,7 @@ function TypeBadge({ kind, overdue }) {
       }}
     >
       <Icon sx={{ fontSize: 11 }} />
-      {label}
+      {text}
     </Box>
   );
 }
@@ -266,27 +268,10 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
 
   const actions = (
     <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
-      <Button
-        size="small"
-        onClick={() => onVerExpediente(novedad)}
-        sx={{
-          height: 32,
-          px: 1.6,
-          borderRadius: "8px",
-          border: `1px solid ${BANDEJA_TONES.novedad}`,
-          bgcolor: "background.paper",
-          color: BANDEJA_TONES.novedad,
-          fontWeight: 600,
-          fontSize: "0.75rem",
-          whiteSpace: "nowrap",
-        }}
-      >
-        Ver expediente
-      </Button>
       <IconButton
         size="small"
         disabled={busy}
-        onClick={(e) => onAgendar(e, novedad)}
+        onClick={(e) => { e.stopPropagation(); onAgendar(e, novedad); }}
         sx={{ border: "1px solid", borderColor: "divider", borderRadius: "8px" }}
         title="Agendar tarea o evento"
       >
@@ -295,7 +280,7 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
       <IconButton
         size="small"
         disabled={busy}
-        onClick={() => onMarcarLeido(novedad)}
+        onClick={(e) => { e.stopPropagation(); onMarcarLeido(novedad); }}
         sx={{ border: "1px solid", borderColor: "divider", borderRadius: "8px" }}
         title="Marcar leído"
       >
@@ -305,7 +290,15 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
   );
 
   return (
-    <Box sx={ROW_SX}>
+    <Box
+      sx={{
+        ...ROW_SX,
+        cursor: "pointer",
+        transition: "background-color 0.15s ease",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+      onClick={() => onVerExpediente(novedad)}
+    >
       <Stack direction="row" alignItems="center" spacing={1}>
         <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: BANDEJA_TONES.novedad, flexShrink: 0 }} />
         <TypeBadge kind="novedad" />
@@ -352,25 +345,35 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
   );
 }
 
-function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, overdue }) {
+function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, onToggle, busy, onOpen, overdue }) {
   const fecha = eventDate(event);
   const eventoPaso = fecha && new Date(fecha).getTime() < Date.now();
   const checked = realizadoEstadoId != null && Number(event.estadoId) === realizadoEstadoId;
-  const vinculacion = casoLabel(event.caso || event.expediente) || "Sin vinculación";
+  const titulo = event.descripcion || tipoEvento?.nombre || "Evento";
+  const vinc = [cliente ? clienteLabel(cliente) : "", caso ? casoLabel(caso) : ""].filter(Boolean).join(" · ");
+  const subtitle = [fecha ? formatFriendlyDate(fecha) : "Sin fecha", vinc, event.ubicacion].filter(Boolean).join(" · ");
 
   const checkbox = eventoPaso && realizadoEstadoId != null ? (
     <BandejaActionButton
       title={checked ? "Marcar pendiente" : "Marcar realizado"}
       disabled={busy}
-      onClick={() => onToggle(event)}
+      onClick={(e) => { e.stopPropagation(); onToggle(event); }}
       color={checked ? BANDEJA_TONES.success : undefined}
     />
   ) : null;
 
   return (
-    <Box sx={ROW_SX}>
+    <Box
+      sx={{
+        ...ROW_SX,
+        cursor: "pointer",
+        transition: "background-color 0.15s ease",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+      onClick={() => onOpen?.(event)}
+    >
       <Stack direction="row" alignItems="center" spacing={1}>
-        <TypeBadge kind="evento" />
+        <TypeBadge kind="evento" label={tipoEvento?.nombre} />
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{
@@ -385,7 +388,7 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
               WebkitBoxOrient: "vertical",
             }}
           >
-            {event.titulo || event.nombre || "Evento"}
+            {titulo}
           </Typography>
           <Typography
             sx={{
@@ -399,7 +402,7 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
               whiteSpace: { xs: "normal", sm: "nowrap" },
             }}
           >
-            {fecha ? `${formatFriendlyDate(fecha)} hs` : "Sin fecha"} · {vinculacion}
+            {subtitle}
           </Typography>
         </Box>
         {overdue && (
@@ -415,28 +418,11 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
             </Typography>
           </Stack>
         )}
-        <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
-          {checkbox}
-          <Button
-            size="small"
-            onClick={() => navigate(`/eventos/${event.id}`)}
-            sx={{
-              height: 30,
-              px: 1.25,
-              borderRadius: "8px",
-              border: "1px solid",
-              borderColor: "divider",
-              bgcolor: "background.paper",
-              color: "text.primary",
-              fontWeight: 600,
-              fontSize: "0.72rem",
-              whiteSpace: "nowrap",
-              display: { xs: "none", sm: "inline-flex" },
-            }}
-          >
-            Ver evento
-          </Button>
-        </Stack>
+        {checkbox && (
+          <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+            {checkbox}
+          </Stack>
+        )}
       </Stack>
       <Stack
         direction="row"
@@ -451,24 +437,11 @@ function BandejaEventRow({ event, realizadoEstadoId, onToggle, busy, navigate, o
             <Typography sx={{ fontWeight: 700, fontSize: "0.69rem" }}>Pendiente</Typography>
           </Stack>
         )}
-        <Stack direction="row" spacing={0.75} sx={{ ml: "auto" }}>
-          {checkbox}
-          <Button
-            size="small"
-            onClick={() => navigate(`/eventos/${event.id}`)}
-            sx={{
-              height: 30,
-              px: 1.25,
-              borderRadius: "8px",
-              border: "1px solid",
-              borderColor: "divider",
-              fontWeight: 600,
-              fontSize: "0.72rem",
-            }}
-          >
-            Ver evento
-          </Button>
-        </Stack>
+        {checkbox && (
+          <Stack direction="row" spacing={0.75} sx={{ ml: "auto" }}>
+            {checkbox}
+          </Stack>
+        )}
       </Stack>
     </Box>
   );
@@ -650,6 +623,7 @@ export default function DashboardBandeja({ view, onSwitchView }) {
   const [menuNovedad, setMenuNovedad] = useState(null);
   const [dialog, setDialog] = useState({ open: false, modo: "tarea", novedad: null });
   const [tareaDialogId, setTareaDialogId] = useState(null);
+  const [eventoDialogId, setEventoDialogId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [expandedItemGroups, setExpandedItemGroups] = useState({});
   const toggleGroup = (id) => setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -662,6 +636,9 @@ export default function DashboardBandeja({ view, onSwitchView }) {
     upcomingTasks,
     futureEvents,
     pastPendingEvents,
+    tiposEventoById,
+    clientesById,
+    expedientesById,
     realizadoEstadoId,
     toggleTaskMutation,
     toggleEventMutation,
@@ -771,10 +748,13 @@ export default function DashboardBandeja({ view, onSwitchView }) {
       <BandejaEventRow
         key={`evento-${item.data.id}`}
         event={item.data}
+        tipoEvento={tiposEventoById.get(Number(item.data.tipoId))}
+        cliente={clientesById.get(Number(item.data.clienteId))}
+        caso={expedientesById.get(Number(item.data.casoId))}
         realizadoEstadoId={realizadoEstadoId}
         onToggle={(e) => toggleEventMutation.mutate(e)}
         busy={eventBusy}
-        navigate={navigate}
+        onOpen={(e) => setEventoDialogId(e.id)}
         overdue={item.subkind === "atrasado"}
       />
     );
@@ -1045,6 +1025,12 @@ export default function DashboardBandeja({ view, onSwitchView }) {
         open={tareaDialogId != null}
         taskId={tareaDialogId}
         onClose={() => setTareaDialogId(null)}
+      />
+
+      <EventoDetalleDialog
+        open={eventoDialogId != null}
+        eventoId={eventoDialogId}
+        onClose={() => setEventoDialogId(null)}
       />
     </Box>
   );

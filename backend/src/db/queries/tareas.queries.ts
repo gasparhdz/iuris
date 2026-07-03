@@ -1,20 +1,30 @@
-import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { subTareas, tareas } from "../schema.js";
+import { casos, clientes, parametros, subTareas, tareas } from "../schema.js";
 
 type NewTarea = typeof tareas.$inferInsert;
 type NewSubTarea = typeof subTareas.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbExecutor = typeof db | DbTransaction;
 
+type TareaListFilters = {
+  completada?: boolean;
+  asignadoA?: number;
+  search?: string;
+  prioridadId?: number;
+  orderBy?: "titulo" | "prioridad" | "vencimiento" | "vinculacion" | "checklist";
+  order?: "asc" | "desc";
+};
+
 export class TareasQueries {
   static async findAll(
     estudioId: number,
     limit: number,
     offset: number,
-    filters: { completada?: boolean; asignadoA?: number; search?: string; prioridadId?: number } = {},
+    filters: TareaListFilters = {},
   ) {
-    const { completada, asignadoA, search, prioridadId } = filters;
+    const { completada, asignadoA, search, prioridadId, orderBy = "titulo", order = "asc" } = filters;
     const conditions = [
       eq(tareas.estudioId, estudioId),
       isNull(tareas.deletedAt),
@@ -30,13 +40,42 @@ export class TareasQueries {
 
     const whereCondition = and(...conditions);
 
+    const prioridadParam = alias(parametros, "tarea_prioridad_sort");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const vinculacionExpr = sql`trim(concat_ws(' ', ${clienteNombre}, coalesce(${casos.caratula}, ${casos.nroExpte}, '')))`;
+    const checklistPercent = sql<number>`coalesce((
+      select round(100.0 * count(*) filter (where ${subTareas.completada}) / nullif(count(*), 0))
+      from ${subTareas}
+      where ${subTareas.tareaId} = ${tareas.id}
+        and ${subTareas.deletedAt} is null
+    ), 0)`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "prioridad":
+          return sortDir(prioridadParam.nombre);
+        case "vencimiento":
+          return sortDir(tareas.fechaLimite);
+        case "vinculacion":
+          return sortDir(vinculacionExpr);
+        case "checklist":
+          return sortDir(checklistPercent);
+        case "titulo":
+        default:
+          return sortDir(tareas.titulo);
+      }
+    })();
+
     const data = await db
-      .select()
+      .select(getTableColumns(tareas))
       .from(tareas)
+      .leftJoin(clientes, eq(tareas.clienteId, clientes.id))
+      .leftJoin(casos, eq(tareas.casoId, casos.id))
+      .leftJoin(prioridadParam, eq(tareas.prioridadId, prioridadParam.id))
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(sql`${tareas.completada} ASC, ${tareas.fechaLimite} ASC NULLS LAST`);
+      .orderBy(orderExpr, asc(tareas.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

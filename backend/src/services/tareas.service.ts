@@ -25,6 +25,8 @@ export class TareasService {
       asignadoA: query.asignadoA,
       search: query.search,
       prioridadId: query.prioridadId,
+      orderBy: query.orderBy,
+      order: query.order,
     });
 
     return {

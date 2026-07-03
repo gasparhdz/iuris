@@ -1,18 +1,28 @@
-import { and, eq, ilike, isNull, or, sql, aliasedTable, desc } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, ilike, isNull, or, sql, aliasedTable } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, participantesCaso, usuarios, tareas, eventos, terceros, parametros } from "../schema.js";
+import { casos, clientes, participantesCaso, usuarios, tareas, eventos, terceros, parametros } from "../schema.js";
 
 type NewCaso = typeof casos.$inferInsert;
 type NewParticipanteCaso = typeof participantesCaso.$inferInsert;
+
+type CasoListFilters = {
+  search?: string;
+  estadoId?: number;
+  ramaId?: number;
+  radicacionParentId?: number;
+  orderBy?: "caratula" | "cliente" | "nroExpte" | "tipo" | "juzgado" | "estado";
+  order?: "asc" | "desc";
+};
 
 export class CasosQueries {
   static async findAll(
     estudioId: number,
     limit: number,
     offset: number,
-    filters: { search?: string; estadoId?: number; ramaId?: number; radicacionParentId?: number } = {},
+    filters: CasoListFilters = {},
   ) {
-    const { search, estadoId, ramaId, radicacionParentId } = filters;
+    const { search, estadoId, ramaId, radicacionParentId, orderBy = "caratula", order = "asc" } = filters;
     const conditions = [
       eq(casos.estudioId, estudioId),
       isNull(casos.deletedAt),
@@ -37,13 +47,40 @@ export class CasosQueries {
 
     const whereCondition = and(...conditions);
 
+    const tipoParam = alias(parametros, "caso_tipo_sort");
+    const estadoParam = alias(parametros, "caso_estado_sort");
+    const radicacionParam = alias(parametros, "caso_radicacion_sort");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "cliente":
+          return sortDir(clienteNombre);
+        case "nroExpte":
+          return sortDir(casos.nroExpte);
+        case "tipo":
+          return sortDir(tipoParam.nombre);
+        case "juzgado":
+          return sortDir(radicacionParam.nombre);
+        case "estado":
+          return sortDir(estadoParam.nombre);
+        case "caratula":
+        default:
+          return sortDir(casos.caratula);
+      }
+    })();
+
     const data = await db
-      .select()
+      .select(getTableColumns(casos))
       .from(casos)
+      .leftJoin(clientes, eq(casos.clienteId, clientes.id))
+      .leftJoin(tipoParam, eq(casos.tipoId, tipoParam.id))
+      .leftJoin(estadoParam, eq(casos.estadoId, estadoParam.id))
+      .leftJoin(radicacionParam, eq(casos.radicacionId, radicacionParam.id))
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(casos.createdAt);
+      .orderBy(orderExpr, asc(casos.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

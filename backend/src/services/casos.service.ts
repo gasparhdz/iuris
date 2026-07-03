@@ -16,6 +16,8 @@ export class CasosService {
       estadoId: query.estadoId,
       ramaId: query.ramaId,
       radicacionParentId: query.radicacionParentId,
+      orderBy: query.orderBy,
+      order: query.order,
     });
 
     return {

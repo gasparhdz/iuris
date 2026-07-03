@@ -25,6 +25,8 @@ export const gastoQuerySchema = z.object({
   from: dateStringSchema.optional(),
   to: dateStringSchema.optional(),
   search: z.string().optional(),
+  orderBy: z.enum(["fecha", "concepto", "cliente", "expediente", "monto", "estado"]).default("fecha"),
+  order: z.enum(["asc", "desc"]).default("desc"),
 }).strict();
 
 export const gastoItemSchema = z.object({

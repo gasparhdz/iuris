@@ -1,6 +1,7 @@
-import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { gastos } from "../schema.js";
+import { casos, clientes, gastos, parametros } from "../schema.js";
 
 type NewGasto = typeof gastos.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -12,6 +13,8 @@ export interface GastosFilters {
   from?: Date;
   to?: Date;
   search?: string;
+  orderBy?: "fecha" | "concepto" | "cliente" | "expediente" | "monto" | "estado";
+  order?: "asc" | "desc";
 }
 
 export interface Pagination {
@@ -21,6 +24,7 @@ export interface Pagination {
 
 export class GastosQueries {
   static async findGastos(estudioId: number, filters: GastosFilters, pagination: Pagination) {
+    const { orderBy = "fecha", order = "desc" } = filters;
     const conditions = [
       eq(gastos.estudioId, estudioId),
       eq(gastos.activo, true),
@@ -37,13 +41,41 @@ export class GastosQueries {
 
     const whereCondition = and(...conditions);
 
+    const conceptoParam = alias(parametros, "gasto_concepto_sort");
+    const estadoParam = alias(parametros, "gasto_estado_sort");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
+    const conceptoExpr = sql`COALESCE(${conceptoParam.nombre}, ${gastos.descripcion}, '')`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "concepto":
+          return sortDir(conceptoExpr);
+        case "cliente":
+          return sortDir(clienteNombre);
+        case "expediente":
+          return sortDir(expedienteExpr);
+        case "monto":
+          return sortDir(gastos.monto);
+        case "estado":
+          return sortDir(estadoParam.nombre);
+        case "fecha":
+        default:
+          return sortDir(gastos.fechaGasto);
+      }
+    })();
+
     const data = await db
-      .select()
+      .select(getTableColumns(gastos))
       .from(gastos)
+      .leftJoin(clientes, eq(gastos.clienteId, clientes.id))
+      .leftJoin(casos, eq(gastos.casoId, casos.id))
+      .leftJoin(conceptoParam, eq(gastos.conceptoId, conceptoParam.id))
+      .leftJoin(estadoParam, eq(gastos.estadoId, estadoParam.id))
       .where(whereCondition)
       .limit(pagination.limit)
       .offset(pagination.offset)
-      .orderBy(gastos.fechaGasto);
+      .orderBy(orderExpr, asc(gastos.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

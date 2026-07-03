@@ -20,6 +20,8 @@ export class GastosService {
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
         search: query.search,
+        orderBy: query.orderBy,
+        order: query.order,
       },
       { limit, offset }
     );

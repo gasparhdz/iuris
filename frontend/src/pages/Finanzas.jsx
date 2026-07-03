@@ -57,7 +57,6 @@ import {
 import {
   clienteLabel,
   casoLabel,
-  compareValues,
   conceptoLabel,
   denseTableSx,
   ellipsisSx,
@@ -322,7 +321,9 @@ export default function Finanzas() {
     ...honorariosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-  }), [honorariosFilterParams, page, rowsPerPage]);
+    orderBy,
+    order,
+  }), [honorariosFilterParams, page, rowsPerPage, orderBy, order]);
 
   const gastosFilterParams = useMemo(() => ({
     search: debouncedSearch.trim() || undefined,
@@ -333,7 +334,9 @@ export default function Finanzas() {
     ...gastosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-  }), [gastosFilterParams, page, rowsPerPage]);
+    orderBy,
+    order,
+  }), [gastosFilterParams, page, rowsPerPage, orderBy, order]);
 
   const ingresosFilterParams = useMemo(() => ({
     search: debouncedSearch.trim() || undefined,
@@ -344,7 +347,17 @@ export default function Finanzas() {
     ...ingresosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-  }), [ingresosFilterParams, page, rowsPerPage]);
+    orderBy,
+    order,
+  }), [ingresosFilterParams, page, rowsPerPage, orderBy, order]);
+
+  const ccListParams = useMemo(() => ({
+    page: page + 1,
+    limit: rowsPerPage,
+    search: debouncedSearch.trim() || undefined,
+    orderBy,
+    order,
+  }), [page, rowsPerPage, debouncedSearch, orderBy, order]);
 
   useEffect(() => {
     setPage(0);
@@ -402,11 +415,20 @@ export default function Finanzas() {
 
   // Resumen de cuenta corriente por cliente calculado en el backend (motor Decimal).
   const ccResumenQuery = useQuery({
-    queryKey: ["clientes", "cuentas-corrientes"],
+    queryKey: ["clientes", "cuentas-corrientes", "list", ccListParams],
     queryFn: async () => {
-      const { data } = await api.get("/clientes/cuentas-corrientes");
-      return data?.data ?? [];
+      const { data } = await api.get("/clientes/cuentas-corrientes", { params: ccListParams });
+      return unwrapPaged(data);
     },
+    enabled: tabKey === "cuentas_corrientes",
+    staleTime: 60_000,
+    placeholderData: (previous) => previous,
+  });
+
+  const ccKpiQuery = useQuery({
+    queryKey: ["clientes", "cuentas-corrientes", "kpi"],
+    queryFn: () => fetchAllPages("/clientes/cuentas-corrientes"),
+    enabled: tabKey === "cuentas_corrientes",
     staleTime: 60_000,
   });
 
@@ -582,7 +604,7 @@ export default function Finanzas() {
       { total: 0, pagado: 0, pendiente: 0 },
     );
 
-    const cuentasKpi = (ccResumenQuery.data ?? []).reduce(
+    const cuentasKpi = (ccKpiQuery.data ?? []).reduce(
       (acc, { totales }) => {
         acc.cargos += Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0);
         acc.cobrado += Number(totales?.ingresosPesos ?? 0);
@@ -601,7 +623,7 @@ export default function Finanzas() {
     getHonorarioSaldoPendiente,
     estadosGastoById,
     planesByHonorario,
-    ccResumenQuery.data,
+    ccKpiQuery.data,
   ]);
 
   const kpiLoading = tabKey === "honorarios"
@@ -609,7 +631,7 @@ export default function Finanzas() {
     : tabKey === "gastos"
       ? gastosKpiQuery.isLoading || valorJusQuery.isLoading || catalogQuery.isLoading
       : tabKey === "cuentas_corrientes"
-        ? ccResumenQuery.isLoading
+        ? ccKpiQuery.isLoading
         : false;
 
   const kpiCards = useMemo(() => {
@@ -641,7 +663,7 @@ export default function Finanzas() {
   // sección limpiamos búsqueda, orden y página (lo que antes hacía el onChange de las tabs).
   useEffect(() => {
     setSearch("");
-    setOrderBy("fecha");
+    setOrderBy(tabKey === "cuentas_corrientes" ? "saldo" : "fecha");
     setOrder("desc");
     setPage(0);
   }, [tabKey]);
@@ -650,132 +672,11 @@ export default function Finanzas() {
     const isAsc = orderBy === property && order === "asc";
     setOrder(isAsc ? "desc" : "asc");
     setOrderBy(property);
+    setPage(0);
   };
-
-  const filterBySearch = (rows, mapper) => {
-    const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) => mapper(row).toLowerCase().includes(q));
-  };
-
-  const sortedHonorarios = useMemo(() => {
-    return [...processedHonorarios].sort((a, b) => {
-      let valA;
-      let valB;
-      switch (orderBy) {
-        case "concepto":
-          valA = conceptoLabel(a);
-          valB = conceptoLabel(b);
-          break;
-        case "cliente":
-          valA = clienteLabel(a.cliente) || clienteLabelFromTareas(clientesById.get(Number(a.clienteId)));
-          valB = clienteLabel(b.cliente) || clienteLabelFromTareas(clientesById.get(Number(b.clienteId)));
-          break;
-        case "expediente":
-          valA = casoLabel(a.caso) || casoLabel(expedientesById.get(Number(a.casoId)));
-          valB = casoLabel(b.caso) || casoLabel(expedientesById.get(Number(b.casoId)));
-          break;
-        case "vencimiento":
-          valA = a.fechaVencimiento;
-          valB = b.fechaVencimiento;
-          break;
-        case "monto":
-          valA = a.computed?.originalVal ?? 0;
-          valB = b.computed?.originalVal ?? 0;
-          break;
-        case "interes":
-          valA = (a.computed?.updatedVal ?? 0) - (a.computed?.originalVal ?? 0);
-          valB = (b.computed?.updatedVal ?? 0) - (b.computed?.originalVal ?? 0);
-          break;
-        case "saldo":
-          valA = getHonorarioSaldoPendiente(a, a.computed).value;
-          valB = getHonorarioSaldoPendiente(b, b.computed).value;
-          break;
-        case "estado":
-          valA = honorarioEstadoChip(a).label;
-          valB = honorarioEstadoChip(b).label;
-          break;
-        case "fecha":
-        default:
-          valA = a.fechaRegulacion;
-          valB = b.fechaRegulacion;
-      }
-      const cmp = compareValues(valA, valB);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [processedHonorarios, orderBy, order, clientesById, expedientesById, getHonorarioSaldoPendiente]);
-
-  const sortedGastos = useMemo(() => {
-    return [...gastos].sort((a, b) => {
-      let valA;
-      let valB;
-      switch (orderBy) {
-        case "concepto":
-          valA = conceptoLabel(a, conceptosById);
-          valB = conceptoLabel(b, conceptosById);
-          break;
-        case "cliente":
-          valA = clienteLabelFromTareas(clientesById.get(Number(a.clienteId)));
-          valB = clienteLabelFromTareas(clientesById.get(Number(b.clienteId)));
-          break;
-        case "expediente":
-          valA = casoLabel(expedientesById.get(Number(a.casoId)));
-          valB = casoLabel(expedientesById.get(Number(b.casoId)));
-          break;
-        case "monto":
-          valA = a.monto;
-          valB = b.monto;
-          break;
-        case "estado": {
-          const estA = estadosGastoById.get(Number(a.estadoId));
-          const estB = estadosGastoById.get(Number(b.estadoId));
-          valA = estA?.nombre ?? "Pendiente";
-          valB = estB?.nombre ?? "Pendiente";
-          break;
-        }
-        case "fecha":
-        default:
-          valA = a.fechaGasto;
-          valB = b.fechaGasto;
-      }
-      const cmp = compareValues(valA, valB);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [gastos, orderBy, order, clientesById, expedientesById, conceptosById, estadosGastoById]);
-
-  const sortedIngresos = useMemo(() => {
-    return [...ingresos].sort((a, b) => {
-      let valA;
-      let valB;
-      switch (orderBy) {
-        case "concepto":
-          valA = conceptosIngresoById.get(Number(a.tipoId))?.nombre || a.descripcion;
-          valB = conceptosIngresoById.get(Number(b.tipoId))?.nombre || b.descripcion;
-          break;
-        case "cliente":
-          valA = clienteLabelFromTareas(clientesById.get(Number(a.clienteId)));
-          valB = clienteLabelFromTareas(clientesById.get(Number(b.clienteId)));
-          break;
-        case "expediente":
-          valA = casoLabel(expedientesById.get(Number(a.casoId)));
-          valB = casoLabel(expedientesById.get(Number(b.casoId)));
-          break;
-        case "monto":
-          valA = a.monto;
-          valB = b.monto;
-          break;
-        case "fecha":
-        default:
-          valA = a.fechaIngreso;
-          valB = b.fechaIngreso;
-      }
-      const cmp = compareValues(valA, valB);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [ingresos, orderBy, order, clientesById, expedientesById, conceptosIngresoById]);
 
   const cuentasCorrientes = useMemo(() => {
-    const rows = (ccResumenQuery.data ?? []).map(({ clienteId, totales }) => {
+    return (ccResumenQuery.data?.items ?? []).map(({ clienteId, totales }) => {
       const cliente = clientesById.get(Number(clienteId));
       return {
         clienteId: Number(clienteId),
@@ -786,39 +687,7 @@ export default function Finanzas() {
         saldoPendiente: Number(totales?.saldoPesos ?? 0),
       };
     });
-
-    return filterBySearch(rows, (item) => [
-      item.clienteNombre,
-      item.saldoPendiente > 0 ? "Deudor" : "Al Dia",
-    ].join(" ")).sort((a, b) => {
-      let valA;
-      let valB;
-      switch (orderBy) {
-        case "cliente":
-          valA = a.clienteNombre;
-          valB = b.clienteNombre;
-          break;
-        case "cargos":
-          valA = a.totalCargos;
-          valB = b.totalCargos;
-          break;
-        case "cobrado":
-          valA = a.totalCobrado;
-          valB = b.totalCobrado;
-          break;
-        case "estado":
-          valA = a.saldoPendiente > 0 ? "Deudor" : "Al Dia";
-          valB = b.saldoPendiente > 0 ? "Deudor" : "Al Dia";
-          break;
-        case "saldo":
-        default:
-          valA = a.saldoPendiente;
-          valB = b.saldoPendiente;
-      }
-      const cmp = compareValues(valA, valB);
-      return order === "desc" ? -cmp : cmp;
-    });
-  }, [ccResumenQuery.data, clientesById, debouncedSearch, orderBy, order]);
+  }, [ccResumenQuery.data, clientesById]);
 
   const activeTotalCount = tabKey === "honorarios"
     ? honorariosQuery.data?.meta?.total ?? 0
@@ -828,14 +697,14 @@ export default function Finanzas() {
         ? ingresosQuery.data?.meta?.total ?? 0
         : tabKey === "planes"
           ? (planesQuery.data ?? []).length
-          : cuentasCorrientes.length;
+          : ccResumenQuery.data?.meta?.total ?? 0;
 
   const activeRows = tabKey === "honorarios"
-    ? sortedHonorarios
+    ? processedHonorarios
     : tabKey === "gastos"
-      ? sortedGastos
+      ? gastos
       : tabKey === "ingresos"
-        ? sortedIngresos
+        ? ingresos
         : tabKey === "planes"
           ? (planesQuery.data ?? [])
           : cuentasCorrientes;
@@ -849,6 +718,8 @@ export default function Finanzas() {
       ? ingresosQuery
     : tabKey === "planes"
       ? planesQuery
+    : tabKey === "cuentas_corrientes"
+      ? ccResumenQuery
       : honorariosQuery;
   const activeError = activeQuery.error?.response?.data?.error?.message
     || activeQuery.error?.message
@@ -1054,7 +925,7 @@ export default function Finanzas() {
             <FinanzasTableShell
               loading={honorariosQuery.isLoading || planesQuery.isLoading}
               error={activeError}
-              isEmpty={!honorariosQuery.isLoading && !planesQuery.isLoading && sortedHonorarios.length === 0}
+              isEmpty={!honorariosQuery.isLoading && !planesQuery.isLoading && processedHonorarios.length === 0}
               emptyTitle="No hay honorarios para mostrar"
               emptySubtitle="Ajusta el buscador o registra honorarios desde un cliente o expediente."
               footer={tablePagination}
@@ -1274,7 +1145,7 @@ export default function Finanzas() {
             <FinanzasTableShell
               loading={gastosQuery.isLoading}
               error={activeError}
-              isEmpty={!gastosQuery.isLoading && sortedGastos.length === 0}
+              isEmpty={!gastosQuery.isLoading && gastos.length === 0}
               emptyTitle="No hay gastos para mostrar"
               emptySubtitle="Registra gastos desde la ficha de un cliente o expediente."
               footer={tablePagination}
@@ -1459,7 +1330,7 @@ export default function Finanzas() {
             <FinanzasTableShell
               loading={ingresosQuery.isLoading}
               error={activeError}
-              isEmpty={!ingresosQuery.isLoading && sortedIngresos.length === 0}
+              isEmpty={!ingresosQuery.isLoading && ingresos.length === 0}
               emptyTitle="No hay ingresos para mostrar"
               emptySubtitle="Los cobros registrados apareceran aqui con su vinculacion."
               footer={tablePagination}

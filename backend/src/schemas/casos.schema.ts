@@ -31,6 +31,8 @@ export const casoQuerySchema = z.object({
   estadoId: positiveIntSchema.optional(),
   ramaId: positiveIntSchema.optional(),
   radicacionParentId: positiveIntSchema.optional(),
+  orderBy: z.enum(["caratula", "cliente", "nroExpte", "tipo", "juzgado", "estado"]).default("caratula"),
+  order: z.enum(["asc", "desc"]).default("asc"),
 }).strict();
 
 export const participanteParamsSchema = z.object({

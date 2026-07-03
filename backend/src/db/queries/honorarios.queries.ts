@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago } from "../schema.js";
@@ -17,10 +17,13 @@ export interface HonorarioFilters {
   search?: string;
   from?: Date;
   to?: Date;
+  orderBy?: "fecha" | "concepto" | "cliente" | "expediente" | "vencimiento" | "monto" | "interes" | "saldo" | "estado";
+  order?: "asc" | "desc";
 }
 
 export class HonorariosQueries {
   static async findHonorarios(estudioId: number, filters: HonorarioFilters, pagination: HonorarioPagination) {
+    const { orderBy = "fecha", order = "desc" } = filters;
     const conditions = [
       eq(honorarios.estudioId, estudioId),
       isNull(honorarios.deletedAt),
@@ -47,11 +50,60 @@ export class HonorariosQueries {
 
     const whereCondition = and(...conditions);
 
+    const concepto = alias(parametros, "honorario_concepto");
+    const estado = alias(parametros, "honorario_estado");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
+    const montoBase = sql`COALESCE(${honorarios.montoPesos}::numeric, ${honorarios.jus} * ${honorarios.valorJusRef})`;
+    const montoCobradoExpr = sql`coalesce((
+      select sum(${ingresoAplicaciones.montoCapital})
+      from ${ingresoAplicaciones}
+      inner join ${ingresos} on ${ingresos.id} = ${ingresoAplicaciones.ingresoId}
+      where ${ingresoAplicaciones.honorarioId} = ${honorarios.id}
+        and ${ingresoAplicaciones.activo} = true
+        and ${ingresoAplicaciones.deletedAt} is null
+        and ${ingresos.deletedAt} is null
+    ), 0)`;
+    const interesExpr = sql`GREATEST(0,
+      ${montoBase} * CASE
+        WHEN ${honorarios.fechaVencimiento} IS NOT NULL
+          AND ${honorarios.fechaVencimiento} < NOW()
+          AND ${honorarios.tasaInteresMensual} IS NOT NULL
+        THEN 1 + (${honorarios.tasaInteresMensual} / 100.0) * GREATEST(0, EXTRACT(EPOCH FROM (NOW() - ${honorarios.fechaVencimiento})) / 86400.0 / 30.0)
+        ELSE 1
+      END - ${montoBase}
+    )`;
+    const saldoExpr = sql`GREATEST(0, ${montoBase} - ${montoCobradoExpr})`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "concepto":
+          return sortDir(concepto.nombre);
+        case "cliente":
+          return sortDir(clienteNombre);
+        case "expediente":
+          return sortDir(expedienteExpr);
+        case "vencimiento":
+          return sortDir(honorarios.fechaVencimiento);
+        case "monto":
+          return sortDir(montoBase);
+        case "interes":
+          return sortDir(interesExpr);
+        case "saldo":
+          return sortDir(saldoExpr);
+        case "estado":
+          return sortDir(estado.nombre);
+        case "fecha":
+        default:
+          return sortDir(honorarios.fechaRegulacion);
+      }
+    })();
+
     const data = await baseHonorariosSelect()
       .where(whereCondition)
       .limit(pagination.limit)
       .offset(pagination.offset)
-      .orderBy(desc(honorarios.fechaRegulacion), desc(honorarios.id));
+      .orderBy(orderExpr, asc(honorarios.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(distinct ${honorarios.id})`.mapWith(Number) })

@@ -1,6 +1,7 @@
-import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { ingresoAplicaciones, ingresos } from "../schema.js";
+import { casos, clientes, ingresoAplicaciones, ingresos, parametros } from "../schema.js";
 
 type NewIngreso = typeof ingresos.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -13,6 +14,8 @@ export interface IngresosFilters {
   from?: Date;
   to?: Date;
   search?: string;
+  orderBy?: "fecha" | "concepto" | "cliente" | "expediente" | "monto";
+  order?: "asc" | "desc";
 }
 
 export interface Pagination {
@@ -22,6 +25,7 @@ export interface Pagination {
 
 export class IngresosQueries {
   static async findIngresos(estudioId: number, filters: IngresosFilters, pagination: Pagination) {
+    const { orderBy = "fecha", order = "desc" } = filters;
     const conditions = [
       eq(ingresos.estudioId, estudioId),
       eq(ingresos.activo, true),
@@ -38,6 +42,27 @@ export class IngresosQueries {
     }
 
     const whereCondition = and(...conditions);
+
+    const tipoParam = alias(parametros, "ingreso_tipo_sort");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
+    const conceptoExpr = sql`COALESCE(${tipoParam.nombre}, ${ingresos.descripcion}, '')`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "concepto":
+          return sortDir(conceptoExpr);
+        case "cliente":
+          return sortDir(clienteNombre);
+        case "expediente":
+          return sortDir(expedienteExpr);
+        case "monto":
+          return sortDir(ingresos.monto);
+        case "fecha":
+        default:
+          return sortDir(ingresos.fechaIngreso);
+      }
+    })();
 
     const data = await db
       .select({
@@ -66,12 +91,15 @@ export class IngresosQueries {
         montoAplicadoGastoPesos: sql<number>`coalesce(sum(case when ${ingresoAplicaciones.gastoId} is not null then ${ingresoAplicaciones.montoCapital} else 0 end), 0)`.mapWith(Number),
       })
       .from(ingresos)
+      .leftJoin(clientes, eq(ingresos.clienteId, clientes.id))
+      .leftJoin(casos, eq(ingresos.casoId, casos.id))
+      .leftJoin(tipoParam, eq(ingresos.tipoId, tipoParam.id))
       .leftJoin(ingresoAplicaciones, and(eq(ingresoAplicaciones.ingresoId, ingresos.id), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)))
       .where(whereCondition)
-      .groupBy(ingresos.id)
+      .groupBy(ingresos.id, clientes.id, casos.id, tipoParam.id)
       .limit(pagination.limit)
       .offset(pagination.offset)
-      .orderBy(ingresos.fechaIngreso);
+      .orderBy(orderExpr, asc(ingresos.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })

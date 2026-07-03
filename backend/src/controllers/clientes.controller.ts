@@ -55,8 +55,11 @@ export class ClientesController {
     }
   }
 
-  static async findCuentasCorrientesResumen(request: FastifyRequest, reply: FastifyReply) {
-    const resumen = await CuentaCorrienteService.getResumenPorCliente(request.authUser.estudioId);
+  static async findCuentasCorrientesResumen(
+    request: FastifyRequest<{ Querystring: import("../schemas/clientes.schema.js").CuentaCorrienteResumenQueryInput }>,
+    reply: FastifyReply,
+  ) {
+    const resumen = await CuentaCorrienteService.getResumenPorCliente(request.authUser.estudioId, request.query);
     return reply.send({ data: resumen });
   }
 

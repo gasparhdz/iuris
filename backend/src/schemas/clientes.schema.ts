@@ -360,11 +360,21 @@ export const cuentaCorrienteResponseSchema = z.object({
 });
 
 export const cuentaCorrienteResumenResponseSchema = z.object({
-  data: z.array(z.object({
-    clienteId: z.number(),
-    totales: cuentaCorrienteTotalesSchema,
-  })),
+  data: z.object({
+    items: z.array(z.object({
+      clienteId: z.number(),
+      totales: cuentaCorrienteTotalesSchema,
+    })),
+    meta: paginationMetaSchema,
+  }),
 });
+
+export const cuentaCorrienteResumenQuerySchema = z.object({
+  ...paginationQuerySchema.shape,
+  search: z.string().optional(),
+  orderBy: z.enum(["cliente", "cargos", "cobrado", "saldo", "estado"]).default("saldo"),
+  order: z.enum(["asc", "desc"]).default("desc"),
+}).strict();
 
 export const clienteListResponseSchema = z.object({
   data: z.object({
@@ -388,3 +398,5 @@ export type CreateClienteInput = z.infer<typeof createClienteSchema>;
 export type UpdateClienteInput = z.infer<typeof updateClienteSchema>;
 export type CreateContactoClienteInput = z.infer<typeof createContactoClienteSchema>;
 export type UpdateContactoClienteInput = z.infer<typeof updateContactoClienteSchema>;
+export type CuentaCorrienteResumenQueryInput = z.infer<typeof cuentaCorrienteResumenQuerySchema>;
+export type ClienteListQuery = z.infer<typeof clienteQuerySchema>;

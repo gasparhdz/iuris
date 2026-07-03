@@ -1,17 +1,29 @@
-import { and, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { eventos } from "../schema.js";
+import { casos, clientes, eventos, parametros } from "../schema.js";
 
 type NewEvento = typeof eventos.$inferInsert;
+
+type EventoListFilters = {
+  from?: Date;
+  to?: Date;
+  search?: string;
+  tipoId?: number;
+  estadoId?: number;
+  upcoming?: boolean;
+  orderBy?: "evento" | "tipoEstado" | "fechas" | "vinculaciones" | "ubicacion";
+  order?: "asc" | "desc";
+};
 
 export class EventosQueries {
   static async findAll(
     estudioId: number,
     limit: number,
     offset: number,
-    filters: { from?: Date; to?: Date; search?: string; tipoId?: number; estadoId?: number; upcoming?: boolean } = {},
+    filters: EventoListFilters = {},
   ) {
-    const { from, to, search, tipoId, estadoId, upcoming } = filters;
+    const { from, to, search, tipoId, estadoId, upcoming, orderBy = "fechas", order = "asc" } = filters;
     const conditions = [
       eq(eventos.estudioId, estudioId),
       isNull(eventos.deletedAt),
@@ -34,13 +46,38 @@ export class EventosQueries {
 
     const whereCondition = and(...conditions);
 
+    const tipoParam = alias(parametros, "evento_tipo_sort");
+    const estadoParam = alias(parametros, "evento_estado_sort");
+    const sortDir = order === "desc" ? desc : asc;
+    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const vinculacionExpr = sql`trim(concat_ws(' ', ${clienteNombre}, coalesce(${casos.caratula}, ${casos.nroExpte}, '')))`;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "evento":
+          return sortDir(eventos.descripcion);
+        case "tipoEstado":
+          return sortDir(sql`concat_ws(' ', ${tipoParam.nombre}, ${estadoParam.nombre})`);
+        case "vinculaciones":
+          return sortDir(vinculacionExpr);
+        case "ubicacion":
+          return sortDir(eventos.ubicacion);
+        case "fechas":
+        default:
+          return sortDir(eventos.fechaInicio);
+      }
+    })();
+
     const data = await db
-      .select()
+      .select(getTableColumns(eventos))
       .from(eventos)
+      .leftJoin(clientes, eq(eventos.clienteId, clientes.id))
+      .leftJoin(casos, eq(eventos.casoId, casos.id))
+      .leftJoin(tipoParam, eq(eventos.tipoId, tipoParam.id))
+      .leftJoin(estadoParam, eq(eventos.estadoId, estadoParam.id))
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(eventos.fechaInicio);
+      .orderBy(orderExpr, asc(eventos.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
