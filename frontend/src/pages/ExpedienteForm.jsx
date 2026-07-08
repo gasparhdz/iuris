@@ -41,11 +41,6 @@ const EMPTY_FORM = {
   driveFolderId: "",
 };
 
-function unwrapItems(data) {
-  const raw = Array.isArray(data) ? data : data?.data?.items ?? data?.data ?? [];
-  return Array.isArray(raw) ? raw : [];
-}
-
 function unwrapData(data) {
   return Array.isArray(data?.data) ? data.data : [];
 }
@@ -55,7 +50,7 @@ function clienteLabel(cliente) {
   return cliente.razonSocial || [cliente.apellido, cliente.nombre].filter(Boolean).join(", ") || cliente.nombre || `Cliente #${cliente.id}`;
 }
 
-export function mapExpedienteDbToForm(c) {
+function mapExpedienteDbToForm(c) {
   return {
     clienteId: c.clienteId || "",
     caratula: c.caratula || "",
@@ -68,7 +63,7 @@ export function mapExpedienteDbToForm(c) {
   };
 }
 
-export function mapExpedienteFormToDb(form) {
+function mapExpedienteFormToDb(form) {
   return {
     clienteId: Number(form.clienteId),
     caratula: form.caratula.trim(),
@@ -106,7 +101,7 @@ export default function ExpedienteForm() {
     queryFn: () => fetchAllPages("/clientes"),
   });
 
-  const catalogQuery = (categoria) => useQuery({
+  const useCatalogQuery = (categoria) => useQuery({
     queryKey: ["catalogos", "parametros", categoria],
     queryFn: async () => {
       const { data } = await api.get("/catalogos/parametros", { params: { categoria } });
@@ -115,10 +110,15 @@ export default function ExpedienteForm() {
     staleTime: 1000 * 60 * 30,
   });
 
-  const ramas = catalogQuery("RAMA_DERECHO").data ?? [];
-  const tipos = catalogQuery("TIPO_CASO").data ?? [];
-  const estados = catalogQuery("ESTADO_CASO").data ?? [];
-  const roles = catalogQuery("ROL_PARTICIPANTE").data ?? [];
+  const ramasQuery = useCatalogQuery("RAMA_DERECHO");
+  const tiposQuery = useCatalogQuery("TIPO_CASO");
+  const estadosQuery = useCatalogQuery("ESTADO_CASO");
+  const rolesQuery = useCatalogQuery("ROL_PARTICIPANTE");
+
+  const ramas = useMemo(() => ramasQuery.data ?? [], [ramasQuery.data]);
+  const tipos = useMemo(() => tiposQuery.data ?? [], [tiposQuery.data]);
+  const estados = useMemo(() => estadosQuery.data ?? [], [estadosQuery.data]);
+  const roles = useMemo(() => rolesQuery.data ?? [], [rolesQuery.data]);
 
   const tercerosQuery = useQuery({
     queryKey: ["terceros", "lookup"],

@@ -68,11 +68,6 @@ import {
   WarningAmber,
 } from "@mui/icons-material";
 
-function unwrapItems(data) {
-  const raw = Array.isArray(data) ? data : data?.data?.items ?? data?.data ?? [];
-  return Array.isArray(raw) ? raw : [];
-}
-
 function uploadToPresignedPost(presigned, file, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -297,11 +292,17 @@ export default function ExpedienteDetalle() {
     staleTime: 1000 * 60 * 30,
   });
 
-  const tipos = useCatalogQuery("TIPO_CASO").data ?? [];
-  const ramas = useCatalogQuery("RAMA_DERECHO").data ?? [];
-  const estados = useCatalogQuery("ESTADO_CASO").data ?? [];
-  const radicaciones = useCatalogQuery("RADICACION").data ?? [];
-  const roles = useCatalogQuery("ROL_PARTICIPANTE").data ?? [];
+  const tiposQuery = useCatalogQuery("TIPO_CASO");
+  const ramasQuery = useCatalogQuery("RAMA_DERECHO");
+  const estadosQuery = useCatalogQuery("ESTADO_CASO");
+  const radicacionesQuery = useCatalogQuery("RADICACION");
+  const rolesQuery = useCatalogQuery("ROL_PARTICIPANTE");
+
+  const tipos = useMemo(() => tiposQuery.data ?? [], [tiposQuery.data]);
+  const ramas = useMemo(() => ramasQuery.data ?? [], [ramasQuery.data]);
+  const estados = useMemo(() => estadosQuery.data ?? [], [estadosQuery.data]);
+  const radicaciones = useMemo(() => radicacionesQuery.data ?? [], [radicacionesQuery.data]);
+  const roles = useMemo(() => rolesQuery.data ?? [], [rolesQuery.data]);
 
   const participantesQuery = useQuery({
     queryKey: ["expedientes", casoId, "participantes"],
