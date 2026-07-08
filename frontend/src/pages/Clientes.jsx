@@ -63,24 +63,6 @@ function isPersonaFisicaId(value) {
   return Number(value) === TIPO_PERSONA_FISICA_ID;
 }
 
-function nullableString(value) {
-  const text = String(value ?? "").trim();
-  return text === "" ? null : text;
-}
-
-function nullableNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function nullableIsoDateTime(value) {
-  const text = nullableString(value);
-  if (!text) return null;
-  if (text.includes("T")) return text;
-  return `${text}T00:00:00.000Z`;
-}
-
 function compactJoin(parts, separator = " ") {
   return parts.filter(Boolean).join(separator);
 }
@@ -137,7 +119,7 @@ function buildClienteListParams({
   };
 }
 
-export function mapDbToFrontend(c) {
+function mapDbToFrontend(c) {
   const isFisica = isPersonaFisicaId(c.tipoPersonaId);
   const nombre = isFisica
     ? compactJoin([c.nombre, c.apellido])
@@ -153,44 +135,6 @@ export function mapDbToFrontend(c) {
     notas: c.observaciones ?? "",
     casosActivos: c.casosActivos ?? 0,
     activo: c.activo ?? true,
-  };
-}
-
-export function mapFrontendToDb(form) {
-  const isFisica = form.tipo === "fisica" || isPersonaFisicaId(form.tipoPersonaId);
-  let nombre = nullableString(form.nombre);
-  let apellido = nullableString(form.apellido);
-
-  if (isFisica && nombre && !apellido) {
-    const parts = nombre.split(/\s+/).filter(Boolean);
-    if (parts.length > 1) {
-      apellido = parts.slice(1).join(" ");
-      nombre = parts[0];
-    } else {
-      apellido = ".";
-    }
-  }
-
-  return {
-    tipoPersonaId: isFisica ? TIPO_PERSONA_FISICA_ID : TIPO_PERSONA_JURIDICA_ID,
-    nombre: isFisica ? nombre : null,
-    apellido: isFisica ? apellido : null,
-    razonSocial: isFisica ? null : nullableString(form.razonSocial),
-    dni: isFisica ? nullableString(form.dni) : null,
-    cuit: nullableString(form.cuit),
-    fechaNacimiento: nullableIsoDateTime(form.fechaNacimiento),
-    email: nullableString(form.email),
-    telFijo: nullableString(form.telFijo),
-    telCelular: nullableString(form.telCelular),
-    dirCalle: nullableString(form.dirCalle),
-    dirNro: nullableString(form.dirNro),
-    dirPiso: nullableString(form.dirPiso),
-    dirDepto: nullableString(form.dirDepto),
-    codigoPostal: nullableString(form.codigoPostal),
-    provinciaId: nullableNumber(form.provinciaId),
-    localidadId: nullableNumber(form.localidadId),
-    observaciones: nullableString(form.observaciones),
-    activo: form.activo ?? true,
   };
 }
 

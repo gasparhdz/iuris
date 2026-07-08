@@ -143,7 +143,7 @@ export default function SaaSEstudioUsuarios() {
     setErrors({});
   }, [editing, showForm]);
 
-  const users = usuariosQuery.data ?? [];
+  const users = useMemo(() => usuariosQuery.data ?? [], [usuariosQuery.data]);
   const maxUsuarios = Number(estudioQuery.data?.maxUsuarios || 0);
   const limitReached = maxUsuarios > 0 && users.length >= maxUsuarios;
   const limitMessage = maxUsuarios ? `Límite de usuarios del plan alcanzado (${maxUsuarios}).` : "";

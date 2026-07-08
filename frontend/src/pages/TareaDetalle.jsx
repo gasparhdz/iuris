@@ -5,7 +5,7 @@ import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import { usePermisos } from "../auth/usePermissions";
 import {
   Avatar,
@@ -50,7 +50,6 @@ import {
   priorityStyles,
   unwrapData,
   unwrapEntity,
-  unwrapItems,
 } from "./tareasUtils";
 
 export default function TareaDetalle() {

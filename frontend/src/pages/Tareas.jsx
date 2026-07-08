@@ -175,7 +175,7 @@ export default function Tareas() {
     staleTime: 1000 * 60,
   });
 
-  const kpiTasks = tareasKpiQuery.data ?? [];
+  const kpiTasks = useMemo(() => tareasKpiQuery.data ?? [], [tareasKpiQuery.data]);
 
   const kpis = useMemo(() => [
     { label: "Pendientes", value: kpiTasks.filter((t) => !t.completada).length, icon: <Assignment />, tone: theme.palette.primary.main },

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+
+const MotionDiv = motion.div;
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import { alpha } from "@mui/material/styles";
 import {
   AppBar,
@@ -61,7 +63,7 @@ import {
   AccountBalanceWallet as CuentaCorrienteIcon,
   Shield as ShieldIcon,
 } from "@mui/icons-material";
-import { useThemeMode } from "../theme/ThemeModeProvider";
+import { useThemeMode } from "../theme/useThemeMode";
 import { PaletteSelector } from "../theme/PaletteSelector";
 import { FinanzasModalsProvider } from "../components/finanzas/FinanzasModalsProvider";
 import { globalSearch } from "../api/search.api";
@@ -1032,7 +1034,7 @@ export default function Layout() {
         <Box sx={{ width: "100%", minWidth: 0, overflow: "hidden" }}>
           <FinanzasModalsProvider>
             <AnimatePresence mode="wait">
-              <motion.div
+              <MotionDiv
                 key={location.pathname}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1043,7 +1045,7 @@ export default function Layout() {
                 <ErrorBoundary resetKey={location.pathname}>
                   <Outlet />
                 </ErrorBoundary>
-              </motion.div>
+              </MotionDiv>
             </AnimatePresence>
           </FinanzasModalsProvider>
         </Box>

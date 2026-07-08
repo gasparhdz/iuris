@@ -148,7 +148,7 @@ export default function Terceros() {
     });
   }, [editing, open]);
 
-  const terceros = tercerosQuery.data?.items ?? [];
+  const terceros = useMemo(() => tercerosQuery.data?.items ?? [], [tercerosQuery.data?.items]);
   const totalCount = tercerosQuery.data?.meta?.total ?? 0;
 
   const sorted = useMemo(() => {

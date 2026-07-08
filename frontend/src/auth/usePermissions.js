@@ -1,4 +1,4 @@
-import { useAuth } from './AuthContext';
+import { useAuth } from './useAuth';
 
 export const usePermiso = (modulo, accion = 'ver') => {
   const { user } = useAuth();

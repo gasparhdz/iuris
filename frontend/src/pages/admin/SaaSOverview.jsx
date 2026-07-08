@@ -71,7 +71,7 @@ export default function SaaSOverview() {
     queryFn: fetchAdminEstudios,
     staleTime: 60_000,
   });
-  const estudios = estudiosQuery.data ?? [];
+  const estudios = useMemo(() => estudiosQuery.data ?? [], [estudiosQuery.data]);
 
   const metrics = useMemo(() => {
     const activos = estudios.filter((e) => e.activo).length;

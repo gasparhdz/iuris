@@ -65,7 +65,7 @@ import {
 } from "@mui/icons-material";
 import api from "../api/axios";
 import { fetchEquipoUsuarios } from "../api/equipo";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import {
   casoLabel,
   clienteLabel,
@@ -287,10 +287,6 @@ function isCaseAssignedTo(expediente, userId) {
 
 function expedienteDate(expediente) {
   return expediente?.createdAt || expediente?.fechaInicio || expediente?.fechaAlta || expediente?.fecha;
-}
-
-function expedienteCloseDate(expediente) {
-  return expediente?.fechaCierre || expediente?.closedAt || expediente?.fechaFin;
 }
 
 function expedienteTipo(expediente, tipoCasoById) {

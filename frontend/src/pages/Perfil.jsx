@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSnackbar } from "notistack";
 import api from "../api/axios";
 import { disablePush, enablePush, getPushStatus } from "../api/push.api";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import SisfeSyncPanel from "../components/SisfeSyncPanel";
 import {
   Alert,

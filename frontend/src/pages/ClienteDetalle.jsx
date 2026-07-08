@@ -5,7 +5,7 @@ import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
-import { finanzasNuevoUrl, formatMoneyAr, honorarioMontoBase, isHonorarioPendiente, invalidateFinanzasQueries, computeHonorarioAmounts, computeGastoAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
+import { finanzasNuevoUrl, formatMoneyAr, isHonorarioPendiente, computeHonorarioAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import {
   Avatar,
@@ -108,13 +108,6 @@ function toIsoDateTime(value) {
   return new Date(value).getTime() || 0;
 }
 
-function getMonto(row, keys) {
-  for (const key of keys) {
-    if (row?.[key] !== null && row?.[key] !== undefined && row?.[key] !== "") return Number(row[key]) || 0;
-  }
-  return 0;
-}
-
 function honorarioDetalleChip(item) {
   const codigo = (item?.estado?.codigo ?? "").toUpperCase();
   const vencimiento = item?.fechaVencimiento ? new Date(item.fechaVencimiento) : null;
@@ -154,9 +147,6 @@ export default function ClienteDetalle() {
 
   const [contactosOpen, setContactosOpen] = useState(true);
   const [nota, setNota] = useState("");
-  const [honorariosExpanded, setHonorariosExpanded] = useState(true);
-  const [gastosExpanded, setGastosExpanded] = useState(true);
-  const [ingresosExpanded, setIngresosExpanded] = useState(true);
   const [deleteEventoTarget, setDeleteEventoTarget] = useState(null);
   const [finanzasSubTab, setFinanzasSubTab] = useState("cc");
 
@@ -203,9 +193,9 @@ export default function ClienteDetalle() {
   const detalle = detalleQuery.data ?? {};
   const cliente = detalle.cliente ?? null;
   const contactos = cliente?.contactos ?? [];
-  const casos = detalle.casos ?? [];
-  const tareas = detalle.tareas ?? [];
-  const eventos = detalle.eventos ?? [];
+  const casos = useMemo(() => detalle.casos ?? [], [detalle.casos]);
+  const tareas = useMemo(() => detalle.tareas ?? [], [detalle.tareas]);
+  const eventos = useMemo(() => detalle.eventos ?? [], [detalle.eventos]);
   const honorarios = detalle.honorarios ?? [];
   const gastos = detalle.gastos ?? [];
   const ingresos = detalle.ingresos ?? [];
@@ -331,28 +321,6 @@ export default function ClienteDetalle() {
     },
     onError: (error) => {
       enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo eliminar el evento", { variant: "error" });
-    },
-  });
-
-  const quickCobroMutation = useMutation({
-    mutationFn: async (honorario) => {
-      const monto = Number(honorarioMontoBase(honorario) || honorario.montoPesos || 0);
-      const { data } = await api.post("/ingresos", {
-        clienteId: honorario.clienteId ?? Number(id),
-        casoId: honorario.casoId ?? null,
-        descripcion: `Cobro honorario #${honorario.id}`,
-        monto,
-        fechaIngreso: new Date().toISOString(),
-      });
-      return data?.data ?? data;
-    },
-    onSuccess: () => {
-      enqueueSnackbar("Cobro registrado", { variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["clientes", id, "detalle"] });
-      invalidateFinanzasQueries(queryClient);
-    },
-    onError: (error) => {
-      enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo registrar el cobro", { variant: "error" });
     },
   });
 
@@ -650,7 +618,6 @@ export default function ClienteDetalle() {
             <Box sx={{ p: 2.5 }}>
               {finanzasSubTab === "cc" && (
                 <CuentaCorrienteLedger
-                  title="Libro Mayor - Cuenta Corriente"
                   subtitle={nombre}
                   rows={cuentaCorrienteRows}
                   formatDate={formatDate}
@@ -975,7 +942,7 @@ function DataTable({ title, empty, columns, rows }) {
   );
 }
 
-function CuentaCorrienteLedger({ title, subtitle, rows, formatDate, formatMoney, onPrint }) {
+function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrint }) {
   const theme = useTheme();
   const saldoFinal = Number(rows[rows.length - 1]?.saldo ?? 0);
   const saldoFinalColor = saldoFinal > 0 ? "error.main" : "success.main";

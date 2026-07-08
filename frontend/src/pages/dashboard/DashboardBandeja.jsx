@@ -37,7 +37,7 @@ import AgendarDialog from "../../components/AgendarDialog";
 import TareaDetalleDialog from "../../components/TareaDetalleDialog";
 import EventoDetalleDialog from "../../components/EventoDetalleDialog";
 import SisfeSyncButton from "../../components/SisfeSyncButton";
-import { useAuth } from "../../auth/AuthContext";
+import { useAuth } from "../../auth/useAuth";
 import { clienteLabel, formatFriendlyDate } from "../tareasUtils";
 import { bandejaFilterCounts, buildBandejaGroups } from "./bandejaGrouping";
 import { BANDEJA_TONES, bandejaGreeting, displayDate, eventDate, tipoMovimientoInfo } from "./dashboardUtils";

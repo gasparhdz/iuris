@@ -56,10 +56,10 @@ export function useDashboardData() {
     queryClient.invalidateQueries({ queryKey: ["agenda"] });
   }
 
-  const tareas = tareasQuery.data ?? [];
-  const eventos = eventosQuery.data ?? [];
-  const catalogEstadosEvento = catalogQuery.data?.ESTADO_EVENTO ?? [];
-  const catalogTiposEvento = catalogQuery.data?.TIPO_EVENTO ?? [];
+  const tareas = useMemo(() => tareasQuery.data ?? [], [tareasQuery.data]);
+  const eventos = useMemo(() => eventosQuery.data ?? [], [eventosQuery.data]);
+  const catalogEstadosEvento = useMemo(() => catalogQuery.data?.ESTADO_EVENTO ?? [], [catalogQuery.data?.ESTADO_EVENTO]);
+  const catalogTiposEvento = useMemo(() => catalogQuery.data?.TIPO_EVENTO ?? [], [catalogQuery.data?.TIPO_EVENTO]);
 
   const tiposEventoById = useMemo(
     () => new Map(catalogTiposEvento.map((t) => [Number(t.id), t])),

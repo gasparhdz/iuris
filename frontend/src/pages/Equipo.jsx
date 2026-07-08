@@ -41,7 +41,7 @@ import {
   toggleEquipoUsuario,
   updateEquipoUsuario,
 } from "../api/equipo";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 
 const MAX_USUARIOS_PLAN = 10;
 
@@ -163,7 +163,7 @@ export default function Equipo() {
     setErrors({});
   }, [editing, showForm]);
 
-  const users = usuariosQuery.data ?? [];
+  const users = useMemo(() => usuariosQuery.data ?? [], [usuariosQuery.data]);
   const activeCount = users.filter((item) => item.activo && !item.deletedAt).length;
   const limitReached = activeCount >= MAX_USUARIOS_PLAN;
   const limitMessage = `Limite de usuarios del plan alcanzado (${MAX_USUARIOS_PLAN}).`;

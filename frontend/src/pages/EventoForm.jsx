@@ -27,7 +27,7 @@ import {
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import { ArrowBack, AttachFile, Save } from "@mui/icons-material";
-import { casoLabel, clienteLabel, getApiError, unwrapData, unwrapEntity, unwrapItems } from "./tareasUtils";
+import { casoLabel, clienteLabel, getApiError, unwrapData, unwrapEntity } from "./tareasUtils";
 
 const EMPTY_FORM = {
   casoId: "",
@@ -124,7 +124,7 @@ export default function EventoForm() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const catalogQuery = (categoria) => useQuery({
+  const useCatalogQuery = (categoria) => useQuery({
     queryKey: ["catalogos", "parametros", categoria],
     queryFn: async () => {
       const { data } = await api.get("/catalogos/parametros", { params: { categoria } });
@@ -133,8 +133,11 @@ export default function EventoForm() {
     staleTime: 1000 * 60 * 30,
   });
 
-  const tipos = catalogQuery("TIPO_EVENTO").data ?? [];
-  const estados = catalogQuery("ESTADO_EVENTO").data ?? [];
+  const tiposQuery = useCatalogQuery("TIPO_EVENTO");
+  const estadosQuery = useCatalogQuery("ESTADO_EVENTO");
+
+  const tipos = useMemo(() => tiposQuery.data ?? [], [tiposQuery.data]);
+  const estados = useMemo(() => estadosQuery.data ?? [], [estadosQuery.data]);
 
   useEffect(() => {
     if (isEdit && eventoQuery.data) {

@@ -21,7 +21,7 @@ import {
   PersonAdd,
 } from "@mui/icons-material";
 import NovedadesExpedientesCard from "../../components/NovedadesExpedientesCard";
-import { useAuth } from "../../auth/AuthContext";
+import { useAuth } from "../../auth/useAuth";
 import DashboardViewToggle from "./DashboardViewToggle";
 import { CARD_TONES, displayDate, eventDate, panelSx, readUserName } from "./dashboardUtils";
 import { EventRow, TaskRow } from "./DashboardRows";

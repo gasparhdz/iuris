@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import {
   Autocomplete,
   Box,
@@ -33,7 +33,6 @@ import {
   tareaToForm,
   unwrapData,
   unwrapEntity,
-  unwrapItems,
 } from "./tareasUtils";
 
 function formatQueryDateTime(value) {

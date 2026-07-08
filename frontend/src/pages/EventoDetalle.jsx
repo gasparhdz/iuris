@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link as RouterLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
-import { alpha, useTheme } from "@mui/material/styles";
+import { alpha } from "@mui/material/styles";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
 import { usePermisos } from "../auth/usePermissions";
@@ -39,11 +39,9 @@ import {
   casoLabel,
   clienteLabel,
   formatDateTime,
-  formatFriendlyDate,
   getApiError,
   unwrapData,
   unwrapEntity,
-  unwrapItems,
 } from "./tareasUtils";
 
 export default function EventoDetalle() {
@@ -52,7 +50,6 @@ export default function EventoDetalle() {
   const navigate = useNavigate();
   const location = useLocation();
   const currentPath = `${location.pathname}${location.search}`;
-  const theme = useTheme();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { canEditar, canEliminar } = usePermisos("EVENTOS");

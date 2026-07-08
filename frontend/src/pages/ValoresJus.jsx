@@ -258,6 +258,11 @@ export default function ValoresJus() {
                       <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
                         Sincronizá el historial oficial o cargá un valor manualmente.
                       </Typography>
+                      {canCrear && (
+                        <Button variant="outlined" onClick={handleOpenManual} sx={{ mt: 2, borderRadius: "10px", fontWeight: 800 }}>
+                          Cargar manualmente
+                        </Button>
+                      )}
                     </Box>
                   </TableCell>
                 </TableRow>

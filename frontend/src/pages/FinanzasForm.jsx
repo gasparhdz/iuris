@@ -71,9 +71,8 @@ import {
   resolveEstadoHonorarioId,
   todayInputValue,
   toIsoDateTimeLocal,
-  unwrapPaged,
 } from "./finanzasUtils";
-import { casoLabel, clienteLabel, getApiError, unwrapEntity, unwrapItems } from "./tareasUtils";
+import { casoLabel, clienteLabel, getApiError, unwrapEntity } from "./tareasUtils";
 
 const NumericFormatCustom = React.forwardRef(function NumericFormatCustom(props, ref) {
   const { onChange, decimalScale = 2, ...other } = props;

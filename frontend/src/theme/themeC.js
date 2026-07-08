@@ -5,7 +5,6 @@ export const getThemeC = (mode = "light") => {
   const isDark = mode === "dark";
   const p = "#065F46";      // Emerald 900
   const pLight = "#10B981"; // Emerald 500
-  const pDark = "#064E3B";  // Emerald 950
 
   return createTheme({
     palette: {

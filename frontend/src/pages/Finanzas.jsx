@@ -1,9 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSnackbar } from "notistack";
+import { useQuery } from "@tanstack/react-query";
 import { usePermisos } from "../auth/usePermissions";
-import { useFinanzasModals } from "../components/finanzas/FinanzasModalsProvider";
+import { useFinanzasModals } from "../components/finanzas/useFinanzasModals";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import { alpha, useTheme } from "@mui/material/styles";
 import Grid from "@mui/material/Grid";
@@ -66,7 +65,6 @@ import {
   formatMoneyAr,
   honorarioEstadoChip,
   isHonorarioPendiente,
-  invalidateFinanzasQueries,
   linkSx,
   unwrapPaged,
   formatCurrency,
@@ -76,7 +74,7 @@ import {
   getItemCurrencyGeneral,
   mapCuentaCorrienteApiRows,
 } from "./finanzasUtils";
-import { clienteLabel as clienteLabelFromTareas, getApiError } from "./tareasUtils";
+import { clienteLabel as clienteLabelFromTareas } from "./tareasUtils";
 
 const TAB_KEYS = ["honorarios", "gastos", "ingresos", "planes", "cuentas_corrientes"];
 const TAB_LABELS = {
@@ -123,16 +121,6 @@ function getPresetRange(key) {
     default:
       return { from: null, to: null };
   }
-}
-
-function isInDateRange(dateStr, from, to) {
-  if (!from && !to) return true;
-  if (!dateStr) return false;
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return false;
-  if (from && d < from) return false;
-  if (to && d > to) return false;
-  return true;
 }
 
 function useDebounced(value, delay = 300) {
@@ -504,11 +492,11 @@ export default function Finanzas() {
     return new Map(list.map((e) => [Number(e.id), e]));
   }, [catalogQuery.data?.ESTADO_GASTO]);
 
-  const honorarios = honorariosQuery.data?.items ?? [];
-  const gastos = gastosQuery.data?.items ?? [];
-  const ingresos = ingresosQuery.data?.items ?? [];
-  const honorariosKpi = honorariosKpiQuery.data ?? [];
-  const gastosKpi = gastosKpiQuery.data ?? [];
+  const honorarios = useMemo(() => honorariosQuery.data?.items ?? [], [honorariosQuery.data?.items]);
+  const gastos = useMemo(() => gastosQuery.data?.items ?? [], [gastosQuery.data?.items]);
+  const ingresos = useMemo(() => ingresosQuery.data?.items ?? [], [ingresosQuery.data?.items]);
+  const honorariosKpi = useMemo(() => honorariosKpiQuery.data ?? [], [honorariosKpiQuery.data]);
+  const gastosKpi = useMemo(() => gastosKpiQuery.data ?? [], [gastosKpiQuery.data]);
 
   const processedHonorarios = useMemo(() => {
     const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
@@ -770,7 +758,6 @@ export default function Finanzas() {
           next.delete("clienteId");
           return next;
         })}
-        theme={theme}
       />
     );
   }
@@ -1640,7 +1627,7 @@ function MoneyWithNote({ value, note, formatMoney }) {
   );
 }
 
-function CuentaCorrienteLedger({ title, subtitle, rows, formatDate, formatMoney, onPrint }) {
+function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrint }) {
   const theme = useTheme();
   const saldoFinal = Number(rows[rows.length - 1]?.saldo ?? 0);
   const saldoFinalColor = saldoFinal > 0 ? "error.main" : "success.main";
@@ -1808,7 +1795,7 @@ function CuentaCorrienteLedger({ title, subtitle, rows, formatDate, formatMoney,
   );
 }
 
-function ClienteCuentaCorrienteDetail({ clienteId, onBack, theme }) {
+function ClienteCuentaCorrienteDetail({ clienteId, onBack }) {
   // El libro mayor se calcula en el backend (motor Decimal); acá solo se renderiza.
   const ccQuery = useQuery({
     queryKey: ["clientes", clienteId, "cuenta-corriente"],
@@ -1832,9 +1819,7 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack, theme }) {
     || ccQuery.error?.message
     || (ccQuery.isError ? "Error de conexion" : null);
 
-  const totales = ccQuery.data?.totales ?? null;
   const rows = useMemo(() => mapCuentaCorrienteApiRows(ccQuery.data?.rows ?? []), [ccQuery.data?.rows]);
-  const saldo = Number(totales?.saldoPesos ?? 0);
 
   if (loading) {
     return (
@@ -1859,10 +1844,6 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack, theme }) {
 
   const cliente = clienteQuery.data ?? null;
   const nombre = clienteLabel(cliente) || (cliente ? [cliente.apellido, cliente.nombre].filter(Boolean).join(", ") : "") || `Cliente #${clienteId}`;
-
-  const totalHonorarios = Number(totales?.honorariosPesos ?? 0);
-  const totalGastos = Number(totales?.gastosPesos ?? 0);
-  const totalIngresos = Number(totales?.ingresosPesos ?? 0);
 
   return (
     <Stack spacing={3}>
@@ -1918,7 +1899,6 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack, theme }) {
       */}
 
       <CuentaCorrienteLedger
-        title="Libro Mayor - Cuenta Corriente"
         subtitle={nombre}
         rows={rows}
         formatDate={formatDateShort}

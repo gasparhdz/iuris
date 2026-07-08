@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
-import { useThemeMode } from "../theme/ThemeModeProvider";
+import { useAuth } from "../auth/useAuth";
+import { useThemeMode } from "../theme/useThemeMode";
 import {
   Box,
   Card,
@@ -24,6 +24,8 @@ import {
 } from "@mui/icons-material";
 import { motion } from "framer-motion";
 import BrandLogo from "../components/BrandLogo";
+
+const MotionDiv = motion.div;
 
 export default function Login() {
   const { login } = useAuth();
@@ -168,7 +170,7 @@ export default function Login() {
         </IconButton>
       </Tooltip>
 
-      <motion.div
+      <MotionDiv
         initial={{ opacity: 0, y: 28 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
@@ -226,7 +228,7 @@ export default function Login() {
 
             {/* Alerta de error */}
             {error && (
-              <motion.div
+              <MotionDiv
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.22 }}
@@ -249,7 +251,7 @@ export default function Login() {
                 >
                   {error}
                 </Alert>
-              </motion.div>
+              </MotionDiv>
             )}
 
             {/* Formulario */}
@@ -354,7 +356,7 @@ export default function Login() {
 
           </CardContent>
         </Card>
-      </motion.div>
+      </MotionDiv>
     </Box>
     </>
   );

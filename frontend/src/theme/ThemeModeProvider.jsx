@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import { getThemeIuris } from "./themeIuris";
@@ -6,14 +6,7 @@ import { getTheme } from "./theme";
 import { getThemeA } from "./themeA";
 import { getThemeB } from "./themeB";
 import { getThemeC } from "./themeC";
-
-export const PALETTE_OPTIONS = [
-  { key: "iuris",    label: "Iuris",       accent: "#00B8A9", desc: "Azul + Turquesa (marca)" },
-  { key: "original", label: "Original",    accent: "#6366F1", desc: "Índigo + Teal"      },
-  { key: "A",        label: "Institucional", accent: "#1D4ED8", desc: "Azul + Sky"         },
-  { key: "B",        label: "Jurídico",    accent: "#D97706", desc: "Slate + Dorado"     },
-  { key: "C",        label: "Judicial",    accent: "#10B981", desc: "Verde Esmeralda"    },
-];
+import { ThemeModeContext } from "./theme-mode-context";
 
 const themeBuilders = {
   iuris: getThemeIuris,
@@ -22,13 +15,6 @@ const themeBuilders = {
   B: getThemeB,
   C: getThemeC,
 };
-
-const ThemeModeContext = createContext({
-  mode: "light",
-  palette: "original",
-  toggle: () => {},
-  setPalette: () => {},
-});
 
 export function ThemeModeProvider({ children }) {
   const [mode, setMode] = useState(() => {
@@ -74,5 +60,3 @@ export function ThemeModeProvider({ children }) {
     </ThemeModeContext.Provider>
   );
 }
-
-export const useThemeMode = () => useContext(ThemeModeContext);

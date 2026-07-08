@@ -229,7 +229,7 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
   );
 }
 
-export default function PlanesPagoTable({ planes, loading, error, empty, onDeletePlan, invalidateKeys = [] }) {
+export default function PlanesPagoTable({ planes, loading, error, empty, invalidateKeys = [] }) {
   const theme = useTheme();
   const [expandedPlanId, setExpandedPlanId] = useState(null);
 

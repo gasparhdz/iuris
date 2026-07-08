@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
-import { useThemeMode } from "../theme/ThemeModeProvider";
+import { useThemeMode } from "../theme/useThemeMode";
 import {
   Alert,
   Box,
@@ -19,6 +19,8 @@ import {
 import { DarkModeOutlined, LightModeOutlined, LockResetOutlined, Visibility, VisibilityOff } from "@mui/icons-material";
 import { motion } from "framer-motion";
 import BrandLogo from "../components/BrandLogo";
+
+const MotionDiv = motion.div;
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -77,7 +79,7 @@ export default function ResetPassword() {
           </IconButton>
         </Tooltip>
 
-        <motion.div initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }} style={{ zIndex: 1, width: "100%", maxWidth: "440px" }}>
+        <MotionDiv initial={{ opacity: 0, y: 28 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }} style={{ zIndex: 1, width: "100%", maxWidth: "440px" }}>
           <Card elevation={0} sx={authCardSx(isDark)}>
             <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
               <Box sx={{ textAlign: "center", mb: 3.5 }}>
@@ -138,7 +140,7 @@ export default function ResetPassword() {
               )}
             </CardContent>
           </Card>
-        </motion.div>
+        </MotionDiv>
       </Box>
     </>
   );

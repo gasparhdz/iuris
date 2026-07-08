@@ -223,7 +223,7 @@ export function resolveEstadoHonorarioId(estados, uiKey) {
   return findParamByCodigo(estados, ui.codigos)?.id ?? findParamByCodigo(estados, ["PENDIENTE"])?.id ?? null;
 }
 
-export function estadoUiFromHonorario(item, estados) {
+export function estadoUiFromHonorario(item) {
   const codigo = (item?.estado?.codigo ?? "").toUpperCase();
   const match = ESTADO_HONORARIO_UI.find((ui) => ui.codigos.some((c) => c === codigo));
   return match?.key ?? "pendiente";

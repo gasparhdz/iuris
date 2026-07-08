@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Navigate } from "react-router-dom";
 import { useSnackbar } from "notistack";
-import { useAuth } from "./AuthContext";
+import { useAuth } from "./useAuth";
 
 function hasPlatformAdminRole(user) {
   const roles = Array.isArray(user?.roles) ? user.roles : [];

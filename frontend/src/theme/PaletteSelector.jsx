@@ -9,7 +9,8 @@ import {
 import PaletteIcon from "@mui/icons-material/Palette";
 import CheckIcon from "@mui/icons-material/Check";
 import { useState } from "react";
-import { useThemeMode, PALETTE_OPTIONS } from "./ThemeModeProvider";
+import { PALETTE_OPTIONS } from "./paletteOptions";
+import { useThemeMode } from "./useThemeMode";
 
 export function PaletteSelector() {
   const { palette, setPalette } = useThemeMode();

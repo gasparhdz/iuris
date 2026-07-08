@@ -64,7 +64,6 @@ import {
   getApiError,
   sameDay,
   unwrapData,
-  unwrapEntity,
 } from "./tareasUtils";
 
 export default function Eventos() {
@@ -172,7 +171,7 @@ export default function Eventos() {
     staleTime: 1000 * 60,
   });
 
-  const kpiEvents = eventosKpiQuery.data ?? [];
+  const kpiEvents = useMemo(() => eventosKpiQuery.data ?? [], [eventosKpiQuery.data]);
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -291,7 +290,6 @@ export default function Eventos() {
               <Grid key={event.id} size={{ xs: 12, md: 6, xl: 4 }}>
                 <EventCard
                   event={event}
-                  theme={theme}
                   tipo={tiposById.get(Number(event.tipoId))}
                   estado={estadosById.get(Number(event.estadoId))}
                   cliente={clientesById.get(Number(event.clienteId))}
@@ -395,7 +393,7 @@ function formatEventDates(inicioStr, finStr) {
   return `${friendlyStart} al ${friendlyEnd}`;
 }
 
-function EventCard({ event, theme, tipo, estado, cliente, caso, currentPath, onOpen, onEdit, onDelete, canEditar = true, canEliminar = true }) {
+function EventCard({ event, tipo, estado, cliente, caso, currentPath, onOpen, onEdit, onDelete, canEditar = true, canEliminar = true }) {
   return (
     <Card elevation={0} sx={{ height: "100%", border: "1px solid", borderColor: "divider", borderRadius: "16px", cursor: "pointer", transition: "transform 0.16s ease, border-color 0.16s ease", "&:hover": { transform: "translateY(-3px)", borderColor: "primary.main" } }} onClick={onOpen}>
       <CardContent sx={{ p: 2.25, "&:last-child": { pb: 2.25 } }}>

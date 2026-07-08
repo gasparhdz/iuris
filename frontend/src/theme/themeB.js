@@ -6,7 +6,6 @@ export const getThemeB = (mode = "light") => {
   const p = "#D97706";      // Amber 600
   const pLight = "#F59E0B"; // Amber 400
   const pDark = "#92400E";  // Amber 800
-  const nav = "#1E293B";    // Slate 800 — sidebar / nav
 
   return createTheme({
     palette: {

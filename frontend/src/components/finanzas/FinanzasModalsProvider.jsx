@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { FinanzasModalsContext } from "./finanzasModalsContext";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha } from "@mui/material/styles";
@@ -16,8 +17,6 @@ import {
 import { WarningAmber } from "@mui/icons-material";
 import { finanzasDialogPaperSx, invalidateFinanzasQueries } from "../../pages/finanzasUtils";
 import { getApiError } from "../../pages/tareasUtils";
-
-const FinanzasModalsContext = createContext(null);
 
 export function FinanzasModalsProvider({ children }) {
   const queryClient = useQueryClient();
@@ -45,12 +44,6 @@ export function FinanzasModalsProvider({ children }) {
       />
     </FinanzasModalsContext.Provider>
   );
-}
-
-export function useFinanzasModals() {
-  const ctx = useContext(FinanzasModalsContext);
-  if (!ctx) throw new Error("useFinanzasModals debe usarse dentro de FinanzasModalsProvider");
-  return ctx;
 }
 
 function DeleteConfirmDialog({ target, onClose, onSuccess, onError }) {

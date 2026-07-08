@@ -35,8 +35,8 @@ import {
   Settings,
   Shield,
 } from "@mui/icons-material";
-import { useAuth } from "../auth/AuthContext";
-import { useThemeMode } from "../theme/ThemeModeProvider";
+import { useAuth } from "../auth/useAuth";
+import { useThemeMode } from "../theme/useThemeMode";
 import BrandLogo from "../components/BrandLogo";
 
 const drawerWidth = 240;
