@@ -209,6 +209,13 @@ const start = async () => {
     iniciarCronValorJus(server.log);
     iniciarCronStorageWatch();
 
+    try {
+      await sisfeSyncQueue.obliterate({ force: true });
+      server.log.info("🧹 Cola SISFE drenada (jobs zombies eliminados)");
+    } catch (obliterateErr) {
+      server.log.warn(obliterateErr, "No se pudo drenar la cola SISFE al arrancar");
+    }
+
     // Resetear cualquier estado de sincronización 'running' colgado de una ejecución previa
     try {
       const { db } = await import("./db/index.js");

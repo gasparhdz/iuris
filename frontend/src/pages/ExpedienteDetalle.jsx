@@ -311,7 +311,9 @@ export default function ExpedienteDetalle() {
 
   const tercerosQuery = useQuery({
     queryKey: ["terceros", "lookup"],
-    queryFn: fetchAllTerceros,
+    // No pasar fetchAllTerceros pelada: react-query inyecta su contexto ({queryKey, signal, ...})
+    // como primer argumento y terminaba en el querystring (400 del backend).
+    queryFn: () => fetchAllTerceros(),
   });
 
   const notasQuery = useQuery({
