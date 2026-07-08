@@ -54,6 +54,8 @@ const envSchema = z.object({
   REDIS_HOST: z.string().default("127.0.0.1"),
   REDIS_PORT: z.coerce.number().default(6379),
   SISFE_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  SISFE_SYNC_MODE: z.enum(["api", "browser"]).default("browser"),
+  SISFE_DIAS_NOVEDADES: z.coerce.number().int().positive().default(7),
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV === "production" && !env.CORS_ORIGIN?.trim()) {
     ctx.addIssue({

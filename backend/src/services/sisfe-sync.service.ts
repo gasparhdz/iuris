@@ -3,17 +3,377 @@ import { Readable } from "node:stream";
 import { db } from "../db/index.js";
 import { casos, movimientosJudiciales, adjuntos, casoTrazabilidad } from "../db/schema.js";
 import { withContext } from "./browser-pool.js";
-import { SisfeError, attachDiagnostics, buscarExpedientePorCuij, conReintentos, esTargetCerrado, fetchDetalleExpediente, parseFechaHoraSISFE, parseUbicacionActual } from "./sisfe-scraper.service.js";
-import { deleteSession, getSession, saveSessionLastSync, updateSyncStatus, type SisfeSyncStats } from "./sisfe-session.service.js";
+import {
+  SisfeError,
+  attachDiagnostics,
+  buscarExpedientePorCuij,
+  conReintentos,
+  debeOmitirDescargaExpediente,
+  descargarExpedienteDigitalEnDetalle,
+  esTargetCerrado,
+  fetchDetalleExpediente,
+  normalizarCuj,
+  parseFechaHoraSISFE,
+  parseUbicacionActual,
+  type MovimientoSisfe,
+  type OpcionesDetalleExpediente,
+} from "./sisfe-scraper.service.js";
+import {
+  deleteSession,
+  extractJwtFromSession,
+  getSession,
+  saveSessionLastSync,
+  updateSyncStatus,
+  type SisfeSyncStats,
+} from "./sisfe-session.service.js";
+import { createSisfeApiClient, type SisfeExpedienteListItem, type SisfeNovedadItem } from "./sisfe-api.client.js";
+import { mapaTipoMovimiento } from "./sisfe-movimiento.mapper.js";
 import { DriveService } from "./drive.service.js";
 import { getStorage } from "../storage/factory.js";
 import { AdjuntosQueries } from "../db/queries/adjuntos.queries.js";
 import { logger } from "../utils/logger.js";
 import { emitirAUsuario } from "../sse/sse.registry.js";
+import { env } from "../env.js";
 
 const log = logger.child({ module: "SISFE-Sync" });
 
+type SesionSync = {
+  cookieName: string;
+  cookieValue: string;
+};
+
+type CasoSyncRow = {
+  id: number;
+  nroExpte: string | null;
+  caratula: string | null;
+  sisfeExpteId: string | null;
+  sisfeFechaUltimaActualizacion: Date | null;
+  sisfeExpedienteDigitalAt: Date | null;
+};
+
+// Extrae el CUIJ limpio del campo nroExpte, que puede venir con basura cargada a mano
+// (ej: "21-27884151-8 Nro. Expediente", "21-23847992-1(762/2018)"). Sin esto, la búsqueda
+// por CUIJ en SISFE no matchea nada.
+function extraerCuij(nroExpte: string | null | undefined): string {
+  const base = (nroExpte ?? "").split("(")[0] ?? "";
+  const match = base.match(/\d{2}-\d{6,10}-\d/);
+  return match ? match[0] : base.trim();
+}
+
 export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?: number): Promise<void> {
+  if (env.SISFE_SYNC_MODE === "api") {
+    return ejecutarSyncApi(usuarioId, estudioId, casoId);
+  }
+  return ejecutarSyncBrowser(usuarioId, estudioId, casoId);
+}
+
+async function ejecutarSyncApi(usuarioId: number, estudioId: number, casoId?: number): Promise<void> {
+  try {
+    await updateSyncStatus(usuarioId, "running", 0, "Iniciando sincronización (API)...");
+
+    const sesion = await getSession(usuarioId, estudioId);
+    if (!sesion) {
+      await updateSyncStatus(usuarioId, "error", 0, "No hay sesión activa. Conectate al SISFE primero.");
+      return;
+    }
+
+    const token = extractJwtFromSession(sesion.cookieValue);
+    if (!token) {
+      await updateSyncStatus(usuarioId, "error", 0, "No se encontró el token JWT en la sesión SISFE. Volvé a conectarte.");
+      return;
+    }
+
+    const api = createSisfeApiClient(token);
+    const casosConExpte = await cargarCasosParaSync(estudioId, casoId);
+    if (casosConExpte.length === 0) {
+      const msg = casoId !== undefined && casoId !== null
+        ? "El expediente seleccionado no está configurado para sincronizar o no existe."
+        : "No hay expedientes cargados con número para sincronizar.";
+      await updateSyncStatus(usuarioId, "done", 100, msg, emptyStats());
+      return;
+    }
+
+    const stats: SisfeSyncStats = emptyStats();
+    let progress = 5;
+
+    await updateSyncStatus(
+      usuarioId,
+      "running",
+      progress,
+      casoId != null
+        ? "Sincronizando expediente seleccionado vía API SISFE..."
+        : `${casosConExpte.length} expedientes para sincronizar vía API SISFE...`,
+    );
+
+    if (casoId != null) {
+      const caso = casosConExpte[0];
+      const cuijBusqueda = extraerCuij(caso.nroExpte);
+      if (!cuijBusqueda) {
+        await updateSyncStatus(usuarioId, "done", 100, "El expediente no tiene número CUJ válido.", stats);
+        return;
+      }
+
+      try {
+        await sincronizarCasoApi({
+          api,
+          sesion: { cookieName: sesion.cookieName, cookieValue: sesion.cookieValue },
+          caso,
+          cuijBusqueda,
+          idExpediente: caso.sisfeExpteId ? Number(caso.sisfeExpteId) : null,
+          usuarioId,
+          estudioId,
+          stats,
+          progress: 50,
+        });
+      } catch (error: unknown) {
+        if (await manejarErrorSync(error, usuarioId, 50)) return;
+        log.error({ err: error, casoId: caso.id }, `[SISFE Sync] Error API al sincronizar caso ${caso.id}`);
+        return;
+      }
+
+      const mensajeFinal = construirMensajeFinalSync(stats, stats.noEncontradosEnSisfe > 0
+        ? "No se encontró el expediente en SISFE."
+        : undefined);
+      await updateSyncStatus(usuarioId, "done", 100, mensajeFinal, stats);
+      await saveSessionLastSync(usuarioId);
+
+      if (stats.movimientosNuevos > 0) {
+        emitirAUsuario(usuarioId, "novedades", {
+          tipo: "sisfe_novedades",
+          nuevos: stats.movimientosNuevos,
+          expedientes: stats.actualizados,
+        });
+      }
+      return;
+    }
+
+    for (let i = 0; i < casosConExpte.length; i++) {
+      const sesionActual = await getSession(usuarioId, estudioId);
+      if (!sesionActual || sesionActual.syncStatus !== "running") {
+        log.info("[SISFE Sync] Sincronizacion cancelada por el usuario.");
+        return;
+      }
+
+      const caso = casosConExpte[i];
+      const cuijBusqueda = extraerCuij(caso.nroExpte);
+      if (!cuijBusqueda) continue;
+
+      progress = 5 + Math.round((i / casosConExpte.length) * 90);
+      await updateSyncStatus(
+        usuarioId,
+        "running",
+        progress,
+        `Sincronizando vía API: ${(caso.caratula || cuijBusqueda).substring(0, 50)}...`,
+      );
+
+      try {
+        await sincronizarCasoApi({
+          api,
+          sesion: { cookieName: sesion.cookieName, cookieValue: sesion.cookieValue },
+          caso,
+          cuijBusqueda,
+          idExpediente: caso.sisfeExpteId ? Number(caso.sisfeExpteId) : null,
+          usuarioId,
+          estudioId,
+          stats,
+          progress,
+        });
+      } catch (error: unknown) {
+        if (await manejarErrorSync(error, usuarioId, progress)) return;
+        if (esTargetCerrado(error)) {
+          log.error({ err: error, casoId: caso.id }, "[SISFE Sync] El navegador se cerró durante la descarga del PDF; abortando.");
+          await updateSyncStatus(usuarioId, "error", progress, "Se interrumpió la conexión con el navegador durante la sincronización. Volvé a intentar en unos minutos.");
+          return;
+        }
+        log.error({ err: error, casoId: caso.id }, `[SISFE Sync] Error API al sincronizar caso ${caso.id}`);
+      }
+
+      if (i < casosConExpte.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+
+    await updateSyncStatus(usuarioId, "done", 100, construirMensajeFinalSync(stats), stats);
+    await saveSessionLastSync(usuarioId);
+
+    if (stats.movimientosNuevos > 0) {
+      emitirAUsuario(usuarioId, "novedades", {
+        tipo: "sisfe_novedades",
+        nuevos: stats.movimientosNuevos,
+        expedientes: stats.actualizados,
+      });
+    }
+  } catch (error: unknown) {
+    await manejarErrorSync(error, usuarioId, 0);
+  }
+}
+
+async function sincronizarCasoApi(params: {
+  api: ReturnType<typeof createSisfeApiClient>;
+  sesion: SesionSync;
+  caso: CasoSyncRow;
+  cuijBusqueda: string;
+  idExpediente: number | null;
+  usuarioId: number;
+  estudioId: number;
+  stats: SisfeSyncStats;
+  progress: number;
+}): Promise<void> {
+  const {
+    api,
+    sesion,
+    caso,
+    cuijBusqueda,
+    usuarioId,
+    estudioId,
+    stats,
+  } = params;
+
+  let idExpediente = params.idExpediente;
+
+  if (idExpediente == null || Number.isNaN(idExpediente)) {
+    const encontrado = await buscarExpedienteEnFiltro(api, cuijBusqueda);
+    if (!encontrado) {
+      log.info({ casoId: caso.id, cuijBusqueda }, "[SISFE Sync] Expediente no encontrado en SISFE por CUIJ");
+      stats.noEncontradosEnSisfe++;
+      return;
+    }
+    idExpediente = encontrado.id;
+  }
+
+  const detalle = await api.findById(idExpediente);
+  const ubicacionActual = parseUbicacionActual(detalle.expUbicacion || "");
+  const fechaUltimaActualizacionPrevia = caso.sisfeFechaUltimaActualizacion;
+  const expedienteDigitalDescargadoPreviamente = caso.sisfeExpedienteDigitalAt != null;
+
+  await db.update(casos)
+    .set({
+      sisfeExpteId: String(idExpediente),
+      sisfeLastSyncAt: new Date(),
+      sisfeSyncedBy: usuarioId,
+      sisfeRadicadoEn: detalle.radicado || null,
+      sisfeLocalidad: detalle.localidad || null,
+      sisfeFechaIngresoMeu: detalle.fechaIngresoMEU ? parseFechaSISFE(detalle.fechaIngresoMEU) : null,
+      sisfeUbicacionActual: ubicacionActual.ubicacion || null,
+      sisfeFechaUbicacionActual: ubicacionActual.fechaDesde,
+      sisfeSoloDigital: detalle.expDigital === 1,
+      sisfeFechaUltimaActualizacion: parseFechaHoraSISFE(detalle.ultimaActualizacionDelExpediente),
+      updatedAt: new Date(),
+      updatedBy: usuarioId,
+    })
+    .where(eq(casos.id, caso.id));
+
+  if (ubicacionActual.ubicacion && ubicacionActual.fechaDesde) {
+    await upsertTrazabilidad(caso.id, estudioId, ubicacionActual.ubicacion, ubicacionActual.fechaDesde);
+  }
+
+  const novedades = await api.fetchAllNovedadesById(idExpediente);
+  const movimientos = novedades
+    .map((n) => mapearNovedadApiAMovimiento(n, cuijBusqueda))
+    .filter((mov): mov is MovimientoSisfe => mov != null);
+
+  const movimientosNuevosAntes = stats.movimientosNuevos;
+  await persistirMovimientos(caso.id, estudioId, usuarioId, movimientos, stats);
+  const movimientosNuevosEnCaso = stats.movimientosNuevos - movimientosNuevosAntes;
+
+  const opcionesDescarga: OpcionesDetalleExpediente = {
+    fechaUltimaActualizacionPrevia,
+    expedienteDigitalDescargadoPreviamente,
+    forzarDescarga: movimientosNuevosEnCaso > 0,
+  };
+  const debeDescargarPdf = movimientosNuevosEnCaso > 0
+    || !debeOmitirDescargaExpediente(detalle.ultimaActualizacionDelExpediente, opcionesDescarga);
+
+  if (debeDescargarPdf) {
+    const adjuntosCaso = await db.select({ nombre: adjuntos.nombre })
+      .from(adjuntos)
+      .where(and(
+        eq(adjuntos.scopeId, caso.id),
+        eq(adjuntos.scope, "CASO"),
+        isNull(adjuntos.eliminadoEn),
+      ));
+    const nombresExistentes = new Set(adjuntosCaso.map((a) => a.nombre.toLowerCase()));
+
+    await withContext(sesion.cookieName, sesion.cookieValue, async (context) => {
+      const page = await context.newPage();
+      attachDiagnostics(page);
+      try {
+        const resultadoPdf = await conReintentos(
+          () => descargarExpedienteDigitalEnDetalle(
+            page,
+            String(idExpediente),
+            opcionesDescarga,
+            detalle.ultimaActualizacionDelExpediente,
+          ),
+          `descargar expediente digital ${cuijBusqueda}`,
+        );
+
+        if (resultadoPdf.expedienteDigitalFallido) {
+          stats.pdfsNoDescargados++;
+        }
+
+        if (resultadoPdf.expedienteDigital) {
+          await reemplazarDocumentoADrive(
+            caso.id,
+            estudioId,
+            usuarioId,
+            nombresExistentes,
+            resultadoPdf.expedienteDigital.buffer,
+            resultadoPdf.expedienteDigital.filename,
+            resultadoPdf.expedienteDigital.mimeType,
+          );
+          await db.update(casos)
+            .set({
+              sisfeExpedienteDigitalAt: parseFechaHoraSISFE(detalle.ultimaActualizacionDelExpediente) ?? new Date(),
+              updatedAt: new Date(),
+              updatedBy: usuarioId,
+            })
+            .where(eq(casos.id, caso.id));
+        }
+      } finally {
+        await page.close().catch(() => {});
+      }
+    });
+  }
+
+  stats.actualizados++;
+  emitirAUsuario(usuarioId, "sisfe_sync", {
+    casoId: caso.id,
+    movimientosNuevos: stats.movimientosNuevos,
+  });
+}
+
+async function buscarExpedienteEnFiltro(
+  api: ReturnType<typeof createSisfeApiClient>,
+  cuijBusqueda: string,
+): Promise<SisfeExpedienteListItem | null> {
+  return api.findByCuij(cuijBusqueda);
+}
+
+function mapearNovedadApiAMovimiento(novedad: SisfeNovedadItem, cuij: string): MovimientoSisfe | null {
+  const fecha = (novedad.fecha ?? "").trim();
+  const novedadTexto = (novedad.novedad ?? "").trim();
+  if (!fecha || !novedadTexto) return null;
+
+  const observacion = (novedad.observacion ?? "").replace(/<br>/gi, "\n").trim();
+  const sisfeMovId = `${normalizarCuj(cuij)}_${fecha}_${novedadTexto}`.toLowerCase().replace(/[\s/-]/g, "_").substring(0, 490);
+
+  return {
+    fecha,
+    tipo: mapaTipoMovimiento({
+      tabla: novedad.tabla,
+      tipoActuacion: novedad.tipoActuacion,
+      actuacionTipoFirma: novedad.actuacionTipoFirma,
+    }),
+    novedad: novedadTexto,
+    observacion,
+    sisfeMovId,
+    documento: null,
+    documentos: [],
+  };
+}
+
+async function ejecutarSyncBrowser(usuarioId: number, estudioId: number, casoId?: number): Promise<void> {
   try {
     await updateSyncStatus(usuarioId, "running", 0, "Iniciando sincronización...");
 
@@ -24,25 +384,7 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
     }
 
     await withContext(sesion.cookieName, sesion.cookieValue, async (context) => {
-    const queryConditions = [
-      eq(casos.estudioId, estudioId),
-      isNotNull(casos.nroExpte),
-      isNull(casos.deletedAt),
-    ];
-    if (casoId !== undefined && casoId !== null) {
-      queryConditions.push(eq(casos.id, casoId));
-    }
-
-    const casosConExpte = await db.select({
-      id: casos.id,
-      nroExpte: casos.nroExpte,
-      caratula: casos.caratula,
-      sisfeExpteId: casos.sisfeExpteId,
-      sisfeFechaUltimaActualizacion: casos.sisfeFechaUltimaActualizacion,
-      sisfeExpedienteDigitalAt: casos.sisfeExpedienteDigitalAt,
-    })
-      .from(casos)
-      .where(and(...queryConditions));
+    const casosConExpte = await cargarCasosParaSync(estudioId, casoId);
 
     if (casosConExpte.length === 0) {
       const msg = casoId !== undefined && casoId !== null
@@ -61,15 +403,14 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
     for (let i = 0; i < casosConExpte.length; i++) {
       const caso = casosConExpte[i];
       
-      // Verificar si el usuario canceló la sincronización desde el frontend
       const sesionActual = await getSession(usuarioId, estudioId);
       if (!sesionActual || sesionActual.syncStatus !== "running") {
         log.info("[SISFE Sync] Sincronizacion cancelada por el usuario.");
-        return; // El finally cerrará el navegador automáticamente
+        return;
       }
 
       const progress = 5 + Math.round((i / casosConExpte.length) * 90);
-      const cuijBusqueda = caso.nroExpte?.split("(")[0]?.trim() ?? "";
+      const cuijBusqueda = extraerCuij(caso.nroExpte);
       if (!cuijBusqueda) continue;
 
       await updateSyncStatus(
@@ -79,9 +420,6 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         `Buscando en SISFE: ${(caso.caratula || cuijBusqueda).substring(0, 50)}...`,
       );
 
-      // Página nueva por expediente: acota la memoria del renderer (cada detalle carga
-      // una página pesada + descarga PDF + reCAPTCHA) y permite recuperar una page colgada
-      // sin arrastrar el problema al resto de los casos.
       const page = await context.newPage();
       attachDiagnostics(page);
 
@@ -92,11 +430,9 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         );
         if (!resultadoBusqueda) {
           stats.noEncontradosEnSisfe++;
-          // TODO FASE 2: crear o asociar expedientes no encontrados queda deshabilitado.
           continue;
         }
 
-        // Obtener nombres de adjuntos existentes para reemplazar correctamente el expediente digital consolidado
         const adjuntosCaso = await db.select({ nombre: adjuntos.nombre })
           .from(adjuntos)
           .where(and(
@@ -126,8 +462,6 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
             sisfeFechaUbicacionActual: ubicacionActual.fechaDesde,
             sisfeSoloDigital: detalle.soloDigital,
             sisfeFechaUltimaActualizacion: parseFechaHoraSISFE(detalle.ultimaActualizacion),
-            // Sólo se actualiza cuando esta corrida obtuvo un PDF válido; si se omitió la
-            // descarga (sin novedades) se conserva el valor previo para no perder el gate.
             ...(detalle.expedienteDigital
               ? { sisfeExpedienteDigitalAt: parseFechaHoraSISFE(detalle.ultimaActualizacion) ?? new Date() }
               : {}),
@@ -137,30 +471,13 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
           .where(eq(casos.id, caso.id));
 
         if (ubicacionActual.ubicacion && ubicacionActual.fechaDesde) {
-          const trazabilidadExistente = await db.select({ id: casoTrazabilidad.id })
-            .from(casoTrazabilidad)
-            .where(and(
-              eq(casoTrazabilidad.casoId, caso.id),
-              eq(casoTrazabilidad.ubicacion, ubicacionActual.ubicacion),
-              eq(casoTrazabilidad.fechaDesde, ubicacionActual.fechaDesde),
-            ))
-            .limit(1);
-
-          if (trazabilidadExistente.length === 0) {
-            await db.insert(casoTrazabilidad).values({
-              casoId: caso.id,
-              estudioId,
-              ubicacion: ubicacionActual.ubicacion,
-              fechaDesde: ubicacionActual.fechaDesde,
-            });
-          }
+          await upsertTrazabilidad(caso.id, estudioId, ubicacionActual.ubicacion, ubicacionActual.fechaDesde);
         }
 
         if (detalle.expedienteDigitalFallido) {
           stats.pdfsNoDescargados++;
         }
 
-        // Si se descargó el expediente digital completo, subirlo a Drive e indexarlo en la tabla de adjuntos
         if (detalle.expedienteDigital) {
           await reemplazarDocumentoADrive(
             caso.id,
@@ -173,47 +490,7 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
           );
         }
 
-        for (const mov of detalle.movimientos) {
-          // El lookup se acota al expediente (caso.id): sisfeMovId es un id global del
-          // portal, asi que filtrar solo por sisfeMovId mezclaria movimientos entre
-          // estudios que sigan el mismo expediente publico.
-          const [existe] = await db.select({
-            id: movimientosJudiciales.id,
-            novedad: movimientosJudiciales.novedad,
-          })
-            .from(movimientosJudiciales)
-            .where(and(
-              eq(movimientosJudiciales.casoId, caso.id),
-              eq(movimientosJudiciales.sisfeMovId, mov.sisfeMovId),
-            ))
-            .limit(1);
-
-          if (!existe) {
-            // onConflictDoNothing cierra la carrera SELECT->INSERT entre dos sync
-            // concurrentes del mismo estudio (el unique index garantiza no duplicar).
-            const inserted = await db.insert(movimientosJudiciales).values({
-              casoId: caso.id,
-              estudioId,
-              fecha: parseFechaSISFE(mov.fecha),
-              tipo: mov.tipo.substring(0, 100),
-              novedad: mov.novedad || null,
-              descripcion: mov.observacion || null,
-              sisfeMovId: mov.sisfeMovId,
-              origenSisfe: true,
-              createdBy: usuarioId,
-            })
-              .onConflictDoNothing({ target: [movimientosJudiciales.casoId, movimientosJudiciales.sisfeMovId] })
-              .returning({ id: movimientosJudiciales.id });
-            if (inserted.length > 0) stats.movimientosNuevos++;
-          } else if (!existe.novedad && mov.novedad) {
-            await db.update(movimientosJudiciales)
-              .set({
-                novedad: mov.novedad,
-                descripcion: mov.observacion || null,
-              })
-              .where(eq(movimientosJudiciales.id, existe.id));
-          }
-        }
+        await persistirMovimientos(caso.id, estudioId, usuarioId, detalle.movimientos, stats);
 
         stats.actualizados++;
         emitirAUsuario(usuarioId, "sisfe_sync", {
@@ -222,24 +499,8 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
         });
         await page.waitForTimeout(2000);
       } catch (error: unknown) {
-        if (error instanceof SisfeError && error.code === "SESION_EXPIRADA") {
-          await deleteSession(usuarioId);
-          await updateSyncStatus(usuarioId, "error", progress, mensajeSisfeError(error));
-          return;
-        }
+        if (await manejarErrorSync(error, usuarioId, progress)) return;
 
-        if (error instanceof SisfeError) {
-          if (error.code === "DOM_CHANGED") {
-            log.error({ err: error, alert: "SISFE_DOM_CHANGED", casoId: caso.id }, "[SISFE Sync] Alerta interna: cambio de DOM en SISFE");
-          } else {
-            log.error({ err: error, casoId: caso.id }, `[SISFE Sync] Error SISFE ${error.code} al sincronizar caso ${caso.id}`);
-          }
-          await updateSyncStatus(usuarioId, "error", progress, mensajeSisfeError(error));
-          return;
-        }
-
-        // El navegador/contexto se cerró (crash de Chrome): abortar toda la sincronización.
-        // Continuar con el resto de los casos solo encadenaría más errores de "Target closed".
         if (esTargetCerrado(error)) {
           log.error({ err: error, casoId: caso.id }, "[SISFE Sync] El navegador se cerró durante la sincronización; abortando.");
           await updateSyncStatus(usuarioId, "error", progress, "Se interrumpió la conexión con el navegador durante la sincronización. Volvé a intentar en unos minutos.");
@@ -252,13 +513,10 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
       }
     }
 
-    const mensajeFinal = stats.pdfsNoDescargados > 0
-      ? `Sincronización completada. ${stats.pdfsNoDescargados} expediente(s) digital(es) no se pudieron descargar (los movimientos sí se actualizaron).`
-      : "Sincronización completada.";
+    const mensajeFinal = construirMensajeFinalSync(stats);
     await updateSyncStatus(usuarioId, "done", 100, mensajeFinal, stats);
     await saveSessionLastSync(usuarioId);
 
-    // Empujar novedades en tiempo real a la campanita del usuario que sincronizó.
     if (stats.movimientosNuevos > 0) {
       emitirAUsuario(usuarioId, "novedades", {
         tipo: "sisfe_novedades",
@@ -268,18 +526,129 @@ export async function ejecutarSync(usuarioId: number, estudioId: number, casoId?
     }
     });
   } catch (error: unknown) {
-    if (error instanceof SisfeError) {
-      if (error.code === "SESION_EXPIRADA") {
-        await deleteSession(usuarioId);
-      }
-      if (error.code === "DOM_CHANGED") {
-        log.error({ err: error, alert: "SISFE_DOM_CHANGED" }, "[SISFE Sync] Alerta interna: cambio de DOM en SISFE");
-      }
-      await updateSyncStatus(usuarioId, "error", 0, mensajeSisfeError(error));
-      return;
-    }
-    await updateSyncStatus(usuarioId, "error", 0, `Error inesperado: ${error instanceof Error ? error.message : "desconocido"}`);
+    await manejarErrorSync(error, usuarioId, 0);
   }
+}
+
+async function cargarCasosParaSync(estudioId: number, casoId?: number): Promise<CasoSyncRow[]> {
+  const queryConditions = [
+    eq(casos.estudioId, estudioId),
+    isNotNull(casos.nroExpte),
+    isNull(casos.deletedAt),
+  ];
+  if (casoId !== undefined && casoId !== null) {
+    queryConditions.push(eq(casos.id, casoId));
+  }
+
+  return db.select({
+    id: casos.id,
+    nroExpte: casos.nroExpte,
+    caratula: casos.caratula,
+    sisfeExpteId: casos.sisfeExpteId,
+    sisfeFechaUltimaActualizacion: casos.sisfeFechaUltimaActualizacion,
+    sisfeExpedienteDigitalAt: casos.sisfeExpedienteDigitalAt,
+  })
+    .from(casos)
+    .where(and(...queryConditions));
+}
+
+async function upsertTrazabilidad(
+  casoId: number,
+  estudioId: number,
+  ubicacion: string,
+  fechaDesde: Date,
+): Promise<void> {
+  const trazabilidadExistente = await db.select({ id: casoTrazabilidad.id })
+    .from(casoTrazabilidad)
+    .where(and(
+      eq(casoTrazabilidad.casoId, casoId),
+      eq(casoTrazabilidad.ubicacion, ubicacion),
+      eq(casoTrazabilidad.fechaDesde, fechaDesde),
+    ))
+    .limit(1);
+
+  if (trazabilidadExistente.length === 0) {
+    await db.insert(casoTrazabilidad).values({
+      casoId,
+      estudioId,
+      ubicacion,
+      fechaDesde,
+    });
+  }
+}
+
+async function persistirMovimientos(
+  casoId: number,
+  estudioId: number,
+  usuarioId: number,
+  movimientos: MovimientoSisfe[],
+  stats: SisfeSyncStats,
+): Promise<void> {
+  for (const mov of movimientos) {
+    const [existe] = await db.select({
+      id: movimientosJudiciales.id,
+      novedad: movimientosJudiciales.novedad,
+    })
+      .from(movimientosJudiciales)
+      .where(and(
+        eq(movimientosJudiciales.casoId, casoId),
+        eq(movimientosJudiciales.sisfeMovId, mov.sisfeMovId),
+      ))
+      .limit(1);
+
+    if (!existe) {
+      const inserted = await db.insert(movimientosJudiciales).values({
+        casoId,
+        estudioId,
+        fecha: parseFechaSISFE(mov.fecha),
+        tipo: mov.tipo.substring(0, 100),
+        novedad: mov.novedad || null,
+        descripcion: mov.observacion || null,
+        sisfeMovId: mov.sisfeMovId,
+        origenSisfe: true,
+        createdBy: usuarioId,
+      })
+        .onConflictDoNothing({ target: [movimientosJudiciales.casoId, movimientosJudiciales.sisfeMovId] })
+        .returning({ id: movimientosJudiciales.id });
+      if (inserted.length > 0) stats.movimientosNuevos++;
+    } else if (!existe.novedad && mov.novedad) {
+      await db.update(movimientosJudiciales)
+        .set({
+          novedad: mov.novedad,
+          descripcion: mov.observacion || null,
+        })
+        .where(eq(movimientosJudiciales.id, existe.id));
+    }
+  }
+}
+
+async function manejarErrorSync(error: unknown, usuarioId: number, progress: number): Promise<boolean> {
+  if (error instanceof SisfeError) {
+    if (error.code === "SESION_EXPIRADA") {
+      await deleteSession(usuarioId);
+    }
+    if (error.code === "DOM_CHANGED") {
+      log.error({ err: error, alert: "SISFE_DOM_CHANGED" }, "[SISFE Sync] Alerta interna: cambio de DOM en SISFE");
+    }
+    await updateSyncStatus(usuarioId, "error", progress, mensajeSisfeError(error));
+    return true;
+  }
+
+  if (error instanceof Error) {
+    await updateSyncStatus(usuarioId, "error", progress, `Error inesperado: ${error.message}`);
+    return true;
+  }
+
+  await updateSyncStatus(usuarioId, "error", progress, "Error inesperado: desconocido");
+  return true;
+}
+
+function construirMensajeFinalSync(stats: SisfeSyncStats, mensajeAlternativo?: string): string {
+  if (mensajeAlternativo) return mensajeAlternativo;
+  if (stats.pdfsNoDescargados > 0) {
+    return `Sincronización completada. ${stats.pdfsNoDescargados} expediente(s) digital(es) no se pudieron descargar (los movimientos sí se actualizaron).`;
+  }
+  return "Sincronización completada.";
 }
 
 function emptyStats(): SisfeSyncStats {
@@ -351,7 +720,6 @@ async function subirDocumentoADrive(
   mimeType: string
 ): Promise<void> {
   try {
-    // 1. Obtener el caso para ver si ya tiene carpeta vinculada
     const [caso] = await db.select({
       driveFolderId: casos.driveFolderId,
     })
@@ -363,7 +731,6 @@ async function subirDocumentoADrive(
 
     let folderId = caso.driveFolderId;
 
-    // 2. Si no tiene carpeta de Drive, crearla usando el DriveService de Iuris
     if (!folderId) {
       try {
         log.info(`[SISFE Sync] Creando carpeta de Google Drive para caso ${casoId}...`);
@@ -374,7 +741,6 @@ async function subirDocumentoADrive(
       }
     }
 
-    // 3. Subir el archivo de buffer si ya tenemos un folderId válido
     if (folderId) {
       log.info(`[SISFE Sync] Subiendo documento a Google Drive para caso ${casoId}.`);
       const storage = getStorage(estudioId);
@@ -386,7 +752,6 @@ async function subirDocumentoADrive(
         size: buffer.length,
       });
 
-      // 4. Indexar el archivo en la tabla de adjuntos en base de datos
       await AdjuntosQueries.insertAdjunto({
         scope: "CASO",
         scopeId: casoId,

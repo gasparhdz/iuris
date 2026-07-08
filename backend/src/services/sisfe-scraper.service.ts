@@ -8,6 +8,7 @@ import { logger } from "../utils/logger.js";
 const log = logger.child({ module: "SISFE-Scraper" });
 
 const SISFE_BASE_URL = "https://sisfe.justiciasantafe.gov.ar";
+const DESCARGA_COMPLETA_TIMEOUT_MS = 60_000;
 
 export type SisfeErrorCode = "SESION_EXPIRADA" | "PORTAL_CAIDO" | "TIMEOUT_DESCARGA" | "DOM_CHANGED" | "RECAPTCHA_BLOQUEO";
 
@@ -207,6 +208,26 @@ async function esperarDescarga(page: Page) {
   }
 }
 
+async function conTimeoutDescargaCompleta<T>(fn: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new SisfeError(
+            "TIMEOUT_DESCARGA",
+            "La descarga del expediente digital no respondio a tiempo.",
+            true,
+          ));
+        }, DESCARGA_COMPLETA_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // Tras navegar a una página protegida, decide si la sesión está viva.
 // Espera a que el SPA resuelva (renderiza el contenido o redirige a /login) y deja un
 // margen para que lleguen los 401 del guard de Angular antes de operar sobre el DOM.
@@ -389,6 +410,120 @@ export interface OpcionesDetalleExpediente {
   fechaUltimaActualizacionPrevia?: Date | null;
   // true si ya tenemos descargado el expediente digital (PDF) de un sync anterior.
   expedienteDigitalDescargadoPreviamente?: boolean;
+  // Saltea la optimización de omisión (p. ej. movimientos nuevos detectados por API).
+  forzarDescarga?: boolean;
+}
+
+export type ResultadoDescargaExpedienteDigital = {
+  expedienteDigital: {
+    buffer: Buffer;
+    filename: string;
+    mimeType: string;
+  } | null;
+  expedienteDigitalFallido: boolean;
+};
+
+export function debeOmitirDescargaExpediente(
+  ultimaActualizacion: string,
+  opciones: OpcionesDetalleExpediente,
+): boolean {
+  const fechaActualUltimaActualizacion = parseFechaHoraSISFE(ultimaActualizacion);
+  const sinNovedades = Boolean(
+    opciones.fechaUltimaActualizacionPrevia &&
+    fechaActualUltimaActualizacion &&
+    fechaActualUltimaActualizacion.getTime() === opciones.fechaUltimaActualizacionPrevia.getTime(),
+  );
+  return sinNovedades && Boolean(opciones.expedienteDigitalDescargadoPreviamente);
+}
+
+async function ejecutarDescargaExpedienteDigital(
+  page: Page,
+  ultimaActualizacion: string,
+): Promise<ResultadoDescargaExpedienteDigital> {
+  let expedienteDigital = null;
+  let expedienteDigitalFallido = false;
+  const btnDescargarExpediente = page.locator(SEL.detail.downloadButton).first();
+  if (await btnDescargarExpediente.count().catch(() => 0) > 0) {
+    try {
+      log.info("[Scraper] Boton de descarga de expediente digital detectado.");
+      await btnDescargarExpediente.scrollIntoViewIfNeeded().catch(() => {});
+      await btnDescargarExpediente.hover().catch(() => {});
+      await page.waitForTimeout(500 + Math.random() * 500);
+
+      const { filename, buffer } = await conTimeoutDescargaCompleta(async () => {
+        const downloadPromise = esperarDescarga(page);
+        await btnDescargarExpediente.click().catch(async () => {
+          await btnDescargarExpediente.click({ force: true });
+        });
+
+        const download = await downloadPromise;
+        const filenameOriginal = download.suggestedFilename();
+        const [d, m, y] = ultimaActualizacion.split("/");
+        const fechaFormateada = (d && m && y) ? `${d}${m}${y}` : new Date().toLocaleDateString("es-AR").replace(/\//g, "");
+
+        const lastDot = filenameOriginal.lastIndexOf(".");
+        const base = lastDot !== -1 ? filenameOriginal.substring(0, lastDot) : filenameOriginal;
+        const ext = lastDot !== -1 ? filenameOriginal.substring(lastDot + 1) : "pdf";
+        const nombreArchivo = `${base}_${fechaFormateada}.${ext}`;
+
+        const path = await download.path();
+        if (!path) {
+          throw new SisfeError("TIMEOUT_DESCARGA", "La descarga del expediente digital no respondio a tiempo.", true);
+        }
+
+        const fileBuffer = await fs.promises.readFile(path);
+        const isPdf = fileBuffer.slice(0, 5).toString("ascii") === "%PDF-";
+        if (!isPdf) {
+          log.warn("[Scraper] El expediente digital descargado no es un PDF válido (posible bloqueo por reCAPTCHA). Omitiendo.");
+          await fs.promises.unlink(path).catch(() => {});
+          throw new SisfeError("RECAPTCHA_BLOQUEO", "SISFE bloqueo la descarga del PDF con reCAPTCHA.", false);
+        }
+
+        await fs.promises.unlink(path).catch(() => {});
+        return { filename: nombreArchivo, buffer: fileBuffer };
+      });
+
+      expedienteDigital = {
+        buffer,
+        filename,
+        mimeType: "application/pdf",
+      };
+      log.info("[Scraper] Expediente digital completo descargado correctamente.");
+    } catch (err) {
+      expedienteDigitalFallido = true;
+      log.error({ err }, "[Scraper] Error al descargar expediente digital completo");
+    }
+  }
+
+  return { expedienteDigital, expedienteDigitalFallido };
+}
+
+export async function intentarDescargaExpedienteDigital(
+  page: Page,
+  ultimaActualizacion: string,
+  opciones: OpcionesDetalleExpediente = {},
+): Promise<ResultadoDescargaExpedienteDigital> {
+  if (!opciones.forzarDescarga && debeOmitirDescargaExpediente(ultimaActualizacion, opciones)) {
+    log.info("[Scraper] Expediente sin novedades desde el ultimo sync; se omite la descarga del PDF consolidado.");
+    return { expedienteDigital: null, expedienteDigitalFallido: false };
+  }
+  return ejecutarDescargaExpedienteDigital(page, ultimaActualizacion);
+}
+
+export async function descargarExpedienteDigitalEnDetalle(
+  page: Page,
+  sisfeId: string,
+  opciones: OpcionesDetalleExpediente = {},
+  ultimaActualizacionConocida?: string,
+): Promise<ResultadoDescargaExpedienteDigital> {
+  await gotoSisfe(page, `${SISFE_BASE_URL}/detalle-expediente/${sisfeId}`);
+  await verificarSesionTrasCarga(page, SEL.detail.header, "el encabezado del detalle SISFE");
+  await page.waitForTimeout(3000);
+
+  const ultimaActualizacion = ultimaActualizacionConocida
+    ?? await extraerCampoDetalle(page, "Ultima actualizacion del expte al:");
+
+  return intentarDescargaExpedienteDigital(page, ultimaActualizacion, opciones);
 }
 
 export async function fetchDetalleExpediente(
@@ -418,69 +553,11 @@ export async function fetchDetalleExpediente(
   const ubicacionActual = await extraerCampoDetalle(page, "Ubicacion actual:");
   const ultimaActualizacion = await extraerCampoDetalle(page, "Ultima actualizacion del expte al:");
 
-  // --- Descargar expediente digital completo de forma prioritaria ---
-  // Optimización: el PDF consolidado sólo cambia cuando hay un movimiento nuevo, lo que se
-  // refleja en "Última actualización del expte". Si esa fecha no cambió desde el último sync
-  // Y ya tenemos el PDF descargado, salteamos la descarga (la parte más cara y frágil del
-  // scraper). La segunda condición evita no reintentar nunca un PDF que falló antes.
-  const fechaActualUltimaActualizacion = parseFechaHoraSISFE(ultimaActualizacion);
-  const sinNovedades = Boolean(
-    opciones.fechaUltimaActualizacionPrevia &&
-    fechaActualUltimaActualizacion &&
-    fechaActualUltimaActualizacion.getTime() === opciones.fechaUltimaActualizacionPrevia.getTime(),
+  const { expedienteDigital, expedienteDigitalFallido } = await intentarDescargaExpedienteDigital(
+    page,
+    ultimaActualizacion,
+    opciones,
   );
-  const omitirDescargaExpediente = sinNovedades && Boolean(opciones.expedienteDigitalDescargadoPreviamente);
-
-  let expedienteDigital = null;
-  let expedienteDigitalFallido = false;
-  const btnDescargarExpediente = page.locator(SEL.detail.downloadButton).first();
-  if (omitirDescargaExpediente) {
-    log.info("[Scraper] Expediente sin novedades desde el ultimo sync; se omite la descarga del PDF consolidado.");
-  } else if (await btnDescargarExpediente.count().catch(() => 0) > 0) {
-    try {
-      log.info("[Scraper] Boton de descarga de expediente digital detectado.");
-      await btnDescargarExpediente.scrollIntoViewIfNeeded().catch(() => {});
-      await btnDescargarExpediente.hover().catch(() => {});
-      await page.waitForTimeout(500 + Math.random() * 500); // Demora humana
-
-      const downloadPromise = esperarDescarga(page);
-      await btnDescargarExpediente.click().catch(async () => {
-        await btnDescargarExpediente.click({ force: true });
-      });
-
-      const download = await downloadPromise;
-      const filenameOriginal = download.suggestedFilename();
-        const [d, m, y] = ultimaActualizacion.split("/");
-        const fechaFormateada = (d && m && y) ? `${d}${m}${y}` : new Date().toLocaleDateString('es-AR').replace(/\//g, "");
-        
-        const lastDot = filenameOriginal.lastIndexOf(".");
-        const base = lastDot !== -1 ? filenameOriginal.substring(0, lastDot) : filenameOriginal;
-        const ext = lastDot !== -1 ? filenameOriginal.substring(lastDot + 1) : "pdf";
-        const filename = `${base}_${fechaFormateada}.${ext}`;
-
-        const path = await download.path();
-        if (path) {
-          const buffer = await fs.promises.readFile(path);
-          const isPdf = buffer.slice(0, 5).toString("ascii") === "%PDF-";
-          if (!isPdf) {
-            log.warn(`[Scraper] El expediente digital descargado no es un PDF válido (posible bloqueo por reCAPTCHA). Omitiendo.`);
-            await fs.promises.unlink(path).catch(() => {});
-            throw new SisfeError("RECAPTCHA_BLOQUEO", "SISFE bloqueo la descarga del PDF con reCAPTCHA.", false);
-          } else {
-            expedienteDigital = {
-              buffer,
-              filename,
-              mimeType: "application/pdf"
-            };
-            await fs.promises.unlink(path).catch(() => {});
-            log.info("[Scraper] Expediente digital completo descargado correctamente.");
-          }
-      }
-    } catch (err) {
-      expedienteDigitalFallido = true;
-      log.error({ err }, "[Scraper] Error al descargar expediente digital completo");
-    }
-  }
 
   const movimientos: MovimientoSisfe[] = [];
   const paginasVisitadas = new Set<string>();

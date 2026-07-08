@@ -97,6 +97,17 @@ export async function deleteSession(usuarioId: number) {
   await db.delete(sisfeSessions).where(eq(sisfeSessions.usuarioId, usuarioId));
 }
 
+export function extractJwtFromSession(cookieValue: string): string | null {
+  try {
+    const parsed = JSON.parse(cookieValue) as { currentUser?: string };
+    if (!parsed.currentUser) return null;
+    const currentUser = JSON.parse(parsed.currentUser) as { token?: string };
+    return currentUser.token?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function updateSyncStatus(
   usuarioId: number,
   status: SisfeSyncStatus,

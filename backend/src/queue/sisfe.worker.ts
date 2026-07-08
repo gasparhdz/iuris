@@ -19,6 +19,10 @@ export const sisfeSyncWorker = new Worker<SisfeSyncJobData, void, "sync">(
   },
 );
 
+// El error de conexión a Redis es la falla silenciosa más difícil de diagnosticar: sin este
+// handler el worker simplemente no consume jobs y no deja rastro.
+sisfeSyncWorker.on("error", (err) => log.error({ err }, "Worker SISFE: error de conexión/procesamiento"));
+
 sisfeSyncWorker.on("completed", (job) => {
   log.info({ jobId: job.id }, "Job SISFE completado");
 });
