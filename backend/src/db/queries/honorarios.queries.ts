@@ -24,6 +24,10 @@ export interface HonorarioFilters {
 export class HonorariosQueries {
   static async findHonorarios(estudioId: number, filters: HonorarioFilters, pagination: HonorarioPagination) {
     const { orderBy = "fecha", order = "desc" } = filters;
+    // Alias con los mismos nombres que usa baseHonorariosSelect(), para que las
+    // condiciones de busqueda/orden referencien las tablas joineadas de la query de datos.
+    const concepto = alias(parametros, "honorario_concepto");
+    const estado = alias(parametros, "honorario_estado");
     const conditions = [
       eq(honorarios.estudioId, estudioId),
       isNull(honorarios.deletedAt),
@@ -43,15 +47,13 @@ export class HonorariosQueries {
           ilike(clientes.nombre, term),
           ilike(clientes.apellido, term),
           ilike(clientes.razonSocial, term),
-          ilike(parametros.nombre, term)
+          ilike(concepto.nombre, term)
         )!
       );
     }
 
     const whereCondition = and(...conditions);
 
-    const concepto = alias(parametros, "honorario_concepto");
-    const estado = alias(parametros, "honorario_estado");
     const sortDir = order === "desc" ? desc : asc;
     const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
     const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
@@ -110,7 +112,7 @@ export class HonorariosQueries {
       .from(honorarios)
       .leftJoin(clientes, eq(honorarios.clienteId, clientes.id))
       .leftJoin(casos, eq(honorarios.casoId, casos.id))
-      .leftJoin(parametros, eq(honorarios.conceptoId, parametros.id))
+      .leftJoin(concepto, eq(honorarios.conceptoId, concepto.id))
       .where(whereCondition);
 
     return { data, count };
