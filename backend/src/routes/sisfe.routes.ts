@@ -3,6 +3,7 @@ import { z } from "zod";
 import { deleteSession, getStatus, isSyncRunning, saveSession, verifySesionActiva, iniciarLoginInteractivo, updateSyncStatus } from "../services/sisfe-session.service.js";
 import { enqueueSisfeSync } from "../queue/sisfe.queue.js";
 import { SecurityAuditService } from "../services/security-audit.service.js";
+import { env } from "../env.js";
 
 const SISFE_BASE_URL = "https://sisfe.justiciasantafe.gov.ar";
 const APP_SISFE_PREFIX = "/api/sisfe";
@@ -162,7 +163,7 @@ async function authenticateProxyRequest(fastify: FastifyInstance, request: Fasti
     reply.setCookie("sisfe_proxy_jwt", token, {
       path: `${APP_SISFE_PREFIX}/proxy`,
       httpOnly: true,
-      secure: false, // local development
+      secure: env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 3600, // 1 hora
     });
