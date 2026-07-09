@@ -863,6 +863,25 @@ export default function DashboardBandeja() {
             {displayDate()} — {urgencyText}
           </Typography>
         </Box>
+
+        {/* Acción de sincronización siempre disponible; el banner de abajo solo aparece
+            cuando la sincronización está vieja (>24h) y actúa como recordatorio. */}
+        <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexShrink: 0, pt: 0.5 }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={0.7}
+            sx={{ display: { xs: "none", sm: "flex" } }}
+          >
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: frescura.tono, flexShrink: 0 }} />
+            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, whiteSpace: "nowrap" }}>
+              {frescura.texto}
+            </Typography>
+          </Stack>
+          <SisfeSyncButton size="small" lastSyncAt={lastSyncAt} sx={{ height: 32, minWidth: 0, px: 1.5 }}>
+            Sincronizar
+          </SisfeSyncButton>
+        </Stack>
       </Stack>
 
       <SisfeBanner lastSyncAt={lastSyncAt} frescura={frescura} />

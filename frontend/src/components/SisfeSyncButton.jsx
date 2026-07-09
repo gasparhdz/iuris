@@ -52,6 +52,11 @@ export default function SisfeSyncButton({
     },
     onError: (error) => {
       setSyncKickoff(false);
+      // Sin sesión guardada: encadenar el login interactivo sin pedir otro click.
+      if (error.response?.data?.error?.code === "SISFE_SESSION_REQUIRED") {
+        launchInteractiveLogin("Tu sesión de SISFE expiró.");
+        return;
+      }
       enqueueSnackbar(
         error.response?.data?.error?.message || "No se pudo iniciar la sincronización SISFE",
         { variant: "error" }
@@ -77,6 +82,14 @@ export default function SisfeSyncButton({
     }
   }, [syncKickoff, statusQuery.data?.syncStatus]);
 
+  const launchInteractiveLogin = (motivo) => {
+    enqueueSnackbar(
+      `${motivo} Se abrió una ventana de Chrome controlada para SISFE en tu computadora. Completá tus credenciales y resolvé el reCAPTCHA allí.`,
+      { variant: "info", autoHideDuration: 10000 }
+    );
+    interactiveMutation.mutate();
+  };
+
   const interactiveMutation = useMutation({
     mutationFn: startSisfeInteractiveLogin,
     onSuccess: () => {
@@ -99,12 +112,17 @@ export default function SisfeSyncButton({
     const current = statusQuery.data?.syncStatus;
     if (prevSyncStatus.current === "running" && (current === "done" || current === "error")) {
       invalidateSisfeQueries(queryClient, { casoId });
-      if (current === "error" && statusQuery.data?.syncMessage) {
+      if (current === "error" && statusQuery.data?.conectado === false) {
+        // La sesión SISFE expiró a mitad de la sincronización (el backend la borró):
+        // encadenar el re-login sin exigir un segundo click; al conectar se reintenta el sync.
+        launchInteractiveLogin("La sesión de SISFE expiró durante la sincronización.");
+      } else if (current === "error" && statusQuery.data?.syncMessage) {
         enqueueSnackbar(statusQuery.data.syncMessage, { variant: "error" });
       }
     }
     prevSyncStatus.current = current;
-  }, [queryClient, statusQuery.data?.syncStatus, statusQuery.data?.syncMessage, casoId, enqueueSnackbar]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- launchInteractiveLogin se recrea por render; el guard de prevSyncStatus evita re-disparos
+  }, [queryClient, statusQuery.data?.syncStatus, statusQuery.data?.syncMessage, statusQuery.data?.conectado, casoId, enqueueSnackbar]);
 
   const isRunning = statusQuery.data?.syncStatus === "running" || syncMutation.isPending || syncKickoff;
   const isConnecting = interactiveMutation.isPending;
@@ -113,11 +131,7 @@ export default function SisfeSyncButton({
 
   const handleClick = () => {
     if (!isConnected) {
-      enqueueSnackbar(
-        "Se abrió una ventana de Chrome controlada para SISFE en tu computadora. Completá tus credenciales y resolvé el reCAPTCHA allí.",
-        { variant: "info", autoHideDuration: 10000 }
-      );
-      interactiveMutation.mutate();
+      launchInteractiveLogin("No hay sesión activa de SISFE.");
       return;
     }
     syncMutation.mutate(casoId);
