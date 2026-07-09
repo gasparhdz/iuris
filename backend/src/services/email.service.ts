@@ -24,6 +24,22 @@ type EventoRecordatorio = {
   fechaInicio: Date;
 };
 
+type CuotaCobranzaItem = {
+  numero: number;
+  vencimiento: Date;
+  clienteNombre: string;
+  casoCaratula?: string | null;
+  montoPesos: string | null;
+  montoJus: string | null;
+  montoAplicado: string;
+  valorJusRef: string | null;
+};
+
+type CobranzaRecordatorio = {
+  vencidas: CuotaCobranzaItem[];
+  porVencer: CuotaCobranzaItem[];
+};
+
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   timeZone: "America/Argentina/Buenos_Aires",
   dateStyle: "medium",
@@ -92,6 +108,53 @@ function buildSubtareasSection(subtareas: TareaRecordatorio["subtareas"]) {
       </ul>
     </div>
   `;
+}
+
+function buildCuotasTableSection(title: string, cuotas: CuotaCobranzaItem[]) {
+  if (cuotas.length === 0) return "";
+
+  const rows = cuotas.map((cuota) => {
+    const saldo = formatSaldoCuotaEmail(cuota);
+    return `
+      <tr>
+        <td style="padding:8px 6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;">${escapeHtml(cuota.clienteNombre)}</td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;">${escapeHtml(cuota.casoCaratula ?? "—")}</td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;text-align:center;">${cuota.numero}</td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;">${escapeHtml(formatDate(cuota.vencimiento))}</td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:13px;font-weight:700;text-align:right;">${escapeHtml(saldo)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <div style="margin:0 0 24px;">
+      <h2 style="margin:0 0 10px;color:#111827;font-size:16px;line-height:1.3;">${escapeHtml(title)}</h2>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th style="padding:8px 6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:12px;text-align:left;">Cliente</th>
+            <th style="padding:8px 6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:12px;text-align:left;">Carátula</th>
+            <th style="padding:8px 6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:12px;text-align:center;">Cuota</th>
+            <th style="padding:8px 6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:12px;text-align:left;">Vencimiento</th>
+            <th style="padding:8px 6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:12px;text-align:right;">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function formatSaldoCuotaEmail(cuota: CuotaCobranzaItem) {
+  if (cuota.montoJus !== null && Number(cuota.montoJus) > 0) {
+    const valorRef = cuota.valorJusRef ? Number(cuota.valorJusRef) : 1;
+    const jusPagados = Number(cuota.montoAplicado) / valorRef;
+    const saldoJus = Math.max(0, Number(cuota.montoJus) - jusPagados);
+    return `${saldoJus.toFixed(4).replace(/\.?0+$/, "")} JUS`;
+  }
+
+  const saldo = Math.max(0, Number(cuota.montoPesos ?? 0) - Number(cuota.montoAplicado));
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(saldo);
 }
 
 function buildEmailTemplate(params: {
@@ -184,6 +247,36 @@ export class EmailService {
       from: env.SMTP_FROM ?? env.SMTP_USER,
       to: usuario.email,
       subject: "📅 Recordatorio de evento",
+      html,
+    });
+  }
+
+  static async sendRecordatorioCobranza(cobranza: CobranzaRecordatorio, usuario: UsuarioEmail) {
+    const total = cobranza.vencidas.length + cobranza.porVencer.length;
+    const intro = total === 1
+      ? "Tenés 1 cuota pendiente de cobro:"
+      : `Tenés ${total} cuotas pendientes de cobro:`;
+
+    const html = buildEmailTemplate({
+      title: "Recordatorio de cobranzas",
+      intro,
+      rows: [
+        buildDetailRow("Vencidas:", String(cobranza.vencidas.length)),
+        buildDetailRow("Por vencer:", String(cobranza.porVencer.length)),
+      ].join(""),
+      extraContent: [
+        buildCuotasTableSection("Cuotas vencidas", cobranza.vencidas),
+        buildCuotasTableSection("Cuotas por vencer", cobranza.porVencer),
+      ].join(""),
+      footerText: "Recordá contactar a tus clientes para gestionar el cobro. Revisá el detalle en Finanzas.",
+      buttonText: "Ir a Finanzas",
+      buttonUrl: `${env.APP_URL}/finanzas`,
+    });
+
+    await transporter.sendMail({
+      from: env.SMTP_FROM ?? env.SMTP_USER,
+      to: usuario.email,
+      subject: "💰 Recordatorio de cobranzas",
       html,
     });
   }

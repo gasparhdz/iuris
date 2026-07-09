@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { casos, eventos, subTareas, tareas, usuarios } from "../db/schema.js";
 import { EmailService } from "./email.service.js";
 import { PushService } from "./push.service.js";
+import { procesarRecordatoriosCobranza } from "./cobranza-notificaciones.service.js";
 
 let cronStarted = false;
 let isProcessing = false;
@@ -23,7 +24,13 @@ export function iniciarCronNotificaciones(logger: FastifyBaseLogger) {
     try {
       await procesarRecordatorios(logger);
     } catch (error) {
-      logger.error({ err: error }, "Error general en cron de notificaciones");
+      logger.error({ err: error }, "Error general en cron de recordatorios tareas/eventos");
+    }
+
+    try {
+      await procesarRecordatoriosCobranza(logger);
+    } catch (error) {
+      logger.error({ err: error }, "Error general en cron de recordatorios de cobranza");
     } finally {
       isProcessing = false;
     }

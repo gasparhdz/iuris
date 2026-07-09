@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, boolean, timestamp, integer, text, decimal, json, uniqueIndex, index, uuid, foreignKey, unique, check } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, boolean, timestamp, integer, text, decimal, json, uniqueIndex, index, uuid, foreignKey, unique, check, date } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
 // ==========================================
@@ -208,6 +208,28 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
 }, (table) => [
   uniqueIndex("push_subscriptions_endpoint_unico").on(table.endpoint),
   index("push_subscriptions_usuario_idx").on(table.usuarioId),
+]);
+
+export const preferenciasCobranza = pgTable("preferencias_cobranza", {
+  id: serial("id").primaryKey(),
+  usuarioId: integer("usuario_id").references(() => usuarios.id, { onDelete: "cascade" }).notNull(),
+  habilitado: boolean("habilitado").default(true).notNull(),
+  diasAnticipacion: integer("dias_anticipacion").default(3).notNull(),
+  porEmail: boolean("por_email").default(true).notNull(),
+  porPush: boolean("por_push").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("preferencias_cobranza_usuario_unique").on(table.usuarioId),
+]);
+
+export const recordatoriosCobranzaLog = pgTable("recordatorios_cobranza_log", {
+  id: serial("id").primaryKey(),
+  usuarioId: integer("usuario_id").references(() => usuarios.id, { onDelete: "cascade" }).notNull(),
+  fecha: date("fecha").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("recordatorios_cobranza_log_usuario_fecha_unique").on(table.usuarioId, table.fecha),
 ]);
 
 // ==========================================

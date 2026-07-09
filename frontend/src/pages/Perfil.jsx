@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import api from "../api/axios";
 import { disablePush, enablePush, getPushStatus } from "../api/push.api";
+import { getPreferenciasCobranza, updatePreferenciasCobranza } from "../api/notificaciones.api";
 import { useAuth } from "../auth/useAuth";
 import SisfeSyncPanel from "../components/SisfeSyncPanel";
 import {
   Alert,
   Box,
   Button,
+  Checkbox,
   CircularProgress,
   Divider,
+  FormControlLabel,
   InputAdornment,
   IconButton,
   Paper,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -26,6 +31,7 @@ import {
   NotificationsActiveOutlined,
   NotificationsOffOutlined,
   NotificationsOutlined,
+  PaymentsOutlined,
   SaveOutlined,
   SecurityOutlined,
   Visibility,
@@ -35,6 +41,7 @@ import {
 export default function Perfil() {
   const { user, updateUser } = useAuth();
   const { enqueueSnackbar } = useSnackbar();
+  const queryClient = useQueryClient();
   const [profile, setProfile] = useState({
     nombre: "",
     apellido: "",
@@ -59,6 +66,35 @@ export default function Perfil() {
     loading: true,
   });
   const [pushBusy, setPushBusy] = useState(false);
+  const [cobranzaPrefs, setCobranzaPrefs] = useState({
+    habilitado: true,
+    diasAnticipacion: 3,
+    porEmail: true,
+    porPush: true,
+  });
+
+  const cobranzaPrefsQuery = useQuery({
+    queryKey: ["notificaciones", "cobranza-preferencias"],
+    queryFn: getPreferenciasCobranza,
+  });
+
+  useEffect(() => {
+    if (cobranzaPrefsQuery.data?.data) {
+      setCobranzaPrefs(cobranzaPrefsQuery.data.data);
+    }
+  }, [cobranzaPrefsQuery.data]);
+
+  const saveCobranzaPrefsMutation = useMutation({
+    mutationFn: updatePreferenciasCobranza,
+    onSuccess: (response) => {
+      setCobranzaPrefs(response.data);
+      queryClient.setQueryData(["notificaciones", "cobranza-preferencias"], response);
+      enqueueSnackbar("Preferencias de cobranza guardadas", { variant: "success" });
+    },
+    onError: (error) => {
+      enqueueSnackbar(error.response?.data?.error?.message || "No se pudieron guardar las preferencias de cobranza", { variant: "error" });
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +208,14 @@ export default function Perfil() {
     } finally {
       setPushBusy(false);
     }
+  };
+
+  const handleCobranzaPrefsSubmit = (event) => {
+    event.preventDefault();
+    saveCobranzaPrefsMutation.mutate({
+      ...cobranzaPrefs,
+      diasAnticipacion: Number(cobranzaPrefs.diasAnticipacion),
+    });
   };
 
   const pushAlert = useMemo(() => {
@@ -389,6 +433,95 @@ export default function Perfil() {
                 {pushStatus.subscribed ? "Desactivar" : "Activar"}
               </Button>
             </Box>
+          </Stack>
+        </Paper>
+
+        <Paper
+          component="form"
+          onSubmit={handleCobranzaPrefsSubmit}
+          elevation={0}
+          sx={{ width: "100%", p: { xs: 2.5, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: "16px" }}
+        >
+          <Stack spacing={2.5}>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <PaymentsOutlined color="primary" />
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 850 }}>
+                  Recordatorios de cobranza
+                </Typography>
+                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                  Resumen diario de cuotas vencidas y por vencer de tus planes de pago.
+                </Typography>
+              </Box>
+            </Stack>
+
+            {cobranzaPrefsQuery.isLoading ? (
+              <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}>
+                <CircularProgress size={24} />
+              </Box>
+            ) : (
+              <>
+                <Alert severity="info" sx={{ borderRadius: "8px" }}>
+                  Recibirás un email y/o push por día con el detalle para que puedas avisar a tus clientes. El sistema no contacta al cliente directamente.
+                </Alert>
+
+                <FormControlLabel
+                  control={(
+                    <Switch
+                      checked={cobranzaPrefs.habilitado}
+                      onChange={(e) => setCobranzaPrefs((current) => ({ ...current, habilitado: e.target.checked }))}
+                    />
+                  )}
+                  label="Recordatorios habilitados"
+                />
+
+                <TextField
+                  size="small"
+                  label="Días de anticipación"
+                  type="number"
+                  value={cobranzaPrefs.diasAnticipacion}
+                  onChange={(e) => setCobranzaPrefs((current) => ({ ...current, diasAnticipacion: e.target.value }))}
+                  fullWidth
+                  disabled={!cobranzaPrefs.habilitado}
+                  inputProps={{ min: 0, max: 30 }}
+                  helperText="Cuotas que vencen dentro de este plazo se incluyen como 'por vencer'."
+                />
+
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  <FormControlLabel
+                    control={(
+                      <Checkbox
+                        checked={cobranzaPrefs.porEmail}
+                        onChange={(e) => setCobranzaPrefs((current) => ({ ...current, porEmail: e.target.checked }))}
+                        disabled={!cobranzaPrefs.habilitado}
+                      />
+                    )}
+                    label="Por email"
+                  />
+                  <FormControlLabel
+                    control={(
+                      <Checkbox
+                        checked={cobranzaPrefs.porPush}
+                        onChange={(e) => setCobranzaPrefs((current) => ({ ...current, porPush: e.target.checked }))}
+                        disabled={!cobranzaPrefs.habilitado}
+                      />
+                    )}
+                    label="Por push"
+                  />
+                </Stack>
+
+                <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    disabled={saveCobranzaPrefsMutation.isPending || cobranzaPrefsQuery.isLoading}
+                    startIcon={saveCobranzaPrefsMutation.isPending ? <CircularProgress size={18} /> : <SaveOutlined />}
+                  >
+                    Guardar preferencias
+                  </Button>
+                </Box>
+              </>
+            )}
           </Stack>
         </Paper>
 

@@ -20,6 +20,16 @@ export async function marcarNovedadesLeidas(movimientoIds) {
   return data;
 }
 
+export async function getPreferenciasCobranza() {
+  const { data } = await api.get("/notificaciones/cobranza/preferencias");
+  return data;
+}
+
+export async function updatePreferenciasCobranza(preferencias) {
+  const { data } = await api.put("/notificaciones/cobranza/preferencias", preferencias);
+  return data;
+}
+
 /**
  * Abre el canal SSE de notificaciones. Devuelve el EventSource para cerrarlo.
  * El token viaja por query param porque EventSource no admite headers.

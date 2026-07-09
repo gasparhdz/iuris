@@ -8,6 +8,7 @@ import { documentedResponses } from "../schemas/common.schema.js";
 import { AuthQueries } from "../db/queries/auth.queries.js";
 import { PushService } from "../services/push.service.js";
 import { env } from "../env.js";
+import { PreferenciasCobranzaQueries } from "../db/queries/preferencias-cobranza.queries.js";
 
 const NOVEDADES_LIMIT = 50;
 
@@ -74,6 +75,17 @@ const notificacionesPendientesResponseSchema = z.object({
     })),
     total: z.number(),
   }),
+});
+
+const preferenciasCobranzaSchema = z.object({
+  habilitado: z.boolean(),
+  diasAnticipacion: z.number().int().min(0).max(30),
+  porEmail: z.boolean(),
+  porPush: z.boolean(),
+});
+
+const preferenciasCobranzaResponseSchema = z.object({
+  data: preferenciasCobranzaSchema,
 });
 
 export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
@@ -347,5 +359,35 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
     await PushService.deleteSubscription(endpoint, request.authUser.id);
 
     return { data: { ok: true as const } };
+  });
+
+  server.get("/cobranza/preferencias", {
+    ...authConfig,
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Obtener preferencias de recordatorios de cobranza del usuario autenticado",
+      security: [{ bearerAuth: [] }],
+      response: documentedResponses(200, preferenciasCobranzaResponseSchema),
+    },
+  }, async (request) => {
+    const preferencias = await PreferenciasCobranzaQueries.findByUsuarioId(request.authUser.id);
+    return {
+      data: PreferenciasCobranzaQueries.resolveDefaults(preferencias),
+    };
+  });
+
+  server.put("/cobranza/preferencias", {
+    ...authConfig,
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Actualizar preferencias de recordatorios de cobranza del usuario autenticado",
+      security: [{ bearerAuth: [] }],
+      body: preferenciasCobranzaSchema,
+      response: documentedResponses(200, preferenciasCobranzaResponseSchema),
+    },
+  }, async (request) => {
+    const body = request.body as z.infer<typeof preferenciasCobranzaSchema>;
+    const saved = await PreferenciasCobranzaQueries.upsert(request.authUser.id, body);
+    return { data: saved };
   });
 };
