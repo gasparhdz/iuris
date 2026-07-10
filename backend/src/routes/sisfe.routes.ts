@@ -1,14 +1,27 @@
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { deleteSession, getStatus, isSyncRunning, saveSession, verifySesionActiva, iniciarLoginInteractivo, updateSyncStatus } from "../services/sisfe-session.service.js";
-import { enqueueSisfeSync } from "../queue/sisfe.queue.js";
+import {
+  deleteSession,
+  getStatus,
+  isSyncRunning,
+  mergeSessionCookie,
+  saveSession,
+  verifySesionActiva,
+  iniciarLoginInteractivo,
+  tryClaimSync,
+  updateSyncStatus,
+} from "../services/sisfe-session.service.js";
+import { enqueueSisfeSync, SisfeSyncAlreadyRunningError } from "../queue/sisfe.queue.js";
 import { SecurityAuditService } from "../services/security-audit.service.js";
 import { env } from "../env.js";
 
 const SISFE_BASE_URL = "https://sisfe.justiciasantafe.gov.ar";
 const APP_SISFE_PREFIX = "/api/sisfe";
+const PROXY_COOKIE_NAME = "sisfe_proxy_auth";
+const PROXY_COOKIE_MAX_AGE_SEC = 15 * 60; // token efímero de corta vida (15 min)
 
 type ProxyQuery = {
+  /** @deprecated No usar JWT de la app en querystring. */
   sisfeToken?: string;
   token?: string;
 };
@@ -29,13 +42,16 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.get("/auth/success", async (_request, reply) => {
+    const targetOrigin = JSON.stringify(env.APP_URL);
     return reply.type("text/html").send(`<!DOCTYPE html><html><body>
-<script>if(window.opener){window.opener.postMessage({event:'SISFE_LOGIN_OK'},'*')}window.close()</script>
+<script>if(window.opener){window.opener.postMessage({event:'SISFE_LOGIN_OK'},${targetOrigin})}window.close()</script>
 <p>Autenticación exitosa. Puede cerrar esta ventana.</p>
 </body></html>`);
   });
 
-  fastify.post("/auth/session", { preHandler: [fastify.authenticate] }, async (request: FastifyRequest<{ Body: ManualSessionBody }>, reply) => {
+  fastify.post("/auth/session", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "editar")],
+  }, async (request: FastifyRequest<{ Body: ManualSessionBody }>, reply) => {
     const parsed = manualSessionSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: { code: "INVALID_BODY", message: "Cookie inválida" } });
@@ -56,16 +72,22 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ data: { message: "Sesión SISFE guardada" } });
   });
 
-  fastify.delete("/auth/session", { preHandler: [fastify.authenticate] }, async (request, reply) => {
+  fastify.delete("/auth/session", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "editar")],
+  }, async (request, reply) => {
     await deleteSession(request.authUser.id);
     return reply.send({ data: { message: "Sesión SISFE eliminada" } });
   });
 
-  fastify.get("/auth/status", { preHandler: [fastify.authenticate] }, async (request) => {
+  fastify.get("/auth/status", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+  }, async (request) => {
     return { data: await getStatus(request.authUser.id) };
   });
 
-  fastify.post("/auth/interactive", { preHandler: [fastify.authenticate] }, async (request, reply) => {
+  fastify.post("/auth/interactive", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "editar")],
+  }, async (request, reply) => {
     try {
       await iniciarLoginInteractivo(request.authUser.id, request.authUser.estudioId);
       await SecurityAuditService.log({
@@ -87,15 +109,47 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post("/sync", { preHandler: [fastify.authenticate] }, async (request: FastifyRequest<{ Body?: { casoId?: number } }>, reply) => {
+  /** Emite cookie httpOnly del proxy (sin JWT en querystring). */
+  fastify.post("/proxy/bootstrap", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+  }, async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Token requerido" } });
+    }
+
+    reply.setCookie(PROXY_COOKIE_NAME, authHeader.slice("Bearer ".length).trim(), {
+      path: `${APP_SISFE_PREFIX}/proxy`,
+      httpOnly: true,
+      secure: env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: PROXY_COOKIE_MAX_AGE_SEC,
+    });
+
+    return reply.send({ data: { message: "Proxy autenticado", expiresIn: PROXY_COOKIE_MAX_AGE_SEC } });
+  });
+
+  fastify.post("/sync", {
+    preHandler: [
+      fastify.authenticate,
+      fastify.authorize("CASOS", "editar"),
+      fastify.authorize("ADJUNTOS", "crear"),
+    ],
+  }, async (request: FastifyRequest<{ Body?: { casoId?: number } }>, reply) => {
     const status = await getStatus(request.authUser.id);
     if (!status.conectado) {
       return reply.status(400).send({ error: { code: "SISFE_SESSION_REQUIRED", message: "No hay sesión activa. Conectate al SISFE primero." } });
     }
 
-    const running = await isSyncRunning(request.authUser.id);
-    if (running) {
-      return reply.status(409).send({ error: { code: "SISFE_SYNC_RUNNING", message: "Ya hay una sincronización en curso" } });
+    const claimed = await tryClaimSync(
+      request.authUser.id,
+      request.authUser.estudioId,
+      "Preparando sincronización...",
+    );
+    if (!claimed) {
+      return reply.status(409).send({
+        error: { code: "SISFE_SYNC_RUNNING", message: "Sincronización ya en curso" },
+      });
     }
 
     const { casoId } = request.body || {};
@@ -106,8 +160,6 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
       metadata: { scopedToCase: Boolean(casoId) },
     });
 
-    await updateSyncStatus(request.authUser.id, "running", 0, "Preparando sincronización...");
-
     try {
       const job = await enqueueSisfeSync({
         usuarioId: request.authUser.id,
@@ -117,6 +169,13 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
 
       return reply.status(202).send({ data: { message: "Sincronización encolada", jobId: job.id } });
     } catch (error) {
+      if (error instanceof SisfeSyncAlreadyRunningError) {
+        await updateSyncStatus(request.authUser.id, "idle", 0, "Sincronización ya en curso");
+        return reply.status(409).send({
+          error: { code: "SISFE_SYNC_RUNNING", message: "Sincronización ya en curso" },
+        });
+      }
+
       request.log.error(error, "No se pudo encolar sincronización SISFE");
       await updateSyncStatus(
         request.authUser.id,
@@ -133,7 +192,9 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.post("/sync/cancel", { preHandler: [fastify.authenticate] }, async (request, reply) => {
+  fastify.post("/sync/cancel", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "editar")],
+  }, async (request, reply) => {
     const running = await isSyncRunning(request.authUser.id);
     if (!running) {
       return reply.status(400).send({ error: { code: "SISFE_SYNC_NOT_RUNNING", message: "No hay ninguna sincronización activa para cancelar." } });
@@ -143,7 +204,9 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ data: { message: "Sincronización cancelada" } });
   });
 
-  fastify.get("/sync/status", { preHandler: [fastify.authenticate] }, async (request) => {
+  fastify.get("/sync/status", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+  }, async (request) => {
     return { data: await getStatus(request.authUser.id) };
   });
 
@@ -156,29 +219,30 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
 };
 
 async function authenticateProxyRequest(fastify: FastifyInstance, request: FastifyRequest<{ Querystring: ProxyQuery }>, reply: FastifyReply) {
-  let token = request.query.sisfeToken ?? request.query.token;
-
-  if (token) {
-    // Guardar token en cookie para autenticar sub-recursos (JS, CSS, imágenes)
-    reply.setCookie("sisfe_proxy_jwt", token, {
-      path: `${APP_SISFE_PREFIX}/proxy`,
-      httpOnly: true,
-      secure: env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 3600, // 1 hora
-    });
-  } else {
-    // Si no viene en la query, intentar leer de la cookie
-    token = request.cookies.sisfe_proxy_jwt;
-  }
-
-  if (token && !request.headers.authorization) {
-    request.headers.authorization = `Bearer ${token}`;
+  // El JWT de la app no viaja en URLs: solo Authorization header o cookie httpOnly del proxy.
+  const cookieToken = request.cookies[PROXY_COOKIE_NAME];
+  if (cookieToken && !request.headers.authorization) {
+    request.headers.authorization = `Bearer ${cookieToken}`;
   }
 
   try {
     await fastify.authenticate(request, reply);
-    return !reply.sent;
+    if (reply.sent) return false;
+
+    // Renovar cookie httpOnly de corta vida tras auth exitosa (header o cookie previa).
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice("Bearer ".length).trim();
+      reply.setCookie(PROXY_COOKIE_NAME, token, {
+        path: `${APP_SISFE_PREFIX}/proxy`,
+        httpOnly: true,
+        secure: env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: PROXY_COOKIE_MAX_AGE_SEC,
+      });
+    }
+
+    return true;
   } catch {
     if (!reply.sent) {
       reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Token inválido o expirado" } });
@@ -190,7 +254,7 @@ async function authenticateProxyRequest(fastify: FastifyInstance, request: Fasti
 async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, reply: FastifyReply) {
   const proxiedPath = getProxiedPath(request);
   const targetUrl = new URL(proxiedPath, SISFE_BASE_URL);
-  const token = request.query.sisfeToken ?? request.query.token;
+  // Limpiar restos legacy de querystring; el JWT de la app no debe reenviarse a SISFE.
   targetUrl.searchParams.delete("sisfeToken");
   targetUrl.searchParams.delete("token");
 
@@ -217,7 +281,7 @@ async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, 
   if (location) {
     return reply
       .status(response.status)
-      .header("location", rewriteLocation(location, token))
+      .header("location", rewriteLocation(location))
       .send();
   }
 
@@ -233,7 +297,7 @@ async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, 
 
   if (contentType.includes("text/html")) {
     const html = await response.text();
-    return reply.send(rewriteHtml(html, token));
+    return reply.send(rewriteHtml(html));
   }
 
   const arrayBuffer = await response.arrayBuffer();
@@ -276,38 +340,18 @@ async function persistCookieIfPresent(response: Response, request: FastifyReques
   const cookieValue = nameValue.slice(separatorIndex + 1).trim();
   if (!cookieName || !cookieValue) return;
 
-  await saveSession(request.authUser.id, request.authUser.estudioId, cookieName, cookieValue);
+  await mergeSessionCookie(request.authUser.id, request.authUser.estudioId, cookieName, cookieValue);
 }
 
-function rewriteLocation(location: string, token?: string) {
+function rewriteLocation(location: string) {
   const path = location.startsWith(SISFE_BASE_URL)
     ? location.slice(SISFE_BASE_URL.length)
     : location;
-  return appendProxyToken(`${APP_SISFE_PREFIX}/proxy${path.startsWith("/") ? path : `/${path}`}`, token);
+  return `${APP_SISFE_PREFIX}/proxy${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-function rewriteHtml(html: string, token?: string) {
-  const tokenParam = token ? `sisfeToken=${encodeURIComponent(token)}` : "";
-  const withProxy = html
+function rewriteHtml(html: string) {
+  return html
     .replaceAll(SISFE_BASE_URL, `${APP_SISFE_PREFIX}/proxy`)
     .replace(/\b(href|action|src)="\/(?!api\/sisfe\/proxy|api\/v1\/sisfe\/proxy)/g, (_match, attr: string) => `${attr}="${APP_SISFE_PREFIX}/proxy/`);
-
-  if (!tokenParam) return withProxy;
-
-  return withProxy.replace(/(href|action|src)="([^"]*\/api\/sisfe\/proxy[^"]*)"/g, (_match, attr: string, url: string) => {
-    return `${attr}="${appendQuery(url, tokenParam)}"`;
-  });
-}
-
-function appendProxyToken(url: string, token?: string) {
-  if (!token) return url;
-  return appendQuery(url, `sisfeToken=${encodeURIComponent(token)}`);
-}
-
-function appendQuery(url: string, query: string) {
-  if (url.includes("sisfeToken=")) return url;
-  const hashIndex = url.indexOf("#");
-  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
-  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
-  return `${base}${base.includes("?") ? "&" : "?"}${query}${hash}`;
 }

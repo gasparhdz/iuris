@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { SEL } from "./sisfe-selectors.js";
 import { logger } from "../utils/logger.js";
+import { parseFechaHoraSisfeArgentina } from "../utils/timezone.js";
 
 const log = logger.child({ module: "SISFE-Scraper" });
 
@@ -295,13 +296,7 @@ export interface ExpedienteDetalleSisfe {
 }
 
 export function parseFechaHoraSISFE(fechaHoraStr: string): Date | null {
-  const match = fechaHoraStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?$/);
-  if (!match) return null;
-
-  const [, dia, mes, anio, hora = "0", minuto = "0"] = match;
-  const parsed = new Date(Number(anio), Number(mes) - 1, Number(dia), Number(hora), Number(minuto), 0, 0);
-
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseFechaHoraSisfeArgentina(fechaHoraStr);
 }
 
 export function parseUbicacionActual(ubicacionStr: string): { ubicacion: string; fechaDesde: Date | null } {

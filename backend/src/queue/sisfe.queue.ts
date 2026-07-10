@@ -9,6 +9,13 @@ export type SisfeSyncJobData = {
   casoId?: number;
 };
 
+export class SisfeSyncAlreadyRunningError extends Error {
+  constructor() {
+    super("Sincronización ya en curso");
+    this.name = "SisfeSyncAlreadyRunningError";
+  }
+}
+
 export const sisfeRedisConnection = {
   host: env.REDIS_HOST,
   port: env.REDIS_PORT,
@@ -30,24 +37,38 @@ const syncJobOptions: JobsOptions = {
 };
 
 export async function enqueueSisfeSync(data: SisfeSyncJobData) {
-  const jobId = `sync-${data.usuarioId}`;
+  // Lock por estudio: un solo job activo/pendiente por estudio (BullMQ jobId = SET NX).
+  const jobId = `sync-estudio-${data.estudioId}`;
 
   const existing = await sisfeSyncQueue.getJob(jobId);
   if (existing) {
     const state = await existing.getState();
-    if (state === "completed" || state === "failed" || state === "waiting" || state === "delayed" || state === "active") {
+    // Nunca remover jobs activos/pendientes de otro claim.
+    if (state === "active" || state === "waiting" || state === "delayed" || state === "prioritized" || state === "waiting-children") {
+      throw new SisfeSyncAlreadyRunningError();
+    }
+    if (state === "completed" || state === "failed") {
       try {
         await existing.remove();
       } catch {
-        // Job zombie en estado "active" (proceso muerto) u otro bloqueo transitorio: seguir e intentar encolar.
+        // Job ya removido o bloqueado: BullMQ rechazará el add si el id sigue ocupado.
       }
     }
   }
 
-  return sisfeSyncQueue.add("sync", data, {
-    ...syncJobOptions,
-    jobId,
-  });
+  try {
+    return await sisfeSyncQueue.add("sync", data, {
+      ...syncJobOptions,
+      jobId,
+    });
+  } catch (error) {
+    // Carrera: otro claim encoló el mismo jobId entre el getJob y el add.
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Job with this id already exists|already exists/i.test(message)) {
+      throw new SisfeSyncAlreadyRunningError();
+    }
+    throw error;
+  }
 }
 
 export async function closeSisfeQueue(): Promise<void> {

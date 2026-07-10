@@ -21,12 +21,15 @@ const PROTECTED_RESOURCE_URL = /recaptcha|gstatic|googleapis|google\.com|justici
 const BLOCKED_THIRD_PARTY_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 const MAX_CONTEXTS_PER_BROWSER = Number(process.env.SISFE_BROWSER_MAX_CONTEXTS ?? 25);
 const IDLE_TTL_MS = Number(process.env.SISFE_BROWSER_IDLE_TTL_MS ?? 10 * 60 * 1000);
+/** Semáforo: tope de contextos Playwright activos concurrentes. */
+const MAX_CONCURRENT_CONTEXTS = Math.max(1, Number(process.env.SISFE_CONCURRENCY ?? 2));
 
 let sharedBrowser: Browser | null = null;
 let launchingBrowser: Promise<Browser> | null = null;
 let contextsSinceLaunch = 0;
 let activeContexts = 0;
 let idleCloseTimer: NodeJS.Timeout | null = null;
+const contextWaitQueue: Array<() => void> = [];
 
 function clearIdleCloseTimer(): void {
   if (idleCloseTimer) {
@@ -47,6 +50,28 @@ function scheduleIdleClose(): void {
     }
   }, IDLE_TTL_MS);
   idleCloseTimer.unref();
+}
+
+async function acquireContextSlot(): Promise<void> {
+  if (activeContexts < MAX_CONCURRENT_CONTEXTS) {
+    activeContexts++;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    contextWaitQueue.push(() => {
+      activeContexts++;
+      resolve();
+    });
+  });
+}
+
+function releaseContextSlot(): void {
+  activeContexts = Math.max(0, activeContexts - 1);
+  const next = contextWaitQueue.shift();
+  if (next) {
+    next();
+  }
 }
 
 async function getBrowser(): Promise<Browser> {
@@ -187,22 +212,25 @@ export async function withContext<T>(
   fn: (context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   clearIdleCloseTimer();
-  await rotateBrowserIfNeeded();
-  const browser = await getBrowser();
-  activeContexts++;
-  contextsSinceLaunch++;
-  const context = await crearContextoAutenticadoDesdeBrowser(browser, cookieName, cookieValue);
-
+  await acquireContextSlot();
   try {
-    return await fn(context);
-  } finally {
-    await context.close().catch((error) => {
-      log.warn({ err: error }, "No se pudo cerrar el contexto Playwright");
-    });
-    activeContexts = Math.max(0, activeContexts - 1);
-    if (contextsSinceLaunch >= MAX_CONTEXTS_PER_BROWSER) {
-      await rotateBrowserIfNeeded();
+    await rotateBrowserIfNeeded();
+    const browser = await getBrowser();
+    contextsSinceLaunch++;
+    const context = await crearContextoAutenticadoDesdeBrowser(browser, cookieName, cookieValue);
+
+    try {
+      return await fn(context);
+    } finally {
+      await context.close().catch((error) => {
+        log.warn({ err: error }, "No se pudo cerrar el contexto Playwright");
+      });
+      if (contextsSinceLaunch >= MAX_CONTEXTS_PER_BROWSER) {
+        await rotateBrowserIfNeeded();
+      }
     }
+  } finally {
+    releaseContextSlot();
     scheduleIdleClose();
   }
 }

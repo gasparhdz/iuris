@@ -32,7 +32,6 @@ import Terceros from "./pages/Terceros";
 import Expedientes from "./pages/Expedientes";
 import ExpedienteForm from "./pages/ExpedienteForm";
 import ExpedienteDetalle from "./pages/ExpedienteDetalle";
-import Plantillas from "./pages/Plantillas";
 import Equipo from "./pages/Equipo";
 import Tareas from "./pages/Tareas";
 import TareaForm from "./pages/TareaForm";
@@ -204,7 +203,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
                 <Route path="equipo" element={<Equipo />} />
                 <Route path="auditoria" element={<Auditoria />} />
                 <Route path="valores-jus" element={<ValoresJus />} />
-                  <Route path="plantillas" element={<Plantillas />} />
+                  {/* Plantillas: página en pages/Plantillas.jsx; oculta hasta desarrollo. */}
+                  <Route path="plantillas" element={<Navigate to="/" replace />} />
                 </Route>
 
                 {/* Redirección por defecto */}

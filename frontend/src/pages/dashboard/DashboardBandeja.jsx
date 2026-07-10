@@ -552,6 +552,54 @@ function SisfeBanner({ lastSyncAt, frescura }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
 
+  if (frescura.connectivityError) {
+    return (
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={1.5}
+        sx={{
+          mt: 2,
+          p: "11px 16px",
+          borderRadius: "11px",
+          bgcolor: isDark ? alpha(theme.palette.error.main, 0.1) : "#FDF2F2",
+          border: "1px solid",
+          borderColor: isDark ? alpha(theme.palette.error.main, 0.28) : "#F0C3C3",
+        }}
+      >
+        <Box
+          sx={{
+            width: 30,
+            height: 30,
+            borderRadius: "8px",
+            bgcolor: isDark ? alpha(theme.palette.error.main, 0.18) : "#F6CBCB",
+            display: "grid",
+            placeItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Sync sx={{ fontSize: 16, color: isDark ? theme.palette.error.light : "#B50A0A" }} />
+        </Box>
+        <Typography
+          sx={{
+            flex: 1,
+            fontWeight: 500,
+            fontSize: "0.78rem",
+            color: isDark ? theme.palette.text.secondary : "#7A2020",
+          }}
+        >
+          <Box
+            component="span"
+            sx={{ fontWeight: 700, color: isDark ? theme.palette.error.light : "#5E1414" }}
+          >
+            No se pudo consultar el estado de SISFE.
+          </Box>{" "}
+          Revisá tu conexión e intentá de nuevo.
+        </Typography>
+      </Stack>
+    );
+  }
+
   if (!frescura.stale) return null;
 
   const syncText = lastSyncAt

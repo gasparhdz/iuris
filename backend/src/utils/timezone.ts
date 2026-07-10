@@ -46,3 +46,35 @@ export function artLocalToUtc(ymd: string, hm: string): Date {
   const start = new Date(`${ymd}${ART_OFFSET_ISO}`);
   return new Date(start.getTime() + ((hours * 60 + minutes) * 60 + seconds) * 1000);
 }
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * Parsea fecha SISFE `DD/MM/YYYY` como medianoche en America/Argentina/Cordoba.
+ * Nunca usa el timezone del proceso Node.
+ */
+export function parseFechaSisfeArgentina(fechaStr: string): Date {
+  const [dia, mes, anio] = fechaStr.trim().split("/");
+  const y = Number(anio);
+  const m = Number(mes);
+  const d = Number(dia);
+  if (!y || !m || !d) return new Date();
+  const parsed = artLocalToUtc(`${y}-${pad2(m)}-${pad2(d)}`, "00:00");
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/**
+ * Parsea fecha/hora SISFE `DD/MM/YYYY` o `DD/MM/YYYY HH:mm` en America/Argentina/Cordoba.
+ */
+export function parseFechaHoraSisfeArgentina(fechaHoraStr: string): Date | null {
+  const match = fechaHoraStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2}))?$/);
+  if (!match) return null;
+
+  const [, dia, mes, anio, hora = "0", minuto = "0"] = match;
+  const ymd = `${anio}-${pad2(Number(mes))}-${pad2(Number(dia))}`;
+  const hm = `${pad2(Number(hora))}:${pad2(Number(minuto))}`;
+  const parsed = artLocalToUtc(ymd, hm);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}

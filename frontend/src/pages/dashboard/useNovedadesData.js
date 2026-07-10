@@ -8,15 +8,24 @@ import {
 } from "../../api/notificaciones.api";
 import { getSisfeStatus } from "../../api/sisfe.api";
 
-function frescuraSync(lastSyncAt) {
+function frescuraSync(lastSyncAt, sisfeError) {
+  if (sisfeError) {
+    return {
+      tono: "#EF5350",
+      texto: "No se pudo consultar el estado de SISFE",
+      stale: true,
+      horas: Infinity,
+      connectivityError: true,
+    };
+  }
   if (!lastSyncAt) {
-    return { tono: "#EF5350", texto: "Nunca sincronizado", stale: true, horas: Infinity };
+    return { tono: "#EF5350", texto: "Nunca sincronizado", stale: true, horas: Infinity, connectivityError: false };
   }
   const horas = dayjs().diff(dayjs(lastSyncAt), "hour");
   const texto = `Sincronizado ${formatDistanceToNow(new Date(lastSyncAt), { locale: es, addSuffix: true })}`;
-  if (horas < 24) return { tono: "#2EBD85", texto, stale: false, horas };
-  if (horas < 72) return { tono: "#FFA726", texto, stale: true, horas };
-  return { tono: "#EF5350", texto, stale: true, horas };
+  if (horas < 24) return { tono: "#2EBD85", texto, stale: false, horas, connectivityError: false };
+  if (horas < 72) return { tono: "#FFA726", texto, stale: true, horas, connectivityError: false };
+  return { tono: "#EF5350", texto, stale: true, horas, connectivityError: false };
 }
 
 export function useNovedadesData() {
@@ -36,8 +45,8 @@ export function useNovedadesData() {
 
   const novedades = novedadesQuery.data?.data?.novedades ?? [];
   const totalNovedades = novedadesQuery.data?.data?.total ?? 0;
-  const lastSyncAt = sisfeQuery.data?.lastSyncAt ?? null;
-  const frescura = frescuraSync(lastSyncAt);
+  const lastSyncAt = sisfeQuery.isError ? null : (sisfeQuery.data?.lastSyncAt ?? null);
+  const frescura = frescuraSync(lastSyncAt, sisfeQuery.isError ? sisfeQuery.error : null);
 
   const marcarTodo = useMutation({
     mutationFn: () => marcarNovedadesLeidas(),
@@ -52,6 +61,7 @@ export function useNovedadesData() {
   return {
     novedadesQuery,
     sisfeQuery,
+    sisfeError: sisfeQuery.isError ? sisfeQuery.error : null,
     novedades,
     totalNovedades,
     lastSyncAt,

@@ -4,6 +4,8 @@ import {
   endOfDayArgentina,
   isSameCalendarDayArgentina,
   isVencido,
+  parseFechaHoraSisfeArgentina,
+  parseFechaSisfeArgentina,
   startOfDayArgentina,
   toArgentinaDateString,
 } from "../utils/timezone.js";
@@ -44,5 +46,15 @@ describe("timezone Argentina/Cordoba", () => {
     const ahora = artLocalToUtc("2026-07-10", "10:00");
     expect(isVencido(recordatorio, ahora)).toBe(true);
     expect(isVencido(fechaLimite, ahora)).toBe(false);
+  });
+
+  it("parseFechaSisfeArgentina usa Cordoba, no el timezone del proceso", () => {
+    const parsed = parseFechaSisfeArgentina("10/07/2026");
+    expect(parsed.toISOString()).toBe("2026-07-10T03:00:00.000Z");
+  });
+
+  it("parseFechaHoraSisfeArgentina interpreta hora local ART", () => {
+    const parsed = parseFechaHoraSisfeArgentina("10/07/2026 00:30");
+    expect(parsed?.toISOString()).toBe("2026-07-10T03:30:00.000Z");
   });
 });

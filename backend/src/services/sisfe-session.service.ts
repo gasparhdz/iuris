@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { sisfeSessions } from "../db/schema.js";
 import { decrypt, encrypt } from "./sisfe-crypto.service.js";
@@ -15,6 +15,7 @@ export type SisfeSyncStats = {
   movimientosNuevos: number;
   noEncontradosEnSisfe: number;
   pdfsNoDescargados: number;
+  fallidos: number;
 };
 
 export async function saveSession(
@@ -165,6 +166,129 @@ export async function isSyncRunning(usuarioId: number) {
     .limit(1);
 
   return Boolean(row);
+}
+
+/** True si algún usuario del estudio tiene sync en curso. */
+export async function isSyncRunningForEstudio(estudioId: number) {
+  const [row] = await db
+    .select({ id: sisfeSessions.id })
+    .from(sisfeSessions)
+    .where(and(eq(sisfeSessions.estudioId, estudioId), eq(sisfeSessions.syncStatus, "running")))
+    .limit(1);
+
+  return Boolean(row);
+}
+
+/**
+ * Claim atómico compare-and-set: marca sync running solo si nadie del estudio
+ * está sincronizando. El perdedor debe responder 409.
+ */
+export async function tryClaimSync(
+  usuarioId: number,
+  estudioId: number,
+  message = "Preparando sincronización...",
+): Promise<boolean> {
+  const [row] = await db
+    .update(sisfeSessions)
+    .set({
+      syncStatus: "running",
+      syncProgress: 0,
+      syncMessage: message,
+      syncStats: null,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(sisfeSessions.usuarioId, usuarioId),
+      eq(sisfeSessions.estudioId, estudioId),
+      ne(sisfeSessions.syncStatus, "running"),
+      sql`NOT EXISTS (
+        SELECT 1 FROM sisfe_sessions AS s2
+        WHERE s2.estudio_id = ${estudioId}
+          AND s2.sync_status = 'running'
+      )`,
+    ))
+    .returning({ id: sisfeSessions.id });
+
+  return Boolean(row);
+}
+
+/**
+ * Fusiona una cookie Set-Cookie del proxy dentro del payload de sesión existente
+ * sin pisar currentUser/JWT ni el resto del estado.
+ */
+export async function mergeSessionCookie(
+  usuarioId: number,
+  estudioId: number,
+  cookieName: string,
+  cookieValue: string,
+): Promise<void> {
+  const sesion = await getSession(usuarioId, estudioId);
+  if (!sesion) {
+    await saveSession(usuarioId, estudioId, cookieName, cookieValue);
+    return;
+  }
+
+  let mergedValue = cookieValue;
+  let mergedName = cookieName;
+
+  try {
+    const existing = JSON.parse(sesion.cookieValue) as {
+      currentUser?: string;
+      _grecaptcha?: string;
+      cookies?: Array<{ name: string; value: string; [key: string]: unknown }>;
+    };
+
+    if (existing && typeof existing === "object") {
+      const cookies = Array.isArray(existing.cookies) ? [...existing.cookies] : [];
+      const idx = cookies.findIndex((c) => c.name === cookieName);
+      const cookieEntry = {
+        name: cookieName,
+        value: cookieValue,
+        domain: "sisfe.justiciasantafe.gov.ar",
+        path: "/",
+      };
+      if (idx >= 0) {
+        cookies[idx] = { ...cookies[idx], ...cookieEntry };
+      } else {
+        cookies.push(cookieEntry);
+      }
+
+      mergedValue = JSON.stringify({
+        ...existing,
+        cookies,
+      });
+      mergedName = sesion.cookieName || cookieName;
+    }
+  } catch {
+    // Payload no-JSON: conservar el valor previo si era JSON con JWT.
+    try {
+      const existing = JSON.parse(sesion.cookieValue) as { currentUser?: string; cookies?: unknown[] };
+      if (existing?.currentUser) {
+        const cookies = Array.isArray(existing.cookies) ? [...existing.cookies] : [];
+        cookies.push({
+          name: cookieName,
+          value: cookieValue,
+          domain: "sisfe.justiciasantafe.gov.ar",
+          path: "/",
+        });
+        mergedValue = JSON.stringify({ ...existing, cookies });
+        mergedName = sesion.cookieName;
+      }
+    } catch {
+      // Sin payload estructurado previo: guardar solo la cookie nueva.
+    }
+  }
+
+  const encrypted = encrypt(mergedValue, { usuarioId, estudioId });
+  await db
+    .update(sisfeSessions)
+    .set({
+      cookieName: mergedName,
+      sessionCookieEncriptada: encrypted,
+      lastVerifiedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(sisfeSessions.usuarioId, usuarioId), eq(sisfeSessions.estudioId, estudioId)));
 }
 
 export async function verifySesionActiva(cookieName: string, cookieValue: string): Promise<boolean> {

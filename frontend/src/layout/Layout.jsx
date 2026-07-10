@@ -40,7 +40,6 @@ import {
   Close as CloseIcon,
   Dashboard as DashboardIcon,
   DarkModeOutlined,
-  Description as DescriptionIcon,
   ExpandMore as ExpandMoreIcon,
   FolderSpecial as FolderIcon,
   Group as GroupIcon,
@@ -104,7 +103,7 @@ const allMenuItems = [
   { text: "Reportes", icon: <BarChartIcon />, path: "/reportes", modulos: ["HONORARIOS", "GASTOS", "INGRESOS"] },
   { text: "Mi Equipo", icon: <GroupIcon />, path: "/equipo", modulo: "EQUIPO" },
   { text: "Auditoría", icon: <AuditoriaIcon />, path: "/auditoria", roles: ["DIRECTOR"] },
-  { text: "Plantillas", icon: <DescriptionIcon />, path: "/plantillas", modulo: "PLANTILLAS" },
+  // Plantillas: oculto hasta que el módulo esté desarrollado (página en pages/Plantillas.jsx).
 ];
 
 const emptySearchResults = {
