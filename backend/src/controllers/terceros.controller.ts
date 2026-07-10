@@ -1,13 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { TercerosService } from "../services/terceros.service.js";
-import type { CreateTerceroInput, UpdateTerceroInput } from "../schemas/terceros.schema.js";
+import type { CreateTerceroInput, TerceroListQuery, UpdateTerceroInput } from "../schemas/terceros.schema.js";
 
 export class TercerosController {
-  static async findAll(request: FastifyRequest<{ Querystring: { page?: number; limit?: number; search?: string } }>, reply: FastifyReply) {
+  static async findAll(request: FastifyRequest<{ Querystring: TerceroListQuery }>, reply: FastifyReply) {
     try {
-      const page = request.query.page ?? 1;
-      const limit = request.query.limit ?? 20;
-      const result = await TercerosService.findAll(request.authUser.estudioId, page, limit, request.query.search);
+      const result = await TercerosService.findAll(request.authUser.estudioId, request.query);
       return reply.send(result);
     } catch (error) {
       throw error;
@@ -54,6 +52,14 @@ export class TercerosController {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "TERCERO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Tercero no encontrado" } });
+      }
+      if (error instanceof Error && error.message === "TERCERO_HAS_ACTIVE_PARTICIPACIONES") {
+        return reply.status(409).send({
+          error: {
+            code: "CONFLICT",
+            message: "No se puede eliminar: el tercero participa en expedientes",
+          },
+        });
       }
       throw error;
     }

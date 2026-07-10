@@ -72,7 +72,7 @@ export default function Terceros() {
   const [editing, setEditing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const [orderBy, setOrderBy] = useState("contacto");
+  const [orderBy, setOrderBy] = useState("nombre");
   const [order, setOrder] = useState("asc");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -83,7 +83,9 @@ export default function Terceros() {
     page: page + 1,
     limit: rowsPerPage,
     search: debouncedSearch.trim() || undefined,
-  }), [page, rowsPerPage, debouncedSearch]);
+    orderBy,
+    order,
+  }), [page, rowsPerPage, debouncedSearch, orderBy, order]);
 
   const tercerosQuery = useQuery({
     queryKey: ["terceros", "list", listParams],
@@ -118,8 +120,15 @@ export default function Terceros() {
     staleTime: 300_000,
   });
 
-  const tipoFisicaId = useMemo(() => (tipoPersonaQuery.data ?? []).find((p) => /FISICA|HUMANA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id ?? 1, [tipoPersonaQuery.data]);
-  const tipoJuridicaId = useMemo(() => (tipoPersonaQuery.data ?? []).find((p) => /JURIDICA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id ?? 2, [tipoPersonaQuery.data]);
+  const tipoFisicaId = useMemo(
+    () => (tipoPersonaQuery.data ?? []).find((p) => /FISICA|HUMANA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id,
+    [tipoPersonaQuery.data],
+  );
+  const tipoJuridicaId = useMemo(
+    () => (tipoPersonaQuery.data ?? []).find((p) => /JURIDICA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id,
+    [tipoPersonaQuery.data],
+  );
+  const tipoPersonaReady = Boolean(tipoFisicaId && tipoJuridicaId);
 
   useEffect(() => {
     if (!open) return;
@@ -150,26 +159,7 @@ export default function Terceros() {
 
   const terceros = useMemo(() => tercerosQuery.data?.items ?? [], [tercerosQuery.data?.items]);
   const totalCount = tercerosQuery.data?.meta?.total ?? 0;
-
-  const sorted = useMemo(() => {
-    const getValue = (item) => {
-      if (orderBy === "contacto") return label(item);
-      if (orderBy === "identificacion") return item.cuit || item.dni || "";
-      if (orderBy === "email") return item.email || "";
-      if (orderBy === "telefono") return item.telefono || "";
-      if (orderBy === "observaciones") return item.observaciones || "";
-      return "";
-    };
-
-    return [...terceros].sort((a, b) => {
-      const valA = getValue(a);
-      const valB = getValue(b);
-      const result = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: "base" });
-      return order === "desc" ? -result : result;
-    });
-  }, [terceros, order, orderBy]);
-
-  const displayRows = sorted;
+  const displayRows = terceros;
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
@@ -354,7 +344,7 @@ export default function Terceros() {
             >
               Cancelar
             </Button>
-            <Button variant="contained" startIcon={!saveMutation.isPending ? <Save /> : null} onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+            <Button variant="contained" startIcon={!saveMutation.isPending ? <Save /> : null} onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !tipoPersonaReady} sx={{ borderRadius: "10px", fontWeight: 900 }}>
               {saveMutation.isPending ? "Guardando..." : editing ? "Guardar Cambios" : "Crear Tercero"}
             </Button>
           </Stack>
@@ -364,7 +354,19 @@ export default function Terceros() {
       <Paper elevation={0} sx={{ ...panelSx, p: 2, borderRadius: "16px", mb: 2.5 }}>
         <TextField fullWidth size="small" placeholder="Buscar por nombre, email o teléfono..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} InputProps={{ startAdornment: <Search sx={{ mr: 1, color: "text.disabled" }} /> }} />
       </Paper>
-      {totalCount === 0 && !tercerosQuery.isFetching ? (
+      {tercerosQuery.isError ? (
+        <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            No se pudieron cargar los terceros
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5, mb: 2 }}>
+            Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+          </Typography>
+          <Button variant="contained" onClick={() => tercerosQuery.refetch()} sx={{ fontWeight: 800 }}>
+            Reintentar
+          </Button>
+        </Paper>
+      ) : totalCount === 0 && !tercerosQuery.isFetching ? (
         <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
           <Person sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
@@ -463,14 +465,14 @@ export default function Terceros() {
               <TableHead>
                 <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
                   {[
-                    { id: "contacto", label: "Nombre / Razón Social" },
-                    { id: "identificacion", label: "Identificación" },
-                    { id: "email", label: "Email" },
-                    { id: "telefono", label: "Teléfono" },
-                    { id: "observaciones", label: "Observaciones" },
-                    { id: "acciones", label: "Acciones", align: "right" },
+                    { id: "nombre", label: "Nombre / Razón Social", sortable: true },
+                    { id: "dni", label: "Identificación", sortable: true },
+                    { id: "email", label: "Email", sortable: false },
+                    { id: "telefono", label: "Teléfono", sortable: false },
+                    { id: "observaciones", label: "Observaciones", sortable: false },
+                    { id: "acciones", label: "Acciones", align: "right", sortable: false },
                   ].map((column) => {
-                    const isSortable = column.id !== "acciones";
+                    const isSortable = column.sortable;
                     return (
                       <TableCell
                         key={column.id}

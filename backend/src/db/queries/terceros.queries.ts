@@ -1,26 +1,53 @@
-import { and, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../index.js";
-import { terceros } from "../schema.js";
+import { casos, participantesCaso, terceros } from "../schema.js";
 
 type NewTercero = typeof terceros.$inferInsert;
 
+type TerceroListFilters = {
+  search?: string;
+  orderBy?: "nombre" | "dni" | "tipo";
+  order?: "asc" | "desc";
+};
+
 export class TercerosQueries {
-  static async findAll(estudioId: number, limit: number, offset: number, search?: string) {
+  static async findAll(
+    estudioId: number,
+    limit: number,
+    offset: number,
+    filters: TerceroListFilters = {},
+  ) {
+    const { search, orderBy = "nombre", order = "asc" } = filters;
     let whereCondition = and(eq(terceros.estudioId, estudioId), isNull(terceros.deletedAt));
 
     if (search) {
+      const term = `%${search}%`;
       whereCondition = and(
         whereCondition,
         or(
-          ilike(terceros.nombre, `%${search}%`),
-          ilike(terceros.apellido, `%${search}%`),
-          ilike(terceros.razonSocial, `%${search}%`),
-          ilike(terceros.dni, `%${search}%`),
-          ilike(terceros.cuit, `%${search}%`),
-          ilike(terceros.email, `%${search}%`)
+          ilike(terceros.nombre, term),
+          ilike(terceros.apellido, term),
+          ilike(terceros.razonSocial, term),
+          ilike(terceros.dni, term),
+          ilike(terceros.cuit, term),
+          ilike(terceros.email, term),
+          ilike(terceros.telefono, term),
         )
       ) ?? whereCondition;
     }
+
+    const sortDir = order === "desc" ? desc : asc;
+    const orderExpr = (() => {
+      switch (orderBy) {
+        case "dni":
+          return sortDir(sql`COALESCE(${terceros.cuit}, ${terceros.dni}, '')`);
+        case "tipo":
+          return sortDir(terceros.tipoPersonaId);
+        case "nombre":
+        default:
+          return sortDir(sql`COALESCE(${terceros.razonSocial}, CONCAT_WS(' ', ${terceros.nombre}, ${terceros.apellido}), '')`);
+      }
+    })();
 
     const data = await db
       .select()
@@ -28,7 +55,7 @@ export class TercerosQueries {
       .where(whereCondition)
       .limit(limit)
       .offset(offset)
-      .orderBy(terceros.id);
+      .orderBy(orderExpr, asc(terceros.id));
 
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
@@ -48,6 +75,21 @@ export class TercerosQueries {
     return tercero ?? null;
   }
 
+  static async countParticipacionesActivas(terceroId: number, estudioId: number) {
+    const [{ count }] = await db
+      .select({ count: sql`count(*)`.mapWith(Number) })
+      .from(participantesCaso)
+      .innerJoin(casos, eq(participantesCaso.casoId, casos.id))
+      .where(and(
+        eq(participantesCaso.terceroId, terceroId),
+        eq(participantesCaso.estudioId, estudioId),
+        eq(casos.estudioId, estudioId),
+        isNull(casos.deletedAt),
+      ));
+
+    return count;
+  }
+
   static async insert(values: NewTercero) {
     const [row] = await db.insert(terceros).values(values).returning();
     return row;
@@ -57,7 +99,7 @@ export class TercerosQueries {
     const [row] = await db
       .update(terceros)
       .set(values)
-      .where(and(eq(terceros.id, id), eq(terceros.estudioId, estudioId)))
+      .where(and(eq(terceros.id, id), eq(terceros.estudioId, estudioId), isNull(terceros.deletedAt)))
       .returning();
     return row;
   }

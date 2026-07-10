@@ -69,7 +69,7 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
     ...can("eliminar"),
     schema: {
       tags: ["Terceros"],
-      summary: "Eliminar un tercero (Físico)",
+      summary: "Baja lógica (soft delete) de un tercero",
       security: [{ bearerAuth: [] }],
       params: idParamSchema,
       response: documentedResponses(200, successMessageResponseSchema),
