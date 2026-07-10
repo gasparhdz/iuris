@@ -27,6 +27,13 @@ import BrandLogo from "../components/BrandLogo";
 
 const MotionDiv = motion.div;
 
+/** Ruta interna segura para post-login (evita open redirect). */
+function resolveInternalNext(raw, defaultNext) {
+  if (!raw || raw === "/") return defaultNext;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return defaultNext;
+  return raw;
+}
+
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -57,7 +64,7 @@ export default function Login() {
       );
 
       const defaultNext = isPlatformAdmin ? "/admin" : "/";
-      const next = searchParams.get("next") === "/" ? defaultNext : (searchParams.get("next") || defaultNext);
+      const next = resolveInternalNext(searchParams.get("next"), defaultNext);
       navigate(next, { replace: true });
     } catch (err) {
       setError(

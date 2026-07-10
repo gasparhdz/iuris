@@ -1,8 +1,9 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./useAuth";
 
 export default function RequireAuth({ children }) {
   const { ready, hasToken } = useAuth();
+  const location = useLocation();
 
   if (!ready) {
     // Pantalla de carga mínima hasta validar token
@@ -10,7 +11,8 @@ export default function RequireAuth({ children }) {
   }
 
   if (!hasToken) {
-    return <Navigate to="/login" replace />;
+    const next = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?next=${next}`} replace />;
   }
 
   return children;

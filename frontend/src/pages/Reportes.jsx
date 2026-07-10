@@ -550,8 +550,19 @@ export default function Reportes() {
   const ccResumenQuery = useQuery({
     queryKey: ["clientes", "cuentas-corrientes"],
     queryFn: async () => {
-      const { data } = await api.get("/clientes/cuentas-corrientes", { params: { limit: 10000 } });
-      return data?.data?.items ?? data?.data ?? [];
+      // El backend limita a 100 por página: paginamos hasta traer todo.
+      const pageSize = 100;
+      const items = [];
+      let pageNum = 1;
+      for (;;) {
+        const { data } = await api.get("/clientes/cuentas-corrientes", { params: { limit: pageSize, page: pageNum } });
+        const page = data?.data?.items ?? data?.data ?? [];
+        if (!Array.isArray(page) || page.length === 0) break;
+        items.push(...page);
+        if (page.length < pageSize || items.length >= 10000) break;
+        pageNum += 1;
+      }
+      return items;
     },
     staleTime: 60_000,
   });

@@ -59,7 +59,10 @@ export function useNovedadesData() {
   const frescura = frescuraSync(lastSyncAt, sisfeQuery.isError ? sisfeQuery.error : null);
 
   const marcarTodo = useMutation({
-    mutationFn: (ids) => marcarNovedadesLeidas(ids),
+    mutationFn: (ids) => {
+      const movimientoIds = Array.isArray(ids) ? ids.filter((id) => Number.isFinite(id) && id > 0) : [];
+      return marcarNovedadesLeidas(movimientoIds);
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] }),
   });
 
