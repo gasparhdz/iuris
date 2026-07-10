@@ -1,0 +1,12 @@
+---
+description: Tras crear un commit, pushear siempre a origin
+alwaysApply: true
+---
+
+# Git: push tras commit
+
+Cuando el usuario pida crear un commit (o se creen commits en la sesión), **después de cada commit exitoso** ejecutar `git push` (o `git push -u origin HEAD` si la rama no tiene upstream).
+
+- No esperar a que el usuario diga "pusheá".
+- No pushear si el commit falló.
+- Seguir las demás reglas de seguridad de git (sin force push a main salvo pedido explícito).
