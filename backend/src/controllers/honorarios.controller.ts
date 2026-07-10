@@ -90,5 +90,25 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
     return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
   }
 
+  if (error.message === "OBLIGADO_REQUIRED") {
+    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: "Debe indicar el obligado al pago" } });
+  }
+
+  if (error.message === "OBLIGADO_INVALID") {
+    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: "Solo puede indicar un obligado al pago (cliente o tercero)" } });
+  }
+
+  if (error.message === "OBLIGADO_NOT_FOUND") {
+    return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Obligado al pago no encontrado" } });
+  }
+
+  if (error.message === "OBLIGADO_NOT_IN_CASO") {
+    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: "El obligado al pago no pertenece al expediente o cliente indicado" } });
+  }
+
+  if (error.message === "OBLIGADO_REQUIRES_CASO") {
+    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: "Un tercero solo puede ser obligado si hay expediente" } });
+  }
+
   throw error;
 }

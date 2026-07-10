@@ -2,6 +2,7 @@ import { CasosQueries } from "../db/queries/casos.queries.js";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { HonorariosQueries } from "../db/queries/honorarios.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
+import { TercerosQueries } from "../db/queries/terceros.queries.js";
 import { serializeDates } from "../utils/serialize.js";
 import { ValorJusService } from "./valorjus.service.js";
 import { PlanesService } from "./planes.service.js";
@@ -47,6 +48,14 @@ export class HonorariosService {
   static async create(estudioId: number, userId: number, data: CreateHonorarioInput) {
     await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
+    await this.ensureObligado(
+      estudioId,
+      data.casoId ?? null,
+      data.clienteId ?? null,
+      data.obligadoClienteId ?? null,
+      data.obligadoTerceroId ?? null,
+      true,
+    );
 
     const fechaRegulacion = new Date(data.fechaRegulacion);
     const valorJusRef = await this.resolveValorJusRef(estudioId, fechaRegulacion, data.politicaJusId, data.valorJusRef, data.jus, data.montoPesos);
@@ -58,6 +67,8 @@ export class HonorariosService {
       casoId: data.casoId ?? null,
       conceptoId: data.conceptoId,
       parteId: data.parteId,
+      obligadoClienteId: data.obligadoClienteId ?? null,
+      obligadoTerceroId: data.obligadoTerceroId ?? null,
       jus: data.jus !== undefined && data.jus !== null ? data.jus.toFixed(4) : null,
       montoPesos: data.montoPesos !== undefined && data.montoPesos !== null ? data.montoPesos.toFixed(2) : null,
       monedaId: data.monedaId ?? null,
@@ -90,6 +101,26 @@ export class HonorariosService {
     if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
+    const nextCasoId = data.casoId !== undefined ? data.casoId : current.casoId;
+    const nextClienteId = data.clienteId !== undefined ? data.clienteId : current.clienteId;
+    const nextObligadoClienteId = data.obligadoClienteId !== undefined
+      ? data.obligadoClienteId
+      : (data.obligadoTerceroId !== undefined ? null : current.obligadoClienteId);
+    const nextObligadoTerceroId = data.obligadoTerceroId !== undefined
+      ? data.obligadoTerceroId
+      : (data.obligadoClienteId !== undefined ? null : current.obligadoTerceroId);
+
+    if (data.obligadoClienteId !== undefined || data.obligadoTerceroId !== undefined || data.casoId !== undefined || data.clienteId !== undefined) {
+      await this.ensureObligado(
+        estudioId,
+        nextCasoId,
+        nextClienteId,
+        nextObligadoClienteId,
+        nextObligadoTerceroId,
+        false,
+      );
+    }
+
     const fechaRegulacion = data.fechaRegulacion ? new Date(data.fechaRegulacion) : current.fechaRegulacion;
     const politicaJusId = data.politicaJusId !== undefined ? data.politicaJusId : current.politicaJusId;
     const jusForSnapshot = data.jus ?? (current.jus !== null ? Number(current.jus) : null);
@@ -113,6 +144,10 @@ export class HonorariosService {
     if (data.casoId !== undefined) updateData.casoId = data.casoId;
     if (data.conceptoId !== undefined) updateData.conceptoId = data.conceptoId;
     if (data.parteId !== undefined) updateData.parteId = data.parteId;
+    if (data.obligadoClienteId !== undefined || data.obligadoTerceroId !== undefined) {
+      updateData.obligadoClienteId = nextObligadoClienteId;
+      updateData.obligadoTerceroId = nextObligadoTerceroId;
+    }
     if (data.jus !== undefined) updateData.jus = data.jus !== null ? data.jus.toFixed(4) : null;
     if (data.montoPesos !== undefined) updateData.montoPesos = data.montoPesos !== null ? data.montoPesos.toFixed(2) : null;
     if (data.monedaId !== undefined) updateData.monedaId = data.monedaId;
@@ -248,6 +283,44 @@ export class HonorariosService {
     if (casoId) {
       const caso = await CasosQueries.findById(casoId, estudioId);
       if (!caso) throw new Error("CASO_NOT_FOUND");
+    }
+  }
+
+  private static async ensureObligado(
+    estudioId: number,
+    casoId: number | null,
+    clienteId: number | null,
+    obligadoClienteId: number | null,
+    obligadoTerceroId: number | null,
+    required: boolean,
+  ) {
+    if (obligadoClienteId && obligadoTerceroId) throw new Error("OBLIGADO_INVALID");
+    if (!obligadoClienteId && !obligadoTerceroId) {
+      if (required) throw new Error("OBLIGADO_REQUIRED");
+      return;
+    }
+
+    if (obligadoClienteId) {
+      const cliente = await ClientesQueries.findById(obligadoClienteId, estudioId);
+      if (!cliente) throw new Error("OBLIGADO_NOT_FOUND");
+
+      if (casoId) {
+        const caso = await CasosQueries.findById(casoId, estudioId);
+        if (!caso) throw new Error("CASO_NOT_FOUND");
+        if (caso.clienteId !== obligadoClienteId) throw new Error("OBLIGADO_NOT_IN_CASO");
+      } else if (clienteId && obligadoClienteId !== clienteId) {
+        throw new Error("OBLIGADO_NOT_IN_CASO");
+      }
+      return;
+    }
+
+    if (obligadoTerceroId) {
+      const tercero = await TercerosQueries.findById(obligadoTerceroId, estudioId);
+      if (!tercero) throw new Error("OBLIGADO_NOT_FOUND");
+      if (!casoId) throw new Error("OBLIGADO_REQUIRES_CASO");
+      const participantes = await CasosQueries.findParticipantes(casoId, estudioId);
+      const match = participantes.find((p) => p.terceroId === obligadoTerceroId);
+      if (!match) throw new Error("OBLIGADO_NOT_IN_CASO");
     }
   }
 

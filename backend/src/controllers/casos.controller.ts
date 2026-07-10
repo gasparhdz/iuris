@@ -20,9 +20,6 @@ export class CasosController {
       if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
       }
-      if (error instanceof Error && error.message === "CASO_HAS_LIVE_INGRESOS") {
-        return reply.status(409).send({ error: { code: "CONFLICT", message: "No se puede eliminar un expediente con ingresos activos" } });
-      }
       throw error;
     }
   }
@@ -31,7 +28,12 @@ export class CasosController {
     try {
       const caso = await CasosService.create(request.authUser.estudioId, request.authUser.id, request.body);
       return reply.status(201).send({ data: caso });
-    } catch (error) {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "CLIENTE_NOT_FOUND") {
+        return reply.status(400).send({
+          error: { code: "INVALID_INPUT", message: "El cliente no existe o fue eliminado" },
+        });
+      }
       throw error;
     }
   }
@@ -43,6 +45,11 @@ export class CasosController {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
+      }
+      if (error instanceof Error && error.message === "CLIENTE_NOT_FOUND") {
+        return reply.status(400).send({
+          error: { code: "INVALID_INPUT", message: "El cliente no existe o fue eliminado" },
+        });
       }
       throw error;
     }
@@ -56,6 +63,14 @@ export class CasosController {
       if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
       }
+      if (error instanceof Error && error.message === "CASO_HAS_LIVE_INGRESOS") {
+        return reply.status(409).send({
+          error: {
+            code: "CONFLICT",
+            message: "No se puede eliminar: el expediente tiene ingresos registrados",
+          },
+        });
+      }
       throw error;
     }
   }
@@ -68,6 +83,11 @@ export class CasosController {
       if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
       }
+      if (error instanceof Error && error.message === "TERCERO_NOT_FOUND") {
+        return reply.status(400).send({
+          error: { code: "INVALID_INPUT", message: "El tercero no existe o fue eliminado" },
+        });
+      }
       throw error;
     }
   }
@@ -75,6 +95,18 @@ export class CasosController {
   static async getParticipantes(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
     try {
       const data = await CasosService.getParticipantes(request.params.id, request.authUser.estudioId);
+      return reply.send({ data });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
+      }
+      throw error;
+    }
+  }
+
+  static async getParticipantesElegibles(request: FastifyRequest<{ Params: { id: number } }>, reply: FastifyReply) {
+    try {
+      const data = await CasosService.getParticipantesElegibles(request.params.id, request.authUser.estudioId);
       return reply.send({ data });
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
@@ -103,6 +135,11 @@ export class CasosController {
     } catch (error: unknown) {
       if (error instanceof Error && (error.message === "CASO_NOT_FOUND" || error.message === "PARTICIPANTE_NOT_FOUND")) {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "No encontrado" } });
+      }
+      if (error instanceof Error && error.message === "TERCERO_NOT_FOUND") {
+        return reply.status(400).send({
+          error: { code: "INVALID_INPUT", message: "El tercero no existe o fue eliminado" },
+        });
       }
       throw error;
     }

@@ -59,6 +59,8 @@ import {
 } from "@mui/icons-material";
 import {
   dateInputFromIso,
+  deudorKeyFromItem,
+  deudorNombreFromItem,
   ESTADO_HONORARIO_UI,
   estadoUiFromHonorario,
   findParamByCodigo,
@@ -66,6 +68,7 @@ import {
   honorarioEstadoChip,
   honorarioMontoBase,
   invalidateFinanzasQueries,
+  isDeudorTercero,
   isHonorarioPendiente,
   normalizeTipoMovimiento,
   resolveEstadoHonorarioId,
@@ -152,6 +155,7 @@ const EMPTY_FORM = {
   monto: "",
   conceptoId: "",
   parteId: "",
+  obligadoKey: "",
   conceptoGastoId: "",
   estadoGastoId: "",
   conceptoIngresoId: "",
@@ -182,7 +186,7 @@ const EMPTY_FORM = {
 };
 
 const REQUIRED_FIELDS = {
-  honorario: ["clienteId", "conceptoId", "parteId", "monedaCodigo", "monto", "fechaRegulacion"],
+  honorario: ["clienteId", "conceptoId", "obligadoKey", "monedaCodigo", "monto", "fechaRegulacion"],
   gasto:     ["clienteId", "monedaCodigo", "monto", "fechaGasto"],
   ingreso:   ["clienteId", "monedaCodigo", "monto", "fechaIngreso"],
   convenio:  ["convenioHonorarioId", "convenioPeriodicidad", "convenioCuotas", "convenioMontoCuota", "convenioFechaInicio"],
@@ -223,7 +227,8 @@ export default function FinanzasForm() {
       clienteId: z.string().min(1, "Seleccioná un cliente"),
       casoId: z.string().optional(),
       conceptoId: z.string().min(1, "Seleccioná un concepto"),
-      parteId: z.string().min(1, "Seleccioná el obligado al pago"),
+      parteId: z.string().optional(),
+      obligadoKey: z.string().min(1, "Seleccioná el obligado al pago"),
       estadoUi: z.string().optional(),
       monedaCodigo: z.string(),
       monto: z.union([z.number(), z.string(), z.null()]),
@@ -520,6 +525,15 @@ export default function FinanzasForm() {
     queryFn: () => fetchAllPages("/expedientes"),
   });
 
+  const participantesElegiblesQuery = useQuery({
+    queryKey: ["expedientes", form.casoId, "participantes-elegibles"],
+    enabled: Boolean(form.casoId) && tipoMovimiento === "honorario",
+    queryFn: async () => {
+      const { data } = await api.get(`/expedientes/${form.casoId}/participantes-elegibles`);
+      return Array.isArray(data?.data) ? data.data : [];
+    },
+  });
+
   const valorJusQuery = useQuery({
     queryKey: ["valorjus", "actual"],
     queryFn: async () => {
@@ -667,6 +681,32 @@ export default function FinanzasForm() {
   const valorJusIngreso = Number(valorJusIngresoQuery.data?.valor ?? valorJusActual);
 
   const selectedCliente = clientes.find((c) => Number(c.id) === Number(form.clienteId)) ?? null;
+  const parteClienteParam = findParamByCodigo(catalog.PARTES, ["CLIENTE"]);
+
+  const obligadosOptions = useMemo(() => {
+    if (form.casoId) {
+      return (participantesElegiblesQuery.data ?? []).map((p) => ({
+        key: `${p.tipo}:${p.id}`,
+        tipo: p.tipo,
+        id: p.id,
+        parteId: p.parteId,
+        rol: p.rol,
+        nombreCompleto: p.nombreCompleto,
+        label: `${p.rol} — ${p.nombreCompleto}`,
+      }));
+    }
+    if (!selectedCliente) return [];
+    const nombreCompleto = clienteLabel(selectedCliente);
+    return [{
+      key: `cliente:${selectedCliente.id}`,
+      tipo: "cliente",
+      id: selectedCliente.id,
+      parteId: parteClienteParam?.id ?? null,
+      rol: parteClienteParam?.nombre ?? "Cliente",
+      nombreCompleto,
+      label: `${parteClienteParam?.nombre ?? "Cliente"} — ${nombreCompleto}`,
+    }];
+  }, [form.casoId, participantesElegiblesQuery.data, selectedCliente, parteClienteParam]);
   const filteredExpedientes = useMemo(() => {
     if (!form.clienteId) return [];
     return expedientes.filter((e) => Number(e.clienteId) === Number(form.clienteId));
@@ -767,6 +807,14 @@ export default function FinanzasForm() {
     () => honorariosSinPlanIngreso.filter((h) => form.selectedHonorarioIds.includes(Number(h.id))),
     [honorariosSinPlanIngreso, form.selectedHonorarioIds],
   );
+  /** Deudor activo del ingreso: no se pueden mezclar cuotas/honorarios de distintos deudores. */
+  const deudorActivoIngreso = useMemo(() => {
+    const fromCuota = selectedCuotas[0]?.plan;
+    if (fromCuota) return deudorKeyFromItem(fromCuota);
+    const fromHon = selectedHonorariosDirectos[0];
+    if (fromHon) return deudorKeyFromItem(fromHon);
+    return null;
+  }, [selectedCuotas, selectedHonorariosDirectos]);
   const totalHonorariosDirectosSeleccionados = useMemo(
     () => selectedHonorariosDirectos.reduce((acc, h) => acc + Number(honorarioMontoBase(h) ?? 0), 0),
     [selectedHonorariosDirectos],
@@ -927,6 +975,11 @@ export default function FinanzasForm() {
         ...base,
         conceptoId: String(item.conceptoId ?? ""),
         parteId: String(item.parteId ?? ""),
+        obligadoKey: item.obligadoClienteId
+          ? `cliente:${item.obligadoClienteId}`
+          : item.obligadoTerceroId
+            ? `tercero:${item.obligadoTerceroId}`
+            : "",
         monedaCodigo: code,
         monto: jus > 0 ? String(jus) : String(item.montoPesos ?? ""),
         fechaRegulacion: dateInputFromIso(item.fechaRegulacion) || todayInputValue(),
@@ -1037,15 +1090,19 @@ export default function FinanzasForm() {
       const monedaJus = findParamByCodigo(monedas, ["JUS"]);
       const monedaArs = findParamByCodigo(monedas, ["ARS", "PESO"]);
       const monedaUsd = findParamByCodigo(monedas, ["USD", "DOLAR", "DÓLAR"]);
-      const partes = catalog.PARTES ?? [];
-      const parteDefault = findParamByCodigo(partes, ["CLIENTE"]);
-
       if (tipoMovimiento === "honorario") {
+        const obligado = obligadosOptions.find((o) => o.key === form.obligadoKey);
+        const parteId = Number(form.parteId || obligado?.parteId || parteClienteParam?.id);
+        if (!obligado || !parteId) {
+          throw new Error("Seleccioná el obligado al pago");
+        }
         const payload = {
           clienteId: form.clienteId ? Number(form.clienteId) : null,
           casoId: form.casoId ? Number(form.casoId) : null,
           conceptoId: Number(form.conceptoId),
-          parteId: Number(form.parteId || parteDefault?.id),
+          parteId,
+          obligadoClienteId: obligado.tipo === "cliente" ? Number(obligado.id) : null,
+          obligadoTerceroId: obligado.tipo === "tercero" ? Number(obligado.id) : null,
           fechaRegulacion: toIsoDateTimeLocal(form.fechaRegulacion),
           estadoId: resolveEstadoHonorarioId(catalog.ESTADO_HONORARIO, form.estadoUi),
           monedaId: isJus ? monedaJus?.id : (isUsd ? monedaUsd?.id : monedaArs?.id),
@@ -1197,13 +1254,28 @@ export default function FinanzasForm() {
   };
 
   const loading = catalogQuery.isLoading || (isEdit && entityQuery.isLoading);
-  const parteCliente = findParamByCodigo(catalog.PARTES, ["CLIENTE"]);
 
   useEffect(() => {
-    if (!isEdit && parteCliente?.id && !form.parteId) {
-      setForm((f) => ({ ...f, parteId: String(parteCliente.id) }));
+    if (tipoMovimiento !== "honorario") return;
+    if (!form.obligadoKey) return;
+    const stillValid = obligadosOptions.some((o) => o.key === form.obligadoKey);
+    if (!stillValid) {
+      setForm((f) => ({ ...f, obligadoKey: "", parteId: "" }));
     }
-  }, [parteCliente, isEdit, form.parteId, setForm]);
+  }, [tipoMovimiento, form.obligadoKey, obligadosOptions, setForm]);
+
+  useEffect(() => {
+    if (tipoMovimiento !== "honorario" || isEdit) return;
+    if (form.obligadoKey) return;
+    if (obligadosOptions.length === 1) {
+      const only = obligadosOptions[0];
+      setForm((f) => ({
+        ...f,
+        obligadoKey: only.key,
+        parteId: only.parteId ? String(only.parteId) : "",
+      }));
+    }
+  }, [tipoMovimiento, isEdit, form.obligadoKey, obligadosOptions, setForm]);
 
   if (loading) {
     return (
@@ -1405,17 +1477,36 @@ export default function FinanzasForm() {
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Controller
-                  name="parteId"
+                  name="obligadoKey"
                   control={control}
                   render={({ field, fieldState: { error } }) => (
                     <FormControl fullWidth size="small" error={Boolean(error)}>
                       <InputLabel>Obligado al pago</InputLabel>
-                      <Select label="Obligado al pago" {...field}>
-                        {(catalog.PARTES ?? []).map((p) => (
-                          <MenuItem key={p.id} value={String(p.id)}>{p.nombre}</MenuItem>
+                      <Select
+                        label="Obligado al pago"
+                        {...field}
+                        onChange={(e) => {
+                          const key = e.target.value;
+                          const option = obligadosOptions.find((o) => o.key === key);
+                          field.onChange(key);
+                          setValue("parteId", option?.parteId ? String(option.parteId) : "", { shouldValidate: false });
+                        }}
+                      >
+                        {obligadosOptions.map((o) => (
+                          <MenuItem key={o.key} value={o.key}>{o.label}</MenuItem>
                         ))}
                       </Select>
                       {error && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>{error.message}</Typography>}
+                      {!form.clienteId && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                          Seleccioná un cliente para listar obligados
+                        </Typography>
+                      )}
+                      {form.casoId && participantesElegiblesQuery.isLoading && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                          Cargando participantes…
+                        </Typography>
+                      )}
                     </FormControl>
                   )}
                 />
@@ -2348,7 +2439,18 @@ export default function FinanzasForm() {
                         checked={allIngresoCuotasSelected}
                         indeterminate={someIngresoCuotasSelected && !allIngresoCuotasSelected}
                         onChange={(event) => {
-                          const cuotaIds = selectableIngresoCuotas.map((cuota) => Number(cuota.id));
+                          const cuotaIds = selectableIngresoCuotas
+                            .filter((cuota) => {
+                              if (!deudorActivoIngreso && !event.target.checked) return true;
+                              if (!event.target.checked) return true;
+                              const key = deudorKeyFromItem(cuota.plan);
+                              // Si ya hay deudor activo, solo ese; si no, al marcar todo se toma el del primer plan.
+                              const target = deudorActivoIngreso
+                                ?? deudorKeyFromItem(planesIngreso[0])
+                                ?? null;
+                              return !target || key === target;
+                            })
+                            .map((cuota) => Number(cuota.id));
                           setForm((f) => {
                             const current = new Set(f.selectedCuotaIds);
                             cuotaIds.forEach((id) => {
@@ -2391,6 +2493,8 @@ export default function FinanzasForm() {
                       </Box>
                     ) : planesIngreso.map((plan) => {
                       const cuotas = cuotasByPlanId.get(plan.id) ?? [];
+                      const planDeudorKey = deudorKeyFromItem(plan);
+                      const planDeudorBloqueado = Boolean(deudorActivoIngreso && planDeudorKey && planDeudorKey !== deudorActivoIngreso);
                       const toggleCuota = (cuotaId, checked) => setForm((f) => {
                         const current = new Set(f.selectedCuotaIds);
                         if (checked) current.add(Number(cuotaId));
@@ -2400,6 +2504,21 @@ export default function FinanzasForm() {
                       });
                       return (
                         <Box key={plan.id}>
+                          <Box sx={{ px: 2, pt: 1.5, pb: 0.5 }}>
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+                                Deudor: {deudorNombreFromItem(plan, selectedCliente)}
+                              </Typography>
+                              {isDeudorTercero(plan) && (
+                                <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
+                              )}
+                              {planDeudorBloqueado && (
+                                <Typography variant="caption" color="warning.main" sx={{ fontWeight: 800 }}>
+                                  (otro deudor — no se puede combinar en este cobro)
+                                </Typography>
+                              )}
+                            </Stack>
+                          </Box>
                           {/* Desktop */}
                           <TableContainer sx={{ display: { xs: "none", md: "block" } }}>
                             <Table size="small">
@@ -2416,12 +2535,13 @@ export default function FinanzasForm() {
                               </TableHead>
                               <TableBody>
                                 {cuotas.map((cuota) => {
-                                  const disabled = ["PAGADA", "CONDONADA"].includes(String(cuota.estadoCodigo ?? "").toUpperCase());
+                                  const estadoDisabled = ["PAGADA", "CONDONADA"].includes(String(cuota.estadoCodigo ?? "").toUpperCase());
+                                  const disabled = estadoDisabled || (planDeudorBloqueado && !form.selectedCuotaIds.includes(Number(cuota.id)));
                                   const checked = form.selectedCuotaIds.includes(Number(cuota.id));
                                   const chip = cuotaEstadoChip(cuota);
                                   const saldo = Number(cuota.totalAPagarPesos ?? cuota.saldoPesos ?? cuota.saldo ?? 0);
                                   return (
-                                    <TableRow key={cuota.id} hover>
+                                    <TableRow key={cuota.id} hover sx={{ opacity: planDeudorBloqueado && !checked ? 0.45 : 1 }}>
                                       <TableCell padding="checkbox">
                                         <Checkbox size="small" checked={checked} disabled={disabled} onChange={(e) => toggleCuota(cuota.id, e.target.checked)} />
                                       </TableCell>
@@ -2451,7 +2571,8 @@ export default function FinanzasForm() {
                                 {cuotasIngresoQueries.some((q) => q.isLoading) ? "Cargando cuotas..." : "No hay cuotas para mostrar."}
                               </Typography>
                             ) : cuotas.map((cuota) => {
-                              const disabled = ["PAGADA", "CONDONADA"].includes(String(cuota.estadoCodigo ?? "").toUpperCase());
+                              const estadoDisabled = ["PAGADA", "CONDONADA"].includes(String(cuota.estadoCodigo ?? "").toUpperCase());
+                              const disabled = estadoDisabled || (planDeudorBloqueado && !form.selectedCuotaIds.includes(Number(cuota.id)));
                               const checked = form.selectedCuotaIds.includes(Number(cuota.id));
                               const chip = cuotaEstadoChip(cuota);
                               const saldo = Number(cuota.totalAPagarPesos ?? cuota.saldoPesos ?? cuota.saldo ?? 0);
@@ -2640,7 +2761,14 @@ export default function FinanzasForm() {
                         checked={honorariosSinPlanIngreso.length > 0 && honorariosSinPlanIngreso.every((h) => form.selectedHonorarioIds.includes(Number(h.id)))}
                         indeterminate={honorariosSinPlanIngreso.some((h) => form.selectedHonorarioIds.includes(Number(h.id))) && !honorariosSinPlanIngreso.every((h) => form.selectedHonorarioIds.includes(Number(h.id)))}
                         onChange={(event) => {
-                          const ids = honorariosSinPlanIngreso.map((h) => Number(h.id));
+                          const ids = honorariosSinPlanIngreso
+                            .filter((h) => {
+                              if (!event.target.checked) return true;
+                              const key = deudorKeyFromItem(h);
+                              const target = deudorActivoIngreso ?? deudorKeyFromItem(honorariosSinPlanIngreso[0]);
+                              return !target || key === target;
+                            })
+                            .map((h) => Number(h.id));
                           setForm((f) => {
                             const current = new Set(f.selectedHonorarioIds);
                             ids.forEach((id) => {
@@ -2689,6 +2817,7 @@ export default function FinanzasForm() {
                               <TableRow>
                                 <TableCell padding="checkbox" />
                                 <TableCell sx={{ fontWeight: 900 }}>Concepto</TableCell>
+                                <TableCell sx={{ fontWeight: 900 }}>Deudor</TableCell>
                                 <TableCell sx={{ fontWeight: 900 }}>Vencimiento</TableCell>
                                 <TableCell sx={{ fontWeight: 900 }}>Monto</TableCell>
                                 <TableCell sx={{ fontWeight: 900 }}>Estado</TableCell>
@@ -2697,14 +2826,36 @@ export default function FinanzasForm() {
                             <TableBody>
                               {honorariosSinPlanIngreso.map((h) => {
                                 const checked = form.selectedHonorarioIds.includes(Number(h.id));
+                                const honKey = deudorKeyFromItem(h);
+                                const bloqueado = Boolean(deudorActivoIngreso && honKey && honKey !== deudorActivoIngreso && !checked);
                                 const chip = honorarioEstadoChip(h);
                                 const label = h.concepto?.nombre || `Honorario #${h.id}`;
                                 return (
-                                  <TableRow key={h.id} hover>
+                                  <TableRow key={h.id} hover sx={{ opacity: bloqueado ? 0.45 : 1 }}>
                                     <TableCell padding="checkbox">
-                                      <Checkbox size="small" checked={checked} onChange={(e) => setForm((f) => { const s = new Set(f.selectedHonorarioIds); if (e.target.checked) s.add(Number(h.id)); else s.delete(Number(h.id)); return { ...f, selectedHonorarioIds: [...s] }; })} />
+                                      <Checkbox
+                                        size="small"
+                                        checked={checked}
+                                        disabled={bloqueado}
+                                        onChange={(e) => setForm((f) => {
+                                          const s = new Set(f.selectedHonorarioIds);
+                                          if (e.target.checked) s.add(Number(h.id));
+                                          else s.delete(Number(h.id));
+                                          return { ...f, selectedHonorarioIds: [...s] };
+                                        })}
+                                      />
                                     </TableCell>
                                     <TableCell sx={{ fontWeight: 800 }}>{label}</TableCell>
+                                    <TableCell>
+                                      <Stack direction="row" spacing={0.75} alignItems="center">
+                                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                                          {deudorNombreFromItem(h, selectedCliente)}
+                                        </Typography>
+                                        {isDeudorTercero(h) && (
+                                          <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
+                                        )}
+                                      </Stack>
+                                    </TableCell>
                                     <TableCell sx={{ whiteSpace: "nowrap" }}>{formatIsoDateShort(h.fechaVencimiento ?? h.fechaRegulacion)}</TableCell>
                                     <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>{formatMoneyAr(honorarioMontoBase(h))}</TableCell>
                                     <TableCell><Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} /></TableCell>
@@ -2718,18 +2869,37 @@ export default function FinanzasForm() {
                         <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" }, p: 1 }}>
                           {honorariosSinPlanIngreso.map((h) => {
                             const checked = form.selectedHonorarioIds.includes(Number(h.id));
+                            const honKey = deudorKeyFromItem(h);
+                            const bloqueado = Boolean(deudorActivoIngreso && honKey && honKey !== deudorActivoIngreso && !checked);
                             const chip = honorarioEstadoChip(h);
                             const label = h.concepto?.nombre || `Honorario #${h.id}`;
                             return (
-                              <Paper key={h.id} elevation={0} sx={{ p: 1.5, border: "1px solid", borderColor: checked ? "primary.main" : "divider", borderRadius: "10px" }}>
+                              <Paper key={h.id} elevation={0} sx={{ p: 1.5, border: "1px solid", borderColor: checked ? "primary.main" : "divider", borderRadius: "10px", opacity: bloqueado ? 0.5 : 1 }}>
                                 <Stack direction="row" alignItems="flex-start" spacing={1}>
-                                  <Checkbox size="small" checked={checked} onChange={(e) => setForm((f) => { const s = new Set(f.selectedHonorarioIds); if (e.target.checked) s.add(Number(h.id)); else s.delete(Number(h.id)); return { ...f, selectedHonorarioIds: [...s] }; })} sx={{ p: 0.5, mt: 0.25 }} />
+                                  <Checkbox
+                                    size="small"
+                                    checked={checked}
+                                    disabled={bloqueado}
+                                    onChange={(e) => setForm((f) => {
+                                      const s = new Set(f.selectedHonorarioIds);
+                                      if (e.target.checked) s.add(Number(h.id));
+                                      else s.delete(Number(h.id));
+                                      return { ...f, selectedHonorarioIds: [...s] };
+                                    })}
+                                    sx={{ p: 0.5, mt: 0.25 }}
+                                  />
                                   <Box sx={{ flex: 1, minWidth: 0 }}>
                                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                                       <Typography variant="body2" sx={{ fontWeight: 900 }}>{label}</Typography>
                                       <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} />
                                     </Stack>
-                                    <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: "wrap", gap: 0.5 }}>
+                                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5, flexWrap: "wrap", gap: 0.5 }}>
+                                      <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                                        {deudorNombreFromItem(h, selectedCliente)}
+                                      </Typography>
+                                      {isDeudorTercero(h) && (
+                                        <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 16, fontSize: "0.55rem", fontWeight: 800 }} />
+                                      )}
                                       <Typography variant="caption">{formatIsoDateShort(h.fechaVencimiento ?? h.fechaRegulacion)}</Typography>
                                       <Typography variant="caption" sx={{ fontWeight: 900 }}>{formatMoneyAr(honorarioMontoBase(h))}</Typography>
                                     </Stack>
@@ -2793,13 +2963,19 @@ export default function FinanzasForm() {
                       {...field}
                     >
                       <MenuItem value="">Seleccioná un honorario</MenuItem>
-                      {(honorariosPendientesQuery.data ?? []).map((h) => (
-                        <MenuItem key={h.id} value={String(h.id)}>
-                          #{h.id} — {formatMoneyAr(honorarioMontoBase(h))}
-                          {h.concepto?.nombre ? ` (${h.concepto.nombre})` : ""}
-                          {h.caso?.caratula ? ` - ${h.caso.caratula}` : ""}
-                        </MenuItem>
-                      ))}
+                      {(honorariosPendientesQuery.data ?? []).map((h) => {
+                        const deudorLabel = h.obligadoNombre
+                          ? (h.obligadoTerceroId ? `Tercero: ${h.obligadoNombre}` : h.obligadoNombre)
+                          : null;
+                        return (
+                          <MenuItem key={h.id} value={String(h.id)}>
+                            #{h.id} — {formatMoneyAr(honorarioMontoBase(h))}
+                            {h.concepto?.nombre ? ` (${h.concepto.nombre})` : ""}
+                            {deudorLabel ? ` · Deudor: ${deudorLabel}` : ""}
+                            {h.caso?.caratula ? ` - ${h.caso.caratula}` : ""}
+                          </MenuItem>
+                        );
+                      })}
                     </Select>
                     {error && (
                       <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
@@ -2809,6 +2985,19 @@ export default function FinanzasForm() {
                   </FormControl>
                 )}
               />
+              {selectedConvenioHonorario && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Deudor:{" "}
+                  <Box component="span" sx={{ fontWeight: 800, color: "text.primary" }}>
+                    {selectedConvenioHonorario.obligadoNombre
+                      || clienteLabel(selectedCliente)
+                      || "—"}
+                  </Box>
+                  {selectedConvenioHonorario.obligadoTerceroId ? (
+                    <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ ml: 1, height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
+                  ) : null}
+                </Typography>
+              )}
               {!form.clienteId && !lockClienteId && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
                   Seleccioná un cliente primero para ver sus honorarios pendientes.

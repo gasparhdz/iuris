@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, getTableColumns, ilike, isNull, or, sql, aliasedTable } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, clientes, participantesCaso, usuarios, tareas, eventos, terceros, parametros } from "../schema.js";
+import { casos, clientes, participantesCaso, usuarios, tareas, eventos, terceros, parametros, categorias } from "../schema.js";
 
 type NewCaso = typeof casos.$inferInsert;
 type NewParticipanteCaso = typeof participantesCaso.$inferInsert;
@@ -29,10 +29,19 @@ export class CasosQueries {
     ];
 
     if (search) {
+      const normalized = search.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
       conditions.push(
         or(
           ilike(casos.caratula, `%${search}%`),
-          ilike(casos.nroExpteNorm, `%${search.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()}%`)
+          ilike(casos.nroExpteNorm, `%${normalized}%`),
+          and(
+            isNull(clientes.deletedAt),
+            or(
+              ilike(clientes.nombre, `%${search}%`),
+              ilike(clientes.apellido, `%${search}%`),
+              ilike(clientes.razonSocial, `%${search}%`),
+            )!,
+          )!,
         )!
       );
     }
@@ -85,6 +94,7 @@ export class CasosQueries {
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
       .from(casos)
+      .leftJoin(clientes, eq(casos.clienteId, clientes.id))
       .where(whereCondition);
 
     return { data, count };
@@ -183,7 +193,87 @@ export class CasosQueries {
       .innerJoin(casos, eq(participantesCaso.casoId, casos.id))
       .innerJoin(terceros, eq(participantesCaso.terceroId, terceros.id))
       .leftJoin(parametros, eq(participantesCaso.rolId, parametros.id))
-      .where(and(eq(participantesCaso.casoId, casoId), eq(casos.estudioId, estudioId), isNull(casos.deletedAt)));
+      .where(and(
+        eq(participantesCaso.casoId, casoId),
+        eq(casos.estudioId, estudioId),
+        isNull(casos.deletedAt),
+        eq(terceros.estudioId, estudioId),
+        isNull(terceros.deletedAt),
+      ));
+  }
+
+  static async findParticipantesElegibles(casoId: number, estudioId: number) {
+    const caso = await this.findById(casoId, estudioId);
+    if (!caso) return null;
+
+    const [clienteRow] = await db
+      .select({
+        id: clientes.id,
+        nombre: clientes.nombre,
+        apellido: clientes.apellido,
+        razonSocial: clientes.razonSocial,
+      })
+      .from(clientes)
+      .where(and(
+        eq(clientes.id, caso.clienteId),
+        eq(clientes.estudioId, estudioId),
+        isNull(clientes.deletedAt),
+      ))
+      .limit(1);
+
+    const [parteCliente] = await db
+      .select({ id: parametros.id, nombre: parametros.nombre })
+      .from(parametros)
+      .innerJoin(categorias, eq(parametros.categoriaId, categorias.id))
+      .where(and(
+        eq(categorias.codigo, "PARTES"),
+        eq(parametros.codigo, "CLIENTE"),
+        eq(parametros.activo, true),
+      ))
+      .limit(1);
+
+    const participantes = await this.findParticipantes(casoId, estudioId);
+
+    const formatNombre = (persona: {
+      razonSocial: string | null;
+      apellido: string | null;
+      nombre: string | null;
+    }) => {
+      if (persona.razonSocial) return persona.razonSocial;
+      const compuesto = [persona.apellido, persona.nombre].filter(Boolean).join(", ");
+      return compuesto || persona.nombre || "";
+    };
+
+    const elegibles: Array<{
+      tipo: "cliente" | "tercero";
+      id: number;
+      rol: string;
+      parteId: number | null;
+      nombreCompleto: string;
+    }> = [];
+
+    if (clienteRow) {
+      elegibles.push({
+        tipo: "cliente",
+        id: clienteRow.id,
+        rol: parteCliente?.nombre ?? "Cliente",
+        parteId: parteCliente?.id ?? null,
+        nombreCompleto: formatNombre(clienteRow),
+      });
+    }
+
+    for (const p of participantes) {
+      if (!p.tercero?.id) continue;
+      elegibles.push({
+        tipo: "tercero",
+        id: p.tercero.id,
+        rol: p.rolNombre ?? "Participante",
+        parteId: p.rolId,
+        nombreCompleto: formatNombre(p.tercero),
+      });
+    }
+
+    return elegibles;
   }
 
   static async updateParticipante(participanteId: number, casoId: number, estudioId: number, values: Partial<NewParticipanteCaso>) {

@@ -4,11 +4,19 @@ import { idParamSchema, paginationMetaSchema, paginationQuerySchema, positiveInt
 const positiveMoneySchema = z.coerce.number().positive();
 const dateStringSchema = z.string().datetime();
 
+function obligadoXorRefine<T extends { obligadoClienteId?: number | null; obligadoTerceroId?: number | null }>(data: T) {
+  const hasCliente = data.obligadoClienteId !== undefined && data.obligadoClienteId !== null;
+  const hasTercero = data.obligadoTerceroId !== undefined && data.obligadoTerceroId !== null;
+  return !(hasCliente && hasTercero);
+}
+
 const honorarioBaseSchema = z.object({
   clienteId: positiveIntSchema.optional().nullable(),
   casoId: positiveIntSchema.optional().nullable(),
   conceptoId: positiveIntSchema,
   parteId: positiveIntSchema,
+  obligadoClienteId: positiveIntSchema.optional().nullable(),
+  obligadoTerceroId: positiveIntSchema.optional().nullable(),
   jus: positiveMoneySchema.optional().nullable(),
   montoPesos: positiveMoneySchema.optional().nullable(),
   monedaId: positiveIntSchema.optional().nullable(),
@@ -20,24 +28,41 @@ const honorarioBaseSchema = z.object({
   estadoId: positiveIntSchema.optional().nullable(),
 }).strict();
 
-export const createHonorarioSchema = honorarioBaseSchema.refine(
-  (data) => (data.jus !== undefined && data.jus !== null) || (data.montoPesos !== undefined && data.montoPesos !== null),
-  {
-    message: "Debe informar al menos jus o montoPesos.",
-    path: ["jus"],
-  }
-);
+export const createHonorarioSchema = honorarioBaseSchema
+  .refine(
+    (data) => (data.jus !== undefined && data.jus !== null) || (data.montoPesos !== undefined && data.montoPesos !== null),
+    {
+      message: "Debe informar al menos jus o montoPesos.",
+      path: ["jus"],
+    }
+  )
+  .refine(obligadoXorRefine, {
+    message: "Solo puede indicar un obligado al pago (cliente o tercero).",
+    path: ["obligadoClienteId"],
+  })
+  .refine(
+    (data) => data.obligadoClienteId != null || data.obligadoTerceroId != null,
+    {
+      message: "Debe indicar el obligado al pago.",
+      path: ["obligadoClienteId"],
+    }
+  );
 
-export const updateHonorarioSchema = honorarioBaseSchema.partial().refine(
-  (data) => {
-    if (data.jus === undefined && data.montoPesos === undefined) return true;
-    return (data.jus !== undefined && data.jus !== null) || (data.montoPesos !== undefined && data.montoPesos !== null);
-  },
-  {
-    message: "Debe informar jus o montoPesos con valor mayor a 0.",
-    path: ["jus"],
-  }
-);
+export const updateHonorarioSchema = honorarioBaseSchema.partial()
+  .refine(
+    (data) => {
+      if (data.jus === undefined && data.montoPesos === undefined) return true;
+      return (data.jus !== undefined && data.jus !== null) || (data.montoPesos !== undefined && data.montoPesos !== null);
+    },
+    {
+      message: "Debe informar jus o montoPesos con valor mayor a 0.",
+      path: ["jus"],
+    }
+  )
+  .refine(obligadoXorRefine, {
+    message: "Solo puede indicar un obligado al pago (cliente o tercero).",
+    path: ["obligadoClienteId"],
+  });
 
 export const honorarioQuerySchema = z.object({
   ...paginationQuerySchema.shape,
@@ -68,6 +93,9 @@ export const honorarioItemSchema = z.object({
   casoId: z.number().nullable(),
   conceptoId: z.number(),
   parteId: z.number(),
+  obligadoClienteId: z.number().nullable(),
+  obligadoTerceroId: z.number().nullable(),
+  obligadoNombre: z.string().nullable().optional(),
   jus: z.number().nullable(),
   montoPesos: z.number().nullable(),
   monedaId: z.number().nullable(),

@@ -664,12 +664,25 @@ export default function Finanzas() {
   };
 
   const cuentasCorrientes = useMemo(() => {
-    return (ccResumenQuery.data?.items ?? []).map(({ clienteId, totales }) => {
-      const cliente = clientesById.get(Number(clienteId));
+    return (ccResumenQuery.data?.items ?? []).map((item) => {
+      const {
+        clienteId,
+        terceroId,
+        tipoDeudor = "cliente",
+        deudorNombre,
+        totales,
+      } = item;
+      const cliente = clienteId != null ? clientesById.get(Number(clienteId)) : null;
+      const nombre = deudorNombre
+        || (cliente ? clienteLabelFromTareas(cliente) : null)
+        || (tipoDeudor === "tercero" ? `Tercero #${terceroId}` : `Cliente #${clienteId}`);
       return {
-        clienteId: Number(clienteId),
+        key: tipoDeudor === "tercero" ? `tercero:${terceroId}` : `cliente:${clienteId}`,
+        tipoDeudor,
+        clienteId: clienteId != null ? Number(clienteId) : null,
+        terceroId: terceroId != null ? Number(terceroId) : null,
         cliente,
-        clienteNombre: clienteLabelFromTareas(cliente) || `Cliente #${clienteId}`,
+        clienteNombre: nombre,
         totalCargos: Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0),
         totalCobrado: Number(totales?.ingresosPesos ?? 0),
         saldoPendiente: Number(totales?.saldoPesos ?? 0),
@@ -916,7 +929,7 @@ export default function Finanzas() {
               emptyTitle="No hay honorarios para mostrar"
               emptySubtitle="Ajusta el buscador o registra honorarios desde un cliente o expediente."
               footer={tablePagination}
-              columnWidths={[180, "20%", "20%", 80, 100, 100, 80, 120]}
+              columnWidths={[180, "16%", "16%", "14%", 80, 100, 100, 80, 120]}
             >
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
@@ -924,6 +937,9 @@ export default function Finanzas() {
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
                     {sortableHead("cliente", "Cliente")}
+                    <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary" }}>
+                      Obligado
+                    </TableCell>
                     {sortableHead("expediente", "Expediente")}
                     {sortableHead("fecha", "Fecha Reg.")}
                     {sortableHead("monto", "Monto Original")}
@@ -939,6 +955,9 @@ export default function Finanzas() {
                     const cliente = item.cliente ?? clientesById.get(Number(item.clienteId));
                     const clienteNombre = clienteLabel(cliente) || clienteLabelFromTareas(cliente) || "Cliente";
                     const caso = item.caso ?? expedientesById.get(Number(item.casoId));
+                    const obligadoNombre = item.obligadoNombre
+                      || (item.parte?.nombre ? item.parte.nombre : null)
+                      || "—";
                     const computed = item.computed ?? computeHonorarioAmounts(
                       item,
                       Number(valorJusQuery.data?.valor ?? 0),
@@ -957,6 +976,11 @@ export default function Finanzas() {
                         </TableCell>
                         <TableCell sx={{ maxWidth: 200 }}>
                           <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabel(cliente) || clienteLabelFromTareas(cliente)} state={{ from: currentPath }} />
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 180 }}>
+                          <Tooltip title={obligadoNombre}>
+                            <Typography variant="body2" sx={{ ...ellipsisSx, maxWidth: 180 }}>{obligadoNombre}</Typography>
+                          </Tooltip>
                         </TableCell>
                         <TableCell sx={{ maxWidth: 240 }}>
                           <EntityLink to={caso?.id ? `/expedientes/${caso.id}` : null} label={casoLabel(caso)} state={{ from: currentPath }} />
@@ -1087,6 +1111,11 @@ export default function Finanzas() {
                           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
                             {conceptoLabel(item)}{caso ? ` · ${casoLabel(caso)}` : ""}
                           </Typography>
+                          {(item.obligadoNombre || item.parte?.nombre) && (
+                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
+                              Obligado: {item.obligadoNombre || item.parte?.nombre}
+                            </Typography>
+                          )}
                         </Box>
 
                         {/* Nivel 3 — metadatos y acciones */}
@@ -1518,18 +1547,26 @@ export default function Finanzas() {
                 <TableBody>
                   {paginatedRows.map((item) => {
                     const deudor = item.saldoPendiente > 0;
+                    const canOpenDetalle = item.tipoDeudor !== "tercero" && item.clienteId != null;
                     return (
                       <TableRow
-                        key={item.clienteId}
-                        hover
-                        onClick={() => setSearchParams((prev) => {
+                        key={item.key}
+                        hover={canOpenDetalle}
+                        onClick={canOpenDetalle ? () => setSearchParams((prev) => {
                           const next = new URLSearchParams(prev);
                           next.set("clienteId", String(item.clienteId));
                           return next;
-                        })}
-                        sx={{ cursor: "pointer" }}
+                        }) : undefined}
+                        sx={{ cursor: canOpenDetalle ? "pointer" : "default" }}
                       >
-                        <TableCell sx={{ fontWeight: 900 }}>{item.clienteNombre}</TableCell>
+                        <TableCell sx={{ fontWeight: 900 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <span>{item.clienteNombre}</span>
+                            {item.tipoDeudor === "tercero" && (
+                              <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
+                            )}
+                          </Stack>
+                        </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{formatMoneyAr(item.totalCargos)}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800, color: "success.main" }}>{formatMoneyAr(item.totalCobrado)}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 950, color: deudor ? "error.main" : "success.main" }}>
@@ -1549,15 +1586,16 @@ export default function Finanzas() {
                 <Stack spacing={1.5}>
                   {paginatedRows.map((item) => {
                     const deudor = item.saldoPendiente > 0;
+                    const canOpenDetalle = item.tipoDeudor !== "tercero" && item.clienteId != null;
                     return (
                       <Paper
-                        key={item.clienteId}
+                        key={item.key}
                         elevation={0}
-                        onClick={() => setSearchParams((prev) => {
+                        onClick={canOpenDetalle ? () => setSearchParams((prev) => {
                           const next = new URLSearchParams(prev);
                           next.set("clienteId", String(item.clienteId));
                           return next;
-                        })}
+                        }) : undefined}
                         sx={{
                           borderRadius: "12px",
                           border: "1px solid",
@@ -1566,16 +1604,21 @@ export default function Finanzas() {
                           borderLeftColor: deudor ? "error.main" : "success.main",
                           overflow: "hidden",
                           bgcolor: alpha(theme.palette.background.paper, 0.6),
-                          cursor: "pointer",
+                          cursor: canOpenDetalle ? "pointer" : "default",
                           transition: "border-color 0.15s, box-shadow 0.15s",
-                          "&:hover": { boxShadow: 2, borderColor: "primary.main" },
+                          "&:hover": canOpenDetalle ? { boxShadow: 2, borderColor: "primary.main" } : undefined,
                         }}
                       >
                         {/* Nivel 1 — crítico */}
                         <Box sx={{ px: 2, pt: 1.75, pb: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}>
-                          <Typography variant="body2" fontWeight={800} noWrap sx={{ flex: 1 }}>
-                            {item.clienteNombre}
-                          </Typography>
+                          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography variant="body2" fontWeight={800} noWrap>
+                              {item.clienteNombre}
+                            </Typography>
+                            {item.tipoDeudor === "tercero" && (
+                              <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
+                            )}
+                          </Stack>
                           <Typography variant="body1" fontWeight={800} color={deudor ? "error.main" : "success.main"} sx={{ flexShrink: 0 }}>
                             {formatMoneyAr(item.saldoPendiente)}
                           </Typography>
@@ -1596,7 +1639,9 @@ export default function Finanzas() {
                         {/* Nivel 3 — estado */}
                         <Box sx={{ px: 2, pb: 1.5, display: "flex", alignItems: "center", gap: 1 }}>
                           <Chip size="small" label={deudor ? "Deudor" : "Al Día"} color={deudor ? "error" : "success"} variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }} role="status" aria-label={`Estado: ${deudor ? "Deudor" : "Al Día"}`} />
-                          <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>Ver detalle →</Typography>
+                          {canOpenDetalle && (
+                            <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>Ver detalle →</Typography>
+                          )}
                         </Box>
                       </Paper>
                     );

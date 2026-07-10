@@ -118,6 +118,18 @@ export const participanteListResponseSchema = z.object({
   data: z.array(participanteItemSchema),
 });
 
+export const participanteElegibleItemSchema = z.object({
+  tipo: z.enum(["cliente", "tercero"]),
+  id: z.number(),
+  rol: z.string(),
+  parteId: z.number().nullable(),
+  nombreCompleto: z.string(),
+});
+
+export const participantesElegiblesResponseSchema = z.object({
+  data: z.array(participanteElegibleItemSchema),
+});
+
 export const casoTareasListResponseSchema = z.object({
   data: z.array(tareaItemSchema),
 });

@@ -8,6 +8,7 @@ import {
   casoQuerySchema, idParamSchema, participanteParamsSchema,
   casoResponseSchema, casoListResponseSchema,
   participanteResponseSchema, participanteListResponseSchema,
+  participantesElegiblesResponseSchema,
   casoTareasListResponseSchema, casoEventosListResponseSchema
 } from "../schemas/casos.schema.js";
 
@@ -102,6 +103,17 @@ export const expedientesRoutes: FastifyPluginAsync = async (fastify) => {
       response: documentedResponses(200, participanteListResponseSchema),
     }
   }, CasosController.getParticipantes);
+
+  server.get("/:id/participantes-elegibles", {
+    ...can("ver"),
+    schema: {
+      tags: ["Expedientes - Participantes"],
+      summary: "Participantes elegibles como obligado al pago (cliente + terceros)",
+      security: [{ bearerAuth: [] }],
+      params: idParamSchema,
+      response: documentedResponses(200, participantesElegiblesResponseSchema),
+    }
+  }, CasosController.getParticipantesElegibles);
 
   server.delete("/:id/participantes/:participanteId", {
     ...can("editar"),

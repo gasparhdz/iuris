@@ -6,6 +6,7 @@ import {
   cuotaTieneSaldoPendiente,
   formatSaldoCuota,
   isPastDailyCobranzaWindow,
+  resolveNombreDeudorCobranza,
   startOfDayArgentina,
   type CuotaRecordatorio,
 } from "../services/cobranza-recordatorio.js";
@@ -105,5 +106,40 @@ describe("cobranza-recordatorio", () => {
   it("habilita la ventana diaria a partir de las 08:00 hora Argentina", () => {
     expect(isPastDailyCobranzaWindow(new Date("2026-07-08T12:00:00.000Z"))).toBe(true);
     expect(isPastDailyCobranzaWindow(new Date("2026-07-08T10:00:00.000Z"))).toBe(false);
+  });
+
+  it("usa el nombre del deudor tercero en el recordatorio de cuotas del plan", () => {
+    // Misma prioridad que CobranzaRecordatorioQueries (SQL CASE).
+    expect(resolveNombreDeudorCobranza({
+      obligadoTerceroId: 55,
+      obligadoClienteId: 10,
+      terceroNombre: "Aseguradora XYZ SA",
+      obligadoClienteNombre: "Cliente Obligado",
+      clienteNombre: "Cliente Titular",
+    })).toBe("Aseguradora XYZ SA");
+
+    expect(resolveNombreDeudorCobranza({
+      obligadoTerceroId: null,
+      obligadoClienteId: 22,
+      terceroNombre: null,
+      obligadoClienteNombre: "Otro Cliente",
+      clienteNombre: "Cliente Titular",
+    })).toBe("Otro Cliente");
+
+    const cuotas = [
+      cuota({
+        cuotaId: 10,
+        clienteNombre: resolveNombreDeudorCobranza({
+          obligadoTerceroId: 55,
+          terceroNombre: "Aseguradora XYZ SA",
+          clienteNombre: "Cliente Titular",
+        }),
+        casoCaratula: "Pérez c/ Gómez",
+        createdBy: 7,
+      }),
+    ];
+
+    const grouped = agruparCuotasPorUsuario(cuotas);
+    expect(grouped.get(7)?.[0]?.clienteNombre).toBe("Aseguradora XYZ SA");
   });
 });

@@ -1,14 +1,17 @@
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import {
   casos,
   categorias,
   clientes,
+  honorarios,
   parametros,
   planCuotas,
   planesPago,
   preferenciasCobranza,
   recordatoriosCobranzaLog,
+  terceros,
 } from "../schema.js";
 import type { CuotaRecordatorio } from "../../services/cobranza-recordatorio.js";
 import { PREFERENCIAS_COBRANZA_DEFAULTS } from "../../services/cobranza-recordatorio.js";
@@ -89,7 +92,15 @@ export class CobranzaRecordatorioQueries {
     if (!estadoPagadaId) return [];
     const estadoCondonadaId = await this.findEstadoCuotaId("CONDONADA");
 
-    const clienteNombre = sql<string>`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), 'Sin cliente')`;
+    const obligadoCliente = alias(clientes, "obligado_cliente");
+    const clienteNombreFallback = sql<string>`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), 'Sin cliente')`;
+    const obligadoClienteNombre = sql<string>`COALESCE(${obligadoCliente.razonSocial}, NULLIF(CONCAT_WS(', ', ${obligadoCliente.apellido}, ${obligadoCliente.nombre}), ''), ${obligadoCliente.nombre}, 'Sin cliente')`;
+    const terceroNombre = sql<string>`COALESCE(${terceros.razonSocial}, NULLIF(CONCAT_WS(', ', ${terceros.apellido}, ${terceros.nombre}), ''), ${terceros.nombre}, 'Sin nombre')`;
+    const clienteNombre = sql<string>`CASE
+      WHEN ${honorarios.obligadoTerceroId} IS NOT NULL THEN ${terceroNombre}
+      WHEN ${honorarios.obligadoClienteId} IS NOT NULL THEN ${obligadoClienteNombre}
+      ELSE ${clienteNombreFallback}
+    END`;
 
     const rows = await db
       .select({
@@ -106,6 +117,20 @@ export class CobranzaRecordatorioQueries {
       })
       .from(planCuotas)
       .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+      .leftJoin(honorarios, and(
+        eq(planesPago.honorarioId, honorarios.id),
+        eq(honorarios.estudioId, planesPago.estudioId),
+        isNull(honorarios.deletedAt),
+      ))
+      .leftJoin(terceros, and(
+        eq(honorarios.obligadoTerceroId, terceros.id),
+        eq(terceros.estudioId, planesPago.estudioId),
+        isNull(terceros.deletedAt),
+      ))
+      .leftJoin(obligadoCliente, and(
+        eq(honorarios.obligadoClienteId, obligadoCliente.id),
+        eq(obligadoCliente.estudioId, planesPago.estudioId),
+      ))
       .leftJoin(clientes, and(
         eq(planesPago.clienteId, clientes.id),
         eq(clientes.estudioId, planesPago.estudioId),

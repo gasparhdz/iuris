@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago } from "../schema.js";
+import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago, terceros } from "../schema.js";
 
 type NewHonorario = typeof honorarios.$inferInsert;
 
@@ -184,6 +184,24 @@ function baseHonorariosSelect() {
   const parte = alias(parametros, "honorario_parte");
   const estado = alias(parametros, "honorario_estado");
   const moneda = alias(parametros, "honorario_moneda");
+  const obligadoCliente = alias(clientes, "honorario_obligado_cliente");
+  const obligadoTercero = alias(terceros, "honorario_obligado_tercero");
+
+  const obligadoNombreExpr = sql<string | null>`CASE
+    WHEN ${honorarios.obligadoTerceroId} IS NOT NULL THEN
+      COALESCE(
+        ${obligadoTercero.razonSocial},
+        NULLIF(CONCAT_WS(', ', ${obligadoTercero.apellido}, ${obligadoTercero.nombre}), ''),
+        ${obligadoTercero.nombre}
+      )
+    WHEN ${honorarios.obligadoClienteId} IS NOT NULL THEN
+      COALESCE(
+        ${obligadoCliente.razonSocial},
+        NULLIF(CONCAT_WS(', ', ${obligadoCliente.apellido}, ${obligadoCliente.nombre}), ''),
+        ${obligadoCliente.nombre}
+      )
+    ELSE NULL
+  END`;
 
   return db
     .select({
@@ -193,6 +211,9 @@ function baseHonorariosSelect() {
       casoId: honorarios.casoId,
       conceptoId: honorarios.conceptoId,
       parteId: honorarios.parteId,
+      obligadoClienteId: honorarios.obligadoClienteId,
+      obligadoTerceroId: honorarios.obligadoTerceroId,
+      obligadoNombre: obligadoNombreExpr,
       jus: honorarios.jus,
       montoPesos: honorarios.montoPesos,
       monedaId: honorarios.monedaId,
@@ -264,5 +285,15 @@ function baseHonorariosSelect() {
     .leftJoin(concepto, eq(honorarios.conceptoId, concepto.id))
     .leftJoin(parte, eq(honorarios.parteId, parte.id))
     .leftJoin(estado, eq(honorarios.estadoId, estado.id))
-    .leftJoin(moneda, eq(honorarios.monedaId, moneda.id));
+    .leftJoin(moneda, eq(honorarios.monedaId, moneda.id))
+    .leftJoin(obligadoCliente, and(
+      eq(honorarios.obligadoClienteId, obligadoCliente.id),
+      eq(honorarios.estudioId, obligadoCliente.estudioId),
+    ))
+    // Sin filtrar deletedAt: honorarios históricos deben seguir mostrando el nombre
+    // del tercero obligado aunque esté soft-deleted.
+    .leftJoin(obligadoTercero, and(
+      eq(honorarios.obligadoTerceroId, obligadoTercero.id),
+      eq(honorarios.estudioId, obligadoTercero.estudioId),
+    ));
 }

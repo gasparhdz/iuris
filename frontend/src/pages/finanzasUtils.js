@@ -46,6 +46,29 @@ export function casoLabel(caso) {
   return caratula || nro || `Expediente #${caso.id}`;
 }
 
+/** Clave estable del deudor de un honorario o plan (cliente:id | tercero:id). */
+export function deudorKeyFromItem(item) {
+  if (!item) return null;
+  if (item.tipoDeudor === "tercero" || item.obligadoTerceroId != null) {
+    const id = item.obligadoTerceroId;
+    return id != null ? `tercero:${id}` : null;
+  }
+  const clienteId = item.obligadoClienteId ?? item.clienteId ?? null;
+  return clienteId != null ? `cliente:${clienteId}` : null;
+}
+
+export function deudorNombreFromItem(item, fallbackCliente = null) {
+  if (!item) return fallbackCliente ? clienteLabel(fallbackCliente) : "—";
+  if (item.deudorNombre) return item.deudorNombre;
+  if (item.obligadoNombre) return item.obligadoNombre;
+  if (item.cliente) return clienteLabel(item.cliente);
+  return fallbackCliente ? clienteLabel(fallbackCliente) : "—";
+}
+
+export function isDeudorTercero(item) {
+  return Boolean(item?.tipoDeudor === "tercero" || item?.obligadoTerceroId != null);
+}
+
 export function conceptoLabel(item, conceptosById) {
   if (item?.concepto?.nombre) return item.concepto.nombre;
   if (item?.descripcion) return item.descripcion;
