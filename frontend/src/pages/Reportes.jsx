@@ -65,6 +65,7 @@ import {
 } from "@mui/icons-material";
 import api from "../api/axios";
 import { fetchEquipoUsuarios } from "../api/equipo";
+import { fetchAllPages } from "../api/pagination";
 import { useAuth } from "../auth/useAuth";
 import {
   casoLabel,
@@ -76,7 +77,6 @@ import {
   formatMoneyAr,
   isHonorarioPendiente,
   movementAmountPesos,
-  unwrapPaged,
 } from "./finanzasUtils";
 
 const CARD_TONES = {
@@ -420,25 +420,6 @@ function TableShell({ loading, isEmpty, emptyTitle, children }) {
   );
 }
 
-async function fetchReportItems(path, maxItems = 500) {
-  const pageSize = 100;
-  let page = 1;
-  let total = Infinity;
-  const items = [];
-
-  while (items.length < maxItems && items.length < total) {
-    const { data } = await api.get(path, { params: { page, limit: Math.min(pageSize, maxItems - items.length) } });
-    const result = unwrapPaged(data);
-    items.push(...result.items);
-    total = Number(result.meta?.total ?? items.length);
-
-    if (result.items.length < pageSize) break;
-    page += 1;
-  }
-
-  return items.slice(0, maxItems);
-}
-
 function StatusChip({ status }) {
   const tone = status === "Moroso" ? CARD_TONES.red : status === "Deudor" ? CARD_TONES.orange : CARD_TONES.green;
   return (
@@ -481,43 +462,43 @@ export default function Reportes() {
 
   const honorariosQuery = useQuery({
     queryKey: ["reportes", "honorarios"],
-    queryFn: () => fetchReportItems("/honorarios"),
+    queryFn: () => fetchAllPages("/honorarios"),
     staleTime: 60_000,
   });
 
   const gastosQuery = useQuery({
     queryKey: ["reportes", "gastos"],
-    queryFn: () => fetchReportItems("/gastos"),
+    queryFn: () => fetchAllPages("/gastos"),
     staleTime: 60_000,
   });
 
   const ingresosQuery = useQuery({
     queryKey: ["reportes", "ingresos"],
-    queryFn: () => fetchReportItems("/ingresos"),
+    queryFn: () => fetchAllPages("/ingresos"),
     staleTime: 60_000,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["reportes", "expedientes"],
-    queryFn: () => fetchReportItems("/expedientes"),
+    queryFn: () => fetchAllPages("/expedientes"),
     staleTime: 60_000,
   });
 
   const clientesQuery = useQuery({
     queryKey: ["reportes", "clientes"],
-    queryFn: () => fetchReportItems("/clientes"),
+    queryFn: () => fetchAllPages("/clientes"),
     staleTime: 60_000,
   });
 
   const tareasQuery = useQuery({
     queryKey: ["reportes", "tareas"],
-    queryFn: () => fetchReportItems("/tareas"),
+    queryFn: () => fetchAllPages("/tareas"),
     staleTime: 60_000,
   });
 
   const eventosQuery = useQuery({
     queryKey: ["reportes", "eventos"],
-    queryFn: () => fetchReportItems("/eventos"),
+    queryFn: () => fetchAllPages("/eventos"),
     staleTime: 60_000,
   });
 
@@ -549,21 +530,7 @@ export default function Reportes() {
   // Resumen de cuenta corriente por deudor calculado en el backend (motor Decimal).
   const ccResumenQuery = useQuery({
     queryKey: ["clientes", "cuentas-corrientes"],
-    queryFn: async () => {
-      // El backend limita a 100 por página: paginamos hasta traer todo.
-      const pageSize = 100;
-      const items = [];
-      let pageNum = 1;
-      for (;;) {
-        const { data } = await api.get("/clientes/cuentas-corrientes", { params: { limit: pageSize, page: pageNum } });
-        const page = data?.data?.items ?? data?.data ?? [];
-        if (!Array.isArray(page) || page.length === 0) break;
-        items.push(...page);
-        if (page.length < pageSize || items.length >= 10000) break;
-        pageNum += 1;
-      }
-      return items;
-    },
+    queryFn: () => fetchAllPages("/clientes/cuentas-corrientes"),
     staleTime: 60_000,
   });
 
