@@ -1,29 +1,75 @@
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { CasosQueries } from "../db/queries/casos.queries.js";
 import { GastosQueries } from "../db/queries/gastos.queries.js";
 import { HonorariosQueries } from "../db/queries/honorarios.queries.js";
 import { IngresosQueries } from "../db/queries/ingresos.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
+import { TercerosQueries } from "../db/queries/terceros.queries.js";
+import { db } from "../db/index.js";
+import { honorarios, ingresoAplicaciones, ingresos, planCuotas, planesPago } from "../db/schema.js";
 import { ValorJusService } from "./valorjus.service.js";
-import { buildCuentaCorriente, type CCAplicacion, type CCGasto, type CCHonorario, type CCIngreso, type CCResult } from "./cuenta-corriente.js";
+import {
+  buildCuentaCorriente,
+  type CCAplicacion,
+  type CCGasto,
+  type CCHonorario,
+  type CCIngreso,
+  type CCResult,
+} from "./cuenta-corriente.js";
+import {
+  deudorKey,
+  honorarioDeudorEsCliente,
+  resolveHonorarioDeudor,
+  type DeudorResuelto,
+} from "./honorario-deudor.js";
 import type { CuentaCorrienteResumenQueryInput } from "../schemas/clientes.schema.js";
 
-export type CCResumenCliente = {
-  clienteId: number;
+type CCHonorarioConMeta = CCHonorario & {
+  clienteId: number | null;
+  obligadoClienteId: number | null;
+  obligadoTerceroId: number | null;
+};
+
+type CCGastoConMeta = CCGasto & { clienteId: number | null };
+type CCIngresoConMeta = CCIngreso & { clienteId: number | null; id: number };
+
+export type CCResumenDeudor = {
+  tipoDeudor: "cliente" | "tercero";
+  clienteId: number | null;
+  terceroId: number | null;
+  deudorNombre: string;
   totales: CCResult["totales"];
 };
 
 /**
  * Carga los datos reales (honorarios + planes/cuotas/aplicaciones, gastos,
  * ingresos) y delega el cálculo al motor Decimal de cuenta-corriente.ts.
- * El frontend solo renderiza el resultado.
+ * Los saldos pivotan sobre el DEUDOR del honorario (obligado), no sobre clienteId del caso.
  */
 export class CuentaCorrienteService {
   static async getCuentaCorrienteCliente(clienteId: number, estudioId: number): Promise<CCResult> {
     const cliente = await ClientesQueries.findById(clienteId, estudioId);
     if (!cliente) throw new Error("CLIENTE_NOT_FOUND");
-    const datos = await this.loadDatos(estudioId, { clienteId });
-    return buildCuentaCorriente(datos);
+
+    const datos = await this.loadDatos(estudioId, {});
+    const honorariosCliente = datos.honorarios.filter((h) => honorarioDeudorEsCliente(h, clienteId));
+    const ingresosCliente = await this.filterIngresosParaDeudor(
+      estudioId,
+      datos.ingresos,
+      { tipo: "cliente", id: clienteId },
+      datos.honorarios,
+      clienteId,
+    );
+    const gastosCliente = datos.gastos.filter((g) => g.clienteId === clienteId);
+
+    return buildCuentaCorriente({
+      fechaCorte: datos.fechaCorte,
+      valorJusActual: datos.valorJusActual,
+      honorarios: honorariosCliente,
+      gastos: gastosCliente,
+      ingresos: ingresosCliente,
+    });
   }
 
   static async getCuentaCorrienteCaso(casoId: number, estudioId: number): Promise<CCResult> {
@@ -33,27 +79,71 @@ export class CuentaCorrienteService {
     return buildCuentaCorriente(datos);
   }
 
-  /** Resumen de cuenta corriente por cliente para todo el estudio (una sola pasada). */
+  /** Resumen de cuenta corriente por deudor (cliente o tercero) para todo el estudio. */
   static async getResumenPorCliente(estudioId: number, query: CuentaCorrienteResumenQueryInput) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const { orderBy = "saldo", order = "desc", search } = query;
     const datos = await this.loadDatos(estudioId, {});
 
-    const grupos = new Map<number, { honorarios: CCHonorario[]; gastos: CCGasto[]; ingresos: CCIngreso[] }>();
-    const ensure = (clienteId: number | null) => {
-      if (!clienteId) return null;
-      if (!grupos.has(clienteId)) grupos.set(clienteId, { honorarios: [], gastos: [], ingresos: [] });
-      return grupos.get(clienteId)!;
+    type Grupo = {
+      deudor: DeudorResuelto;
+      honorarios: CCHonorarioConMeta[];
+      gastos: CCGastoConMeta[];
+      ingresos: CCIngresoConMeta[];
     };
-    datos.honorarios.forEach((h) => ensure(h.clienteId)?.honorarios.push(h));
-    datos.gastos.forEach((g) => ensure(g.clienteId)?.gastos.push(g));
-    datos.ingresos.forEach((i) => ensure(i.clienteId)?.ingresos.push(i));
+
+    const grupos = new Map<string, Grupo>();
+    const ensure = (deudor: DeudorResuelto) => {
+      const key = deudorKey(deudor);
+      if (!grupos.has(key)) {
+        grupos.set(key, { deudor, honorarios: [], gastos: [], ingresos: [] });
+      }
+      return grupos.get(key)!;
+    };
+
+    for (const h of datos.honorarios) {
+      const deudor = resolveHonorarioDeudor(h);
+      if (!deudor) continue;
+      ensure(deudor).honorarios.push(h);
+    }
+
+    // Gastos siempre van al cliente del gasto.
+    for (const g of datos.gastos) {
+      if (!g.clienteId) continue;
+      ensure({ tipo: "cliente", id: g.clienteId }).gastos.push(g);
+    }
+
+    // Ingresos: atribuir al deudor de las deudas imputadas; sin apps → cliente del ingreso.
+    const ingresoDeudores = await this.mapIngresosADeudores(estudioId, datos.ingresos, datos.honorarios);
+    for (const ingreso of datos.ingresos) {
+      const deudores = ingresoDeudores.get(ingreso.id);
+      if (deudores && deudores.length > 0) {
+        for (const deudor of deudores) {
+          ensure(deudor).ingresos.push(ingreso);
+        }
+      } else if (ingreso.clienteId) {
+        ensure({ tipo: "cliente", id: ingreso.clienteId }).ingresos.push(ingreso);
+      }
+    }
 
     const { data: clientes } = await ClientesQueries.findAll(estudioId, 10000, 0, {});
     const clientesById = new Map(clientes.map((c) => [c.id, c]));
+    const { data: tercerosList } = await TercerosQueries.findAll(estudioId, 10000, 0);
+    const tercerosById = new Map(tercerosList.map((t) => [t.id, t]));
 
-    const rows = [...grupos.entries()].map(([clienteId, grupo]) => {
+    const formatPersona = (p: {
+      razonSocial?: string | null;
+      apellido?: string | null;
+      nombre?: string | null;
+    } | undefined, fallback: string) => {
+      if (!p) return fallback;
+      if (p.razonSocial) return p.razonSocial;
+      const compuesto = [p.apellido, p.nombre].filter(Boolean).join(", ");
+      return compuesto || p.nombre || fallback;
+    };
+
+    const rows = [...grupos.values()].map((grupo) => {
       const totales = buildCuentaCorriente({
         fechaCorte: datos.fechaCorte,
         valorJusActual: datos.valorJusActual,
@@ -61,17 +151,24 @@ export class CuentaCorrienteService {
         gastos: grupo.gastos,
         ingresos: grupo.ingresos,
       }).totales;
-      const cliente = clientesById.get(clienteId);
-      const clienteNombre = cliente?.razonSocial
-        || [cliente?.apellido, cliente?.nombre].filter(Boolean).join(", ")
-        || `Cliente #${clienteId}`;
+
+      const tipoDeudor = grupo.deudor.tipo;
+      const clienteId = tipoDeudor === "cliente" ? grupo.deudor.id : null;
+      const terceroId = tipoDeudor === "tercero" ? grupo.deudor.id : null;
+      const deudorNombre = tipoDeudor === "cliente"
+        ? formatPersona(clientesById.get(grupo.deudor.id), `Cliente #${grupo.deudor.id}`)
+        : formatPersona(tercerosById.get(grupo.deudor.id), `Tercero #${grupo.deudor.id}`);
+
       const totalCargos = Number(totales.honorariosPesos ?? 0) + Number(totales.gastosPesos ?? 0);
       const totalCobrado = Number(totales.ingresosPesos ?? 0);
       const saldoPendiente = Number(totales.saldoPesos ?? 0);
+
       return {
+        tipoDeudor,
         clienteId,
+        terceroId,
+        deudorNombre,
         totales,
-        clienteNombre,
         totalCargos,
         totalCobrado,
         saldoPendiente,
@@ -81,7 +178,7 @@ export class CuentaCorrienteService {
 
     const searchTerm = search?.trim().toLowerCase();
     const filtered = searchTerm
-      ? rows.filter((row) => [row.clienteNombre, row.estadoFinanciero].join(" ").toLowerCase().includes(searchTerm))
+      ? rows.filter((row) => [row.deudorNombre, row.estadoFinanciero, row.tipoDeudor].join(" ").toLowerCase().includes(searchTerm))
       : rows;
 
     const compare = (a: number | string, b: number | string) => {
@@ -94,8 +191,8 @@ export class CuentaCorrienteService {
       let valB: number | string;
       switch (orderBy) {
         case "cliente":
-          valA = a.clienteNombre;
-          valB = b.clienteNombre;
+          valA = a.deudorNombre;
+          valB = b.deudorNombre;
           break;
         case "cargos":
           valA = a.totalCargos;
@@ -116,11 +213,19 @@ export class CuentaCorrienteService {
       }
       const cmp = compare(valA, valB);
       if (cmp !== 0) return order === "desc" ? -cmp : cmp;
-      return a.clienteId - b.clienteId;
+      const idA = a.clienteId ?? a.terceroId ?? 0;
+      const idB = b.clienteId ?? b.terceroId ?? 0;
+      return idA - idB;
     });
 
     const offset = (page - 1) * limit;
-    const items = sorted.slice(offset, offset + limit).map(({ clienteId, totales }) => ({ clienteId, totales }));
+    const items: CCResumenDeudor[] = sorted.slice(offset, offset + limit).map((row) => ({
+      tipoDeudor: row.tipoDeudor,
+      clienteId: row.clienteId,
+      terceroId: row.terceroId,
+      deudorNombre: row.deudorNombre,
+      totales: row.totales,
+    }));
 
     return {
       items,
@@ -128,9 +233,137 @@ export class CuentaCorrienteService {
     };
   }
 
+  /**
+   * Atribuye cada ingreso a los deudores de las deudas imputadas.
+   * Si no hay aplicaciones, no entra en el map (caller usa clienteId del ingreso).
+   */
+  private static async mapIngresosADeudores(
+    estudioId: number,
+    ingresosList: CCIngresoConMeta[],
+    honorariosList: CCHonorarioConMeta[],
+  ): Promise<Map<number, DeudorResuelto[]>> {
+    const result = new Map<number, DeudorResuelto[]>();
+    if (ingresosList.length === 0) return result;
+
+    const honorarioById = new Map(honorariosList.map((h) => [h.id, h]));
+    const ingresoIds = ingresosList.map((i) => i.id);
+    if (ingresoIds.length === 0) return result;
+
+    const apps = await db
+      .select({
+        ingresoId: ingresoAplicaciones.ingresoId,
+        honorarioId: ingresoAplicaciones.honorarioId,
+        cuotaId: ingresoAplicaciones.cuotaId,
+        gastoId: ingresoAplicaciones.gastoId,
+      })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
+      .where(and(
+        inArray(ingresoAplicaciones.ingresoId, ingresoIds),
+        eq(ingresoAplicaciones.activo, true),
+        isNull(ingresoAplicaciones.deletedAt),
+        isNull(ingresos.deletedAt),
+        eq(ingresos.estudioId, estudioId),
+      ));
+
+    const cuotaIds = [...new Set(apps.map((a) => a.cuotaId).filter((id): id is number => id != null))];
+    const cuotaToHonorario = new Map<number, number>();
+    if (cuotaIds.length > 0) {
+      const cuotaRows = await db
+        .select({
+          cuotaId: planCuotas.id,
+          honorarioId: planesPago.honorarioId,
+        })
+        .from(planCuotas)
+        .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+        .where(inArray(planCuotas.id, cuotaIds));
+      for (const row of cuotaRows) {
+        cuotaToHonorario.set(row.cuotaId, row.honorarioId);
+      }
+    }
+
+    // Honorarios referenciados por cuota / app que no estaban en la lista cargada.
+    const referencedHonorarioIds = new Set<number>();
+    for (const app of apps) {
+      if (app.honorarioId) referencedHonorarioIds.add(app.honorarioId);
+    }
+    for (const honorarioId of cuotaToHonorario.values()) {
+      referencedHonorarioIds.add(honorarioId);
+    }
+    const missingHonorarioIds = [...referencedHonorarioIds].filter((id) => !honorarioById.has(id));
+    if (missingHonorarioIds.length > 0) {
+      const missing = await db
+        .select({
+          id: honorarios.id,
+          clienteId: honorarios.clienteId,
+          obligadoClienteId: honorarios.obligadoClienteId,
+          obligadoTerceroId: honorarios.obligadoTerceroId,
+        })
+        .from(honorarios)
+        .where(and(
+          eq(honorarios.estudioId, estudioId),
+          inArray(honorarios.id, missingHonorarioIds),
+          isNull(honorarios.deletedAt),
+        ));
+      for (const h of missing) {
+        honorarioById.set(h.id, {
+          id: h.id,
+          clienteId: h.clienteId,
+          obligadoClienteId: h.obligadoClienteId,
+          obligadoTerceroId: h.obligadoTerceroId,
+        } as CCHonorarioConMeta);
+      }
+    }
+
+    for (const app of apps) {
+      if (result.has(app.ingresoId)) continue; // un ingreso se atribuye a un solo deudor (primera imputación)
+
+      let honorarioId = app.honorarioId;
+      if (!honorarioId && app.cuotaId) {
+        honorarioId = cuotaToHonorario.get(app.cuotaId) ?? null;
+      }
+
+      let deudor: DeudorResuelto | null = null;
+      if (honorarioId) {
+        const h = honorarioById.get(honorarioId);
+        if (h) deudor = resolveHonorarioDeudor(h);
+      } else if (app.gastoId) {
+        const ingreso = ingresosList.find((i) => i.id === app.ingresoId);
+        if (ingreso?.clienteId) deudor = { tipo: "cliente", id: ingreso.clienteId };
+      }
+
+      if (!deudor) continue;
+      result.set(app.ingresoId, [deudor]);
+    }
+
+    return result;
+  }
+
+  private static async filterIngresosParaDeudor(
+    estudioId: number,
+    ingresosList: CCIngresoConMeta[],
+    deudor: DeudorResuelto,
+    honorariosList: CCHonorarioConMeta[],
+    fallbackClienteId: number | null,
+  ): Promise<CCIngresoConMeta[]> {
+    const map = await this.mapIngresosADeudores(estudioId, ingresosList, honorariosList);
+
+    return ingresosList.filter((ingreso) => {
+      const deudores = map.get(ingreso.id);
+      if (deudores && deudores.length > 0) {
+        return deudores.some((d) => d.tipo === deudor.tipo && d.id === deudor.id);
+      }
+      // Sin aplicaciones: pago a cuenta del cliente.
+      if (deudor.tipo === "cliente" && fallbackClienteId != null) {
+        return ingreso.clienteId === fallbackClienteId;
+      }
+      return false;
+    });
+  }
+
   private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {
     const fechaCorte = new Date();
-    const [{ data: honorarios }, { data: gastos }, { data: ingresos }, valorJusActual, planes] = await Promise.all([
+    const [{ data: honorariosRows }, { data: gastos }, { data: ingresosRows }, valorJusActual, planes] = await Promise.all([
       HonorariosQueries.findHonorarios(estudioId, filters, { limit: 10000, offset: 0 }),
       GastosQueries.findGastos(estudioId, filters, { limit: 10000, offset: 0 }),
       IngresosQueries.findIngresos(estudioId, filters, { limit: 10000, offset: 0 }),
@@ -147,7 +380,7 @@ export class CuentaCorrienteService {
 
     const planByHonorario = new Map(planes.map((plan) => [plan.honorarioId, plan]));
 
-    const ccHonorarios = await Promise.all(honorarios.map(async (honorario): Promise<CCHonorario & { clienteId: number | null }> => {
+    const ccHonorarios = await Promise.all(honorariosRows.map(async (honorario): Promise<CCHonorarioConMeta> => {
       const plan = planByHonorario.get(honorario.id) ?? null;
 
       let ccPlan: CCHonorario["plan"] = null;
@@ -187,6 +420,8 @@ export class CuentaCorrienteService {
       return {
         id: honorario.id,
         clienteId: honorario.clienteId,
+        obligadoClienteId: honorario.obligadoClienteId ?? null,
+        obligadoTerceroId: honorario.obligadoTerceroId ?? null,
         descripcion: honorario.concepto?.nombre ?? "Honorario",
         fechaRegulacion: honorario.fechaRegulacion,
         fechaVencimiento: honorario.fechaVencimiento,
@@ -205,7 +440,7 @@ export class CuentaCorrienteService {
       fechaCorte,
       valorJusActual: String(valorJusActual ?? 0),
       honorarios: ccHonorarios,
-      gastos: gastos.map((gasto): CCGasto & { clienteId: number | null } => ({
+      gastos: gastos.map((gasto): CCGastoConMeta => ({
         id: gasto.id,
         clienteId: gasto.clienteId,
         descripcion: gasto.descripcion ?? "Gasto",
@@ -213,7 +448,7 @@ export class CuentaCorrienteService {
         monto: gasto.monto,
         cotizacionArs: gasto.cotizacionArs,
       })),
-      ingresos: ingresos.map((ingreso): CCIngreso & { clienteId: number | null } => ({
+      ingresos: ingresosRows.map((ingreso): CCIngresoConMeta => ({
         id: ingreso.id,
         clienteId: ingreso.clienteId,
         descripcion: ingreso.descripcion ?? "Ingreso",

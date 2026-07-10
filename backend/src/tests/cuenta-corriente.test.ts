@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildCuentaCorriente, type CCHonorario, type CCIngreso } from "../services/cuenta-corriente.js";
+import {
+  honorarioDeudorEsCliente,
+  resolveHonorarioDeudor,
+} from "../services/honorario-deudor.js";
 
 const VJ = "132863.1800"; // valor JUS de referencia de los casos reales
 
@@ -20,6 +24,99 @@ function honorarioBase(overrides: Partial<CCHonorario>): CCHonorario {
     ...overrides,
   };
 }
+
+describe("resolveHonorarioDeudor", () => {
+  it("prioriza obligadoTerceroId sobre cliente", () => {
+    expect(resolveHonorarioDeudor({
+      clienteId: 10,
+      obligadoClienteId: 10,
+      obligadoTerceroId: 55,
+    })).toEqual({ tipo: "tercero", id: 55 });
+  });
+
+  it("usa obligadoClienteId si no hay tercero", () => {
+    expect(resolveHonorarioDeudor({
+      clienteId: 10,
+      obligadoClienteId: 22,
+      obligadoTerceroId: null,
+    })).toEqual({ tipo: "cliente", id: 22 });
+  });
+
+  it("fallback a clienteId cuando ambos obligados son null (registros viejos)", () => {
+    expect(resolveHonorarioDeudor({
+      clienteId: 10,
+      obligadoClienteId: null,
+      obligadoTerceroId: null,
+    })).toEqual({ tipo: "cliente", id: 10 });
+  });
+
+  it("honorario con obligado tercero NO pertenece al cliente del caso", () => {
+    const h = { clienteId: 10, obligadoClienteId: null, obligadoTerceroId: 55 };
+    expect(honorarioDeudorEsCliente(h, 10)).toBe(false);
+    expect(honorarioDeudorEsCliente(h, 55)).toBe(false);
+  });
+
+  it("honorario sin obligado sí suma al cliente (fallback)", () => {
+    const h = { clienteId: 10, obligadoClienteId: null, obligadoTerceroId: null };
+    expect(honorarioDeudorEsCliente(h, 10)).toBe(true);
+  });
+});
+
+describe("cuenta corriente: filtrado por deudor", () => {
+  it("honorario con deudor tercero no entra en el saldo del cliente", () => {
+    const delCliente = honorarioBase({
+      id: 1,
+      montoPesos: "100000.00",
+      monedaCodigo: "ARS",
+      jus: null,
+    });
+    const delTercero = honorarioBase({
+      id: 2,
+      montoPesos: "500000.00",
+      monedaCodigo: "ARS",
+      jus: null,
+    });
+
+    const honorariosCliente = [
+      { ...delCliente, clienteId: 10, obligadoClienteId: null, obligadoTerceroId: null },
+      { ...delTercero, clienteId: 10, obligadoClienteId: null, obligadoTerceroId: 99 },
+    ].filter((h) => honorarioDeudorEsCliente(h, 10));
+
+    const result = buildCuentaCorriente({
+      fechaCorte: new Date("2026-06-09T00:00:00.000Z"),
+      valorJusActual: VJ,
+      honorarios: honorariosCliente,
+      gastos: [],
+      ingresos: [],
+    });
+
+    // Solo el de $100.000 (fallback cliente); el de $500.000 del tercero queda fuera.
+    expect(result.totales.honorariosPesos).toBe(100000);
+    expect(result.totales.saldoPesos).toBe(100000);
+  });
+
+  it("honorario sin obligado (legacy) sí suma al clienteId", () => {
+    const legacy = honorarioBase({
+      id: 3,
+      montoPesos: "25000.00",
+      monedaCodigo: "ARS",
+      jus: null,
+    });
+    const honorarios = [
+      { ...legacy, clienteId: 7, obligadoClienteId: null, obligadoTerceroId: null },
+    ].filter((h) => honorarioDeudorEsCliente(h, 7));
+
+    const result = buildCuentaCorriente({
+      fechaCorte: new Date("2026-06-09T00:00:00.000Z"),
+      valorJusActual: VJ,
+      honorarios,
+      gastos: [],
+      ingresos: [],
+    });
+
+    expect(result.totales.saldoPesos).toBe(25000);
+  });
+});
 
 describe("cuenta corriente (motor Decimal)", () => {
   it("caso A: honorario 4 JUS AL_COBRO con cobro de $300.000 deja saldo $231.452,72", () => {

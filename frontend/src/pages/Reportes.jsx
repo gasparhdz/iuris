@@ -546,20 +546,19 @@ export default function Reportes() {
     staleTime: 60_000,
   });
 
-  // Resumen de cuenta corriente por cliente calculado en el backend (motor Decimal).
+  // Resumen de cuenta corriente por deudor calculado en el backend (motor Decimal).
   const ccResumenQuery = useQuery({
     queryKey: ["clientes", "cuentas-corrientes"],
     queryFn: async () => {
-      const { data } = await api.get("/clientes/cuentas-corrientes");
-      return data?.data ?? [];
+      const { data } = await api.get("/clientes/cuentas-corrientes", { params: { limit: 10000 } });
+      return data?.data?.items ?? data?.data ?? [];
     },
     staleTime: 60_000,
   });
 
-  const ccTotalesByCliente = useMemo(() => {
-    const map = new Map();
-    (ccResumenQuery.data ?? []).forEach(({ clienteId, totales }) => map.set(Number(clienteId), totales));
-    return map;
+  const ccResumenItems = useMemo(() => {
+    const raw = ccResumenQuery.data;
+    return Array.isArray(raw) ? raw : [];
   }, [ccResumenQuery.data]);
 
   const catalogQuery = useQuery({
@@ -628,9 +627,14 @@ export default function Reportes() {
     const honorariosExport = periodHonorarios.map((item) => {
       const expediente = item.expediente || item.caso || expedientesById.get(Number(item.expedienteId ?? item.casoId));
       const cliente = item.cliente || expediente?.cliente || clientesById.get(getClienteId(item));
+      const deudor = item.obligadoNombre
+        || item.parte?.nombre
+        || clienteLabel(cliente)
+        || "Sin deudor";
       return {
         Fecha: formatDateShort(item.fechaRegulacion || item.fecha),
         Cliente: clienteLabel(cliente) || "Sin cliente",
+        Deudor: deudor,
         Expediente: casoLabel(expediente) || "Sin expediente",
         Monto: computeHonorarioAmounts(item, valorJusActual, catalogMonedas, catalogPoliticas).updatedVal,
         Estado: isHonorarioPendiente(item) ? "Pendiente" : "Cobrado",
@@ -676,15 +680,23 @@ export default function Reportes() {
   }, [isDirector, equipo, tareas, expedientes]);
 
   const cartera = useMemo(() => {
-    const rows = clientes.map((cliente) => {
-      const clienteId = Number(cliente.id);
-      const totales = ccTotalesByCliente.get(clienteId);
+    const rows = ccResumenItems.map((item) => {
+      const tipoDeudor = item.tipoDeudor ?? "cliente";
+      const clienteId = item.clienteId != null ? Number(item.clienteId) : null;
+      const terceroId = item.terceroId != null ? Number(item.terceroId) : null;
+      const totales = item.totales;
       const saldo = Number(totales?.saldoPesos || 0);
       const estado = saldo > 50_000 ? "Moroso" : saldo > 0 ? "Deudor" : "Al día";
+      const nombre = item.deudorNombre
+        || (clienteId != null ? getPersonaName(clientesById.get(clienteId)) : null)
+        || (tipoDeudor === "tercero" ? `Tercero #${terceroId}` : `Cliente #${clienteId}`);
       return {
-        id: cliente.id,
-        cliente: getPersonaName(cliente),
-        expedientesActivos: expedientes.filter((expediente) => getExpedienteClienteId(expediente) === clienteId && isExpedienteActivo(expediente)).length,
+        id: tipoDeudor === "tercero" ? `tercero:${terceroId}` : `cliente:${clienteId}`,
+        tipoDeudor,
+        cliente: nombre,
+        expedientesActivos: clienteId != null
+          ? expedientes.filter((expediente) => getExpedienteClienteId(expediente) === clienteId && isExpedienteActivo(expediente)).length
+          : 0,
         honorariosPendientes: Number(totales?.honorariosPendientesPesos || 0),
         saldo,
         estado,
@@ -693,12 +705,12 @@ export default function Reportes() {
 
     const query = clientSearch.trim().toLowerCase();
     return rows
-      .filter((row) => !query || row.cliente.toLowerCase().includes(query))
+      .filter((row) => !query || row.cliente.toLowerCase().includes(query) || row.tipoDeudor.includes(query))
       .sort((a, b) => {
         const direction = clientOrder === "asc" ? 1 : -1;
         return compareValues(a[clientOrderBy], b[clientOrderBy]) * direction;
       });
-  }, [clientes, expedientes, ccTotalesByCliente, clientSearch, clientOrderBy, clientOrder]);
+  }, [ccResumenItems, clientesById, expedientes, clientSearch, clientOrderBy, clientOrder]);
 
   const clientesEstadoPie = useMemo(() => {
     const counts = new Map([
@@ -711,17 +723,21 @@ export default function Reportes() {
   }, [cartera]);
 
   const resumenFinanciero = useMemo(() => {
-    // Saldos reales por cliente (sin filtro de búsqueda), usando la cuenta corriente
+    // Saldos reales por deudor (sin filtro de búsqueda), usando la cuenta corriente
     let totalHonorariosPendientes = 0;
     let totalACobrar = 0;
     const deudores = [];
-    clientes.forEach((cliente) => {
-      const clienteId = Number(cliente.id);
-      const totales = ccTotalesByCliente.get(clienteId);
+    ccResumenItems.forEach((item) => {
+      const totales = item.totales;
       const saldo = Math.max(0, Number(totales?.saldoPesos || 0));
       totalHonorariosPendientes += Number(totales?.honorariosPendientesPesos || 0);
       totalACobrar += saldo;
-      if (saldo > 0) deudores.push({ name: compactLabel(getPersonaName(cliente), 22), saldo });
+      if (saldo > 0) {
+        const nombre = item.deudorNombre
+          || (item.clienteId != null ? getPersonaName(clientesById.get(Number(item.clienteId))) : null)
+          || (item.tipoDeudor === "tercero" ? `Tercero #${item.terceroId}` : `Cliente #${item.clienteId}`);
+        deudores.push({ name: compactLabel(nombre, 22), saldo });
+      }
     });
 
     // Período: cobrado (ingresos) y gastos
@@ -762,7 +778,7 @@ export default function Reportes() {
       mensual: buckets,
       topDeudores: deudores.sort((a, b) => b.saldo - a.saldo).slice(0, 8),
     };
-  }, [clientes, ingresos, gastos, proyeccionCuotas, from, to, valorJusActual, catalogMonedas, ccTotalesByCliente]);
+  }, [ccResumenItems, clientesById, ingresos, gastos, proyeccionCuotas, from, to, valorJusActual, catalogMonedas]);
 
   const SIN_MOVIMIENTO_DIAS = 90;
 
@@ -870,7 +886,8 @@ export default function Reportes() {
       clientes: {
         name: "Cartera",
         rows: cartera.map((row) => ({
-          Cliente: row.cliente,
+          Deudor: row.cliente,
+          Tipo: row.tipoDeudor === "tercero" ? "Tercero" : "Cliente",
           "Expedientes activos": row.expedientesActivos,
           "Honorarios pendientes": row.honorariosPendientes,
           Saldo: row.saldo,
@@ -1112,7 +1129,7 @@ export default function Reportes() {
                       <TableHead>
                         <TableRow>
                           {[
-                            ["cliente", "Cliente"],
+                            ["cliente", "Deudor"],
                             ["expedientesActivos", "Expedientes activos"],
                             ["honorariosPendientes", "Honorarios pendientes"],
                             ["estado", "Estado"],
@@ -1128,7 +1145,14 @@ export default function Reportes() {
                       <TableBody>
                         {cartera.map((row) => (
                           <TableRow key={row.id} hover>
-                            <TableCell sx={{ fontWeight: 900 }}>{row.cliente}</TableCell>
+                            <TableCell sx={{ fontWeight: 900 }}>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <span>{row.cliente}</span>
+                                {row.tipoDeudor === "tercero" && (
+                                  <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
+                                )}
+                              </Stack>
+                            </TableCell>
                             <TableCell align="right">{row.expedientesActivos}</TableCell>
                             <TableCell align="right">{formatMoneyAr(row.honorariosPendientes)}</TableCell>
                             <TableCell><StatusChip status={row.estado} /></TableCell>
