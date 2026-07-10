@@ -272,6 +272,7 @@ export class PlanesService {
 
   static async registrarIngreso(estudioId: number, userId: number, data: CreateIngresoInput) {
     await assertMonedaSoportada(data.monedaId);
+    await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
     let cuotaIds = [...(data.cuotaIds ?? [])];
     let gastoIds = [...(data.gastoIds ?? [])];
     let honorarioIds = [...(data.honorarioIds ?? [])];
@@ -327,6 +328,7 @@ export class PlanesService {
         .from(gastos)
         .where(
           and(
+            eq(gastos.estudioId, estudioId),
             eq(gastos.clienteId, data.clienteId),
             data.casoId ? eq(gastos.casoId, data.casoId) : undefined,
             eq(gastos.activo, true),

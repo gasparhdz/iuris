@@ -59,6 +59,16 @@ const envSchema = z.object({
   SISFE_SYNC_MODE: z.enum(["api", "browser"]).default("browser"),
   SISFE_DIAS_NOVEDADES: z.coerce.number().int().positive().default(7),
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === "production") {
+    const jwtOk = env.JWT_SECRET.length >= 32 || isBase64Encoded32Bytes(env.JWT_SECRET);
+    if (!jwtOk) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["JWT_SECRET"],
+        message: "JWT_SECRET en produccion debe tener al menos 32 caracteres (o 32 bytes en base64). Generar con: openssl rand -base64 32",
+      });
+    }
+  }
   if (env.NODE_ENV === "production" && !env.CORS_ORIGIN?.trim()) {
     ctx.addIssue({
       code: "custom",

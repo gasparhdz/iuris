@@ -86,8 +86,9 @@ server.register(helmet, {
 });
 
 // Store de rate-limit en Redis para que el limite sea global entre instancias (no por proceso).
-// Config fail-open: si Redis no responde rapido, no bloquea la request (el limite degrada a no
-// aplicarse en vez de romper el endpoint).
+// Config fail-open para rutas generales: si Redis no responde, no bloquea la request.
+// Los endpoints de auth (/login, /forgot-password) tienen además un fallback in-memory
+// fail-safe (auth-ip-throttle + login-throttle) que NUNCA degrada a sin límite.
 const rateLimitRedis = new Redis({
   host: env.REDIS_HOST,
   port: env.REDIS_PORT,
@@ -96,13 +97,13 @@ const rateLimitRedis = new Redis({
   enableOfflineQueue: false,
   lazyConnect: true,
 });
-rateLimitRedis.on("error", (err: Error) => server.log.warn({ err }, "Redis de rate-limit no disponible (degradando a sin limite)"));
+rateLimitRedis.on("error", (err: Error) => server.log.warn({ err }, "Redis de rate-limit no disponible (auth usa fallback in-memory)"));
 
 server.register(rateLimit, {
   global: false, // Solo aplica a rutas que lo configuren explícitamente
   redis: rateLimitRedis,
-  // Fail-open real: si el store de Redis falla (caído/inaccesible), se omite el límite
-  // en vez de rechazar la request. Sin esto, un Redis caído devuelve 429 y rompe el login.
+  // Fail-open para rutas no-auth: si Redis falla, se omite el límite de esa ruta.
+  // Auth no depende solo de esto: ver assertAuthIpRateLimit / login-throttle.
   skipOnError: true,
 });
 server.register(multipart, {

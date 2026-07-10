@@ -13,6 +13,7 @@ import {
   userProfileResponseSchema,
 } from "../schemas/auth.schema.js";
 import { env } from "../env.js";
+import { assertAuthIpRateLimit, assertForgotPasswordIpRateLimit } from "../services/auth-ip-throttle.js";
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
@@ -49,6 +50,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     "/login",
     {
       ...rateLimitConfig,
+      preHandler: [assertAuthIpRateLimit],
       schema: {
         tags: ["Auth"],
         summary: "Iniciar sesion",
@@ -66,13 +68,16 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     "/register-tenant",
     {
       ...rateLimitConfig,
-      preHandler: async (_request, reply) => {
-        if (env.NODE_ENV === "production") {
-          return reply.status(403).send({
-            error: { code: "REGISTRATION_DISABLED", message: "Registro no disponible" },
-          });
-        }
-      },
+      preHandler: [
+        assertAuthIpRateLimit,
+        async (_request, reply) => {
+          if (env.NODE_ENV === "production") {
+            return reply.status(403).send({
+              error: { code: "REGISTRATION_DISABLED", message: "Registro no disponible" },
+            });
+          }
+        },
+      ],
       schema: {
         tags: ["Auth"],
         summary: "Registrar un nuevo Estudio y Usuario Admin",
@@ -141,6 +146,7 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     "/forgot-password",
     {
       ...forgotPasswordRateLimitConfig,
+      preHandler: [assertForgotPasswordIpRateLimit],
       schema: {
         tags: ["Auth"],
         summary: "Iniciar recupero de contraseña",

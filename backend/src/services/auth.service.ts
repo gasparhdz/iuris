@@ -13,8 +13,12 @@ import type {
 } from "../schemas/auth.schema.js";
 import { EmailService } from "./email.service.js";
 import { assertAccountNotLocked, clearLoginThrottle, registerFailedLogin } from "./login-throttle.js";
+import { logger } from "../utils/logger.js";
 
 type RefreshTokenMeta = { userAgent?: string; ip?: string };
+
+/** Hash bcrypt cost-12 fijo: iguala el timing cuando el email no existe. */
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("__iuris_timing_dummy__", 12);
 
 export class AuthService {
   static async login(data: LoginInput) {
@@ -24,17 +28,24 @@ export class AuthService {
     // 1. Buscar usuario
     const user = await AuthQueries.findUserByEmail(data.email);
     if (!user) {
+      await bcrypt.compare(data.password, DUMMY_PASSWORD_HASH);
       await registerFailedLogin(data.email);
       throw new Error("INVALID_CREDENTIALS");
     }
 
     if (!user.activo) {
-      throw new Error("USER_DISABLED");
+      logger.warn({ userId: user.id }, "Login denegado: usuario deshabilitado");
+      await bcrypt.compare(data.password, user.passwordHash);
+      await registerFailedLogin(data.email);
+      throw new Error("INVALID_CREDENTIALS");
     }
 
     const estudio = await AuthQueries.findEstudioById(user.estudioId);
     if (!estudio?.activo) {
-      throw new Error("STUDY_DISABLED");
+      logger.warn({ userId: user.id, estudioId: user.estudioId }, "Login denegado: estudio suspendido");
+      await bcrypt.compare(data.password, user.passwordHash);
+      await registerFailedLogin(data.email);
+      throw new Error("INVALID_CREDENTIALS");
     }
 
     // 2. Verificar contraseña (cost factor 12)
@@ -197,6 +208,8 @@ export class AuthService {
       const tokenHash = await bcrypt.hash(token, 12);
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
+      // Invalidar tokens previos antes de emitir uno nuevo.
+      await AuthQueries.invalidateActivePasswordResetTokens(user.id);
       await AuthQueries.insertPasswordResetToken({
         usuarioId: user.id,
         tokenHash,
@@ -228,7 +241,8 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(data.newPassword, 12);
     await AuthQueries.updateUserPassword(user.id, passwordHash);
     await AuthQueries.incrementUserTokenVersion(user.id);
-    await AuthQueries.markPasswordResetTokenUsed(storedToken.id);
+    // Invalida el usado y cualquier hermano restante.
+    await AuthQueries.invalidateActivePasswordResetTokens(user.id);
     await AuthQueries.revokeActiveRefreshTokensByUserId(user.id);
 
     return { message: "Contraseña restablecida exitosamente" };

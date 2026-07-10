@@ -1,6 +1,8 @@
 import { IngresosQueries } from "../db/queries/ingresos.queries.js";
 import { GastosQueries } from "../db/queries/gastos.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
+import { ClientesQueries } from "../db/queries/clientes.queries.js";
+import { CasosQueries } from "../db/queries/casos.queries.js";
 import { db } from "../db/index.js";
 import { serializeDates } from "../utils/serialize.js";
 import { PlanesService } from "./planes.service.js";
@@ -39,6 +41,21 @@ export class IngresosService {
 
   static async update(id: number, estudioId: number, userId: number, data: UpdateIngresoInput) {
     if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
+
+    const currentPreview = await IngresosQueries.findIngresoById(id, estudioId);
+    if (!currentPreview) throw new Error("INGRESO_NOT_FOUND");
+
+    const nextClienteId = data.clienteId !== undefined ? data.clienteId : currentPreview.clienteId;
+    const nextCasoId = data.casoId !== undefined ? data.casoId : currentPreview.casoId;
+    if (nextClienteId != null) {
+      const cliente = await ClientesQueries.findById(nextClienteId, estudioId);
+      if (!cliente) throw new Error("CLIENTE_NOT_FOUND");
+    }
+    if (nextCasoId != null) {
+      const caso = await CasosQueries.findById(nextCasoId, estudioId);
+      if (!caso) throw new Error("CASO_NOT_FOUND");
+    }
+
     const { current, ingreso } = await db.transaction(async (tx) => {
       const current = await IngresosQueries.findIngresoById(id, estudioId, tx);
       if (!current) throw new Error("INGRESO_NOT_FOUND");

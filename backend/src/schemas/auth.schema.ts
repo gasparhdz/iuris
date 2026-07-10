@@ -1,8 +1,11 @@
 import { z } from "zod";
 
+const passwordSchema = z.string().min(12, "La contrasena debe tener al menos 12 caracteres");
+
 export const loginSchema = z.object({
   email: z.string().email("Debe ser un email valido"),
-  password: z.string().min(6, "La contrasena debe tener al menos 6 caracteres"),
+  // Login acepta cualquier longitud no vacía: la política fuerte aplica al setear/cambiar.
+  password: z.string().min(1, "La contrasena es requerida"),
 }).strict();
 
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -12,7 +15,7 @@ export const registerTenantSchema = z.object({
   usuarioNombre: z.string().min(2, "El nombre es requerido"),
   usuarioApellido: z.string().min(2, "El apellido es requerido"),
   email: z.string().email("Debe ser un email valido"),
-  password: z.string().min(6, "La contrasena debe tener al menos 6 caracteres"),
+  password: passwordSchema,
 }).strict();
 
 export type RegisterTenantInput = z.infer<typeof registerTenantSchema>;
@@ -26,8 +29,8 @@ export const updateProfileSchema = z.object({
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(6, "La contrasena actual debe tener al menos 6 caracteres"),
-  newPassword: z.string().min(6, "La nueva contrasena debe tener al menos 6 caracteres"),
+  currentPassword: z.string().min(1, "La contrasena actual es requerida"),
+  newPassword: passwordSchema,
 }).strict();
 
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
@@ -41,7 +44,7 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export const resetPasswordSchema = z.object({
   email: z.string().email("Debe ser un email valido"),
   token: z.string().min(1, "El token es requerido"),
-  newPassword: z.string().min(6, "La nueva contrasena debe tener al menos 6 caracteres"),
+  newPassword: passwordSchema,
 }).strict();
 
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

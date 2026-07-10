@@ -59,8 +59,8 @@ export class AuthController {
       if (error instanceof Error && error.message === "ACCOUNT_LOCKED") {
         return reply.status(429).send({ error: { code: "ACCOUNT_LOCKED", message: "Demasiados intentos fallidos. Probá de nuevo en unos minutos." } });
       }
-      if (error instanceof Error && (error.message === "INVALID_CREDENTIALS" || error.message === "USER_DISABLED" || error.message === "STUDY_DISABLED")) {
-        return reply.status(401).send({ error: { code: error.message, message: "Credenciales invalidas o usuario deshabilitado" } });
+      if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
+        return reply.status(401).send({ error: { code: "INVALID_CREDENTIALS", message: "Credenciales invalidas" } });
       }
       request.log.error(error);
       return reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "Error interno del servidor" } });

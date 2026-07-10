@@ -2,8 +2,10 @@ import fp from "fastify-plugin";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { jsonSchemaTransform } from "fastify-type-provider-zod";
+import { env } from "../env.js";
 
 export const swaggerPlugin = fp(async (fastify) => {
+  // OpenAPI schema siempre disponible para el type provider; la UI /docs solo en no-prod.
   await fastify.register(swagger, {
     openapi: {
       info: {
@@ -23,6 +25,8 @@ export const swaggerPlugin = fp(async (fastify) => {
     },
     transform: jsonSchemaTransform,
   });
+
+  if (env.NODE_ENV === "production") return;
 
   await fastify.register(swaggerUi, {
     routePrefix: "/docs",

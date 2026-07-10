@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { ValorJusController } from "../controllers/valorjus.controller.js";
+import { isSuperRole, forbidden } from "../controllers/admin.controller.js";
 import { documentedResponses, successMessageResponseSchema } from "../schemas/common.schema.js";
 import {
   createValorJusSchema,
@@ -16,12 +17,21 @@ import {
 
 export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
-  const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
-    preHandler: [fastify.authenticate, fastify.authorize("VALORJUS", accion)],
-  });
+  const canRead = {
+    preHandler: [fastify.authenticate, fastify.authorize("VALORJUS", "ver")],
+  };
+  // Mutaciones tocan el registro GLOBAL (estudioId=1): solo admin de plataforma.
+  const canMutate = {
+    preHandler: [
+      fastify.authenticate,
+      async (request: Parameters<typeof isSuperRole>[0], reply: Parameters<typeof forbidden>[0]) => {
+        if (!isSuperRole(request)) return forbidden(reply);
+      },
+    ],
+  };
 
   server.get("/actual", {
-    ...can("ver"),
+    ...canRead,
     schema: {
       tags: ["Valor JUS"],
       summary: "Obtener valor JUS actual",
@@ -32,7 +42,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findActual);
 
   server.get("/historico", {
-    ...can("ver"),
+    ...canRead,
     schema: {
       tags: ["Valor JUS"],
       summary: "Obtener valor JUS historico por fecha",
@@ -43,7 +53,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findActual);
 
   server.get("/", {
-    ...can("ver"),
+    ...canRead,
     schema: {
       tags: ["Valor JUS"],
       summary: "Listar historico de valores JUS",
@@ -54,7 +64,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.findAll);
 
   server.post("/", {
-    ...can("crear"),
+    ...canMutate,
     schema: {
       tags: ["Valor JUS"],
       summary: "Crear valor JUS",
@@ -65,7 +75,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.create);
 
   server.post("/sync", {
-    ...can("crear"),
+    ...canMutate,
     schema: {
       tags: ["Valor JUS"],
       summary: "Sincronizar valores JUS desde el portal oficial",
@@ -75,7 +85,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.sync);
 
   server.put("/:id", {
-    ...can("editar"),
+    ...canMutate,
     schema: {
       tags: ["Valor JUS"],
       summary: "Actualizar valor JUS",
@@ -87,7 +97,7 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
   }, ValorJusController.update);
 
   server.delete("/:id", {
-    ...can("eliminar"),
+    ...canMutate,
     schema: {
       tags: ["Valor JUS"],
       summary: "Eliminar valor JUS",

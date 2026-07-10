@@ -254,6 +254,14 @@ export class AuthQueries {
     return row;
   }
 
+  /** Marca como usados todos los reset tokens activos del usuario (emisión o uso exitoso). */
+  static async invalidateActivePasswordResetTokens(usuarioId: number) {
+    await db
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(passwordResetTokens.usuarioId, usuarioId), isNull(passwordResetTokens.usedAt)));
+  }
+
   static async findActivePasswordResetTokensByUserId(usuarioId: number) {
     return await db
       .select()

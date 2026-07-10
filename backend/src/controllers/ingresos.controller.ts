@@ -60,6 +60,8 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
   const errors: Record<string, string> = {
     INGRESO_NOT_FOUND: "Ingreso no encontrado",
     CUOTA_NOT_FOUND: "Cuota no encontrada",
+    CLIENTE_NOT_FOUND: "Cliente no encontrado",
+    CASO_NOT_FOUND: "Expediente no encontrado",
   };
 
   const message = errors[error.message];

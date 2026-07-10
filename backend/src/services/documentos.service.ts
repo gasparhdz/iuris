@@ -5,6 +5,15 @@ import { PlantillasQueries } from "../db/queries/plantillas.queries.js";
 import { getStorage } from "../storage/factory.js";
 import { serializeDates } from "../utils/serialize.js";
 
+export function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export class DocumentosService {
   static async generarDocumento(plantillaId: number, casoId: number, estudioId: number): Promise<{ htmlGenerado: string; titulo: string; driveFolderId: string | null }> {
     const plantilla = await PlantillasQueries.findPlantillaById(plantillaId, estudioId);
@@ -14,13 +23,13 @@ export class DocumentosService {
     if (!context) throw new Error("CASO_NOT_FOUND");
 
     const replacements: Record<string, string> = {
-      estudio_nombre: context.estudio.nombre,
-      cliente_nombre: formatClienteNombre(context.cliente),
-      cliente_dni_cuit: context.cliente.dni ?? context.cliente.cuit ?? "",
-      caso_caratula: context.caso.caratula ?? "",
-      caso_nro_expte: context.caso.nroExpte ?? "",
-      caso_juzgado: context.juzgado?.nombre ?? "",
-      fecha_hoy: formatFecha(new Date()),
+      estudio_nombre: escapeHtml(context.estudio.nombre),
+      cliente_nombre: escapeHtml(formatClienteNombre(context.cliente)),
+      cliente_dni_cuit: escapeHtml(context.cliente.dni ?? context.cliente.cuit ?? ""),
+      caso_caratula: escapeHtml(context.caso.caratula ?? ""),
+      caso_nro_expte: escapeHtml(context.caso.nroExpte ?? ""),
+      caso_juzgado: escapeHtml(context.juzgado?.nombre ?? ""),
+      fecha_hoy: escapeHtml(formatFecha(new Date())),
     };
 
     const htmlGenerado = plantilla.contenidoHtml.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, key: string) => replacements[key] ?? "");

@@ -40,7 +40,7 @@ describe("register-tenant — gate de producción", () => {
           usuarioNombre: "Test",
           usuarioApellido: "User",
           email: `blocked_${Date.now()}@test.local`,
-          password: "123456",
+          password: "password-segura-12",
         },
       });
       expect(res.statusCode).toBe(403);
@@ -57,10 +57,10 @@ describe("register-tenant — gate de producción", () => {
       url: "/auth/register-tenant",
       payload: {
         estudioNombre: "X",
-        usuarioNombre: "T",
-        usuarioApellido: "U",
+        usuarioNombre: "Te",
+        usuarioApellido: "Us",
         email: "not-an-email",
-        password: "123456",
+        password: "password-segura-12",
       },
     });
     expect(res.statusCode).not.toBe(403);
