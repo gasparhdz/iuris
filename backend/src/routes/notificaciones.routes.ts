@@ -8,6 +8,7 @@ import { documentedResponses } from "../schemas/common.schema.js";
 import { AuthQueries } from "../db/queries/auth.queries.js";
 import { PushService } from "../services/push.service.js";
 import { AgendarMovimientoService } from "../services/agendar-movimiento.service.js";
+import { casoPadreVivo, clientePadreVivo } from "../services/notificaciones.service.js";
 import { env } from "../env.js";
 import { PreferenciasCobranzaQueries } from "../db/queries/preferencias-cobranza.queries.js";
 
@@ -162,6 +163,8 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
             eq(tareas.completada, false),
             eq(tareas.activo, true),
             isNull(tareas.deletedAt),
+            casoPadreVivo(tareas.casoId),
+            clientePadreVivo(tareas.clienteId),
             verTareas ? undefined : sql`false`
           )
         ),
@@ -181,6 +184,8 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
             eq(eventos.recordatorioEnviado, false),
             eq(eventos.activo, true),
             isNull(eventos.deletedAt),
+            casoPadreVivo(eventos.casoId),
+            clientePadreVivo(eventos.clienteId),
             verEventos ? undefined : sql`false`
           )
         ),

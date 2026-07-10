@@ -2,24 +2,25 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/index.js";
 import { usuarios } from "../db/schema.js";
+import { env } from "../env.js";
 import {
   CobranzaRecordatorioQueries,
   PreferenciasCobranzaQueries,
 } from "../db/queries/preferencias-cobranza.queries.js";
 import {
   agruparCuotasPorUsuario,
-  buildCobranzaPushBody,
   clasificarCuotasCobranza,
   isPastDailyCobranzaWindow,
   startOfDayArgentina,
   toArgentinaDateString,
 } from "./cobranza-recordatorio.js";
+import { buildCobranzaPushCopy, NOTIFICATION_PATHS } from "./notification-copy.js";
 import { EmailService } from "./email.service.js";
 import { PushService } from "./push.service.js";
 
 export async function procesarRecordatoriosCobranza(logger: FastifyBaseLogger) {
   const now = new Date();
-  if (!isPastDailyCobranzaWindow(now)) return;
+  if (!isPastDailyCobranzaWindow(now, env.COBRANZA_HORA_ART)) return;
 
   const hoyArgentina = startOfDayArgentina(now);
   const fechaLog = toArgentinaDateString(now);
@@ -64,9 +65,10 @@ export async function procesarRecordatoriosCobranza(logger: FastifyBaseLogger) {
 
       if (preferencias.porEmail) {
         try {
-          await EmailService.sendRecordatorioCobranza({ vencidas, porVencer }, usuario);
-          enviadoEmail = true;
-          logger.info({ usuarioId, canal: "email" }, "Recordatorio de cobranza enviado");
+          enviadoEmail = await EmailService.sendRecordatorioCobranza({ vencidas, porVencer }, usuario);
+          if (enviadoEmail) {
+            logger.info({ usuarioId, canal: "email" }, "Recordatorio de cobranza enviado");
+          }
         } catch (error) {
           logger.error({ err: error, usuarioId, canal: "email" }, "Error enviando recordatorio de cobranza por email");
         }
@@ -74,14 +76,16 @@ export async function procesarRecordatoriosCobranza(logger: FastifyBaseLogger) {
 
       if (preferencias.porPush) {
         try {
-          await PushService.sendToUsuario(usuarioId, {
-            title: "Cobranzas pendientes",
-            body: buildCobranzaPushBody(vencidas.length, porVencer.length),
-            url: "/finanzas",
+          const pushCopy = buildCobranzaPushCopy({ vencidas, porVencer });
+          enviadoPush = await PushService.sendToUsuario(usuarioId, {
+            title: pushCopy.title,
+            body: pushCopy.body,
+            url: NOTIFICATION_PATHS.cobranza(),
             tag: "cobranza-diaria",
           }, logger);
-          enviadoPush = true;
-          logger.info({ usuarioId, canal: "push" }, "Recordatorio de cobranza enviado");
+          if (enviadoPush) {
+            logger.info({ usuarioId, canal: "push" }, "Recordatorio de cobranza enviado");
+          }
         } catch (error) {
           logger.error({ err: error, usuarioId, canal: "push" }, "Error enviando recordatorio de cobranza por push");
         }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   agruparCuotasPorUsuario,
-  buildCobranzaPushBody,
   clasificarCuotasCobranza,
   cuotaTieneSaldoPendiente,
   formatSaldoCuota,
@@ -10,6 +9,7 @@ import {
   startOfDayArgentina,
   type CuotaRecordatorio,
 } from "../services/cobranza-recordatorio.js";
+import { buildCobranzaPushBody } from "../services/notification-copy.js";
 
 function cuota(overrides: Partial<CuotaRecordatorio> = {}): CuotaRecordatorio {
   return {
@@ -120,9 +120,11 @@ describe("cobranza-recordatorio", () => {
     expect(buildCobranzaPushBody(0, 1)).toBe("1 por vencer");
   });
 
-  it("habilita la ventana diaria a partir de las 08:00 hora Argentina", () => {
+  it("habilita la ventana diaria a partir de la hora ART configurada (default 8)", () => {
     expect(isPastDailyCobranzaWindow(new Date("2026-07-08T12:00:00.000Z"))).toBe(true);
     expect(isPastDailyCobranzaWindow(new Date("2026-07-08T10:00:00.000Z"))).toBe(false);
+    expect(isPastDailyCobranzaWindow(new Date("2026-07-08T10:00:00.000Z"), 7)).toBe(true);
+    expect(isPastDailyCobranzaWindow(new Date("2026-07-08T12:00:00.000Z"), 10)).toBe(false);
   });
 
   it("usa el nombre del deudor tercero en el recordatorio de cuotas del plan", () => {

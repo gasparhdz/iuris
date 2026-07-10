@@ -36,3 +36,4 @@ Thumbs.db
 # Notas y documentacion interna (no versionar)
 TODO.md
 scratch/
+backend/tmp/

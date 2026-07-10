@@ -78,13 +78,17 @@ export class PushService {
       ));
   }
 
+  /**
+   * @returns true si al menos una suscripción recibió el push.
+   * TODO: persistir métricas de fallos push (conteo/último error) para operación.
+   */
   static async sendToUsuario(
     usuarioId: number,
     payload: PushPayload,
     logger: FastifyBaseLogger,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!PushService.isEnabled()) {
-      return;
+      return false;
     }
 
     try {
@@ -94,10 +98,11 @@ export class PushService {
         .where(eq(pushSubscriptions.usuarioId, usuarioId));
 
       if (subscriptions.length === 0) {
-        return;
+        return false;
       }
 
       const body = JSON.stringify(payload);
+      let enviado = false;
 
       for (const sub of subscriptions) {
         try {
@@ -116,6 +121,7 @@ export class PushService {
             .update(pushSubscriptions)
             .set({ lastUsedAt: new Date() })
             .where(eq(pushSubscriptions.id, sub.id));
+          enviado = true;
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;
 
@@ -127,11 +133,15 @@ export class PushService {
             continue;
           }
 
+          // TODO: métricas de fallos push persistidas (no solo log).
           logger.warn({ err: error, usuarioId, subscriptionId: sub.id }, "Error enviando push a suscripcion");
         }
       }
+
+      return enviado;
     } catch (error) {
       logger.error({ err: error, usuarioId }, "Error general enviando push al usuario");
+      return false;
     }
   }
 }

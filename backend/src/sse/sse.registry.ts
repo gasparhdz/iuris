@@ -3,11 +3,11 @@ import type { FastifyReply } from "fastify";
 /**
  * Registro en memoria de conexiones SSE abiertas, indexadas por usuario.
  *
- * NOTA DE ESCALA: este registro vive en el proceso. Hoy el backend corre como
- * instancia única (ver reset de sync 'running' al arrancar en server.ts), por lo
- * que alcanza. Si en el futuro se escala horizontalmente, hay que abanicar los
- * eventos entre instancias con Redis Pub/Sub (ya tenemos ioredis disponible):
- * cada instancia publica en un canal y todas reenvían a sus conexiones locales.
+ * TODO(SSE multi-instancia): este registro vive en el proceso. Hoy el backend
+ * corre como instancia única (ver reset de sync 'running' al arrancar en
+ * server.ts), por lo que alcanza. Si se escala horizontalmente, abanicar
+ * eventos entre instancias con Redis Pub/Sub (ioredis ya disponible): cada
+ * instancia publica en un canal y todas reenvían a sus conexiones locales.
  */
 const conexiones = new Map<number, Set<FastifyReply>>();
 

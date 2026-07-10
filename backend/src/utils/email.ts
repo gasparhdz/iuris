@@ -12,17 +12,18 @@ export const transporter = env.SMTP_HOST
   : null;
 
 if (!transporter) {
-  logger.warn("SMTP no configurado; email omitido en entorno actual.");
+  logger.warn("emails deshabilitados: SMTP_HOST no configurado");
 }
 
 export async function sendEmail(to: string, subject: string, html: string) {
   if (!transporter) {
-    logger.warn("SMTP no configurado; email omitido en entorno actual.");
+    logger.warn("emails deshabilitados: envío omitido");
     return;
   }
 
   await transporter.sendMail({
     from: `"Iuris" <${env.SMTP_FROM ?? env.SMTP_USER}>`,
+    replyTo: env.SMTP_REPLY_TO?.trim() || undefined,
     to,
     subject,
     html,

@@ -18,6 +18,7 @@ import {
 } from "../schema.js";
 import type { CuotaRecordatorio } from "../../services/cobranza-recordatorio.js";
 import { PREFERENCIAS_COBRANZA_DEFAULTS } from "../../services/cobranza-recordatorio.js";
+import { padresCasoClienteVivos } from "./padre-vivo.js";
 
 export type PreferenciasCobranza = {
   habilitado: boolean;
@@ -179,8 +180,8 @@ export class CobranzaRecordatorioQueries {
         eq(honorarios.obligadoClienteId, obligadoCliente.id),
         eq(obligadoCliente.estudioId, planesPago.estudioId),
       ))
-      // LEFT JOIN: no filtrar deletedAt en WHERE (un plan sin caso/cliente o con
-      // caso/cliente soft-deleted sigue entrando a recordatorios).
+      // LEFT JOIN sin filtrar deletedAt en el ON: planes sin vínculo (FK null) siguen
+      // entrando; padres soft-deleted se excluyen con padresCasoClienteVivos en WHERE.
       .leftJoin(clientes, and(
         eq(planesPago.clienteId, clientes.id),
         eq(clientes.estudioId, planesPago.estudioId),
@@ -197,6 +198,12 @@ export class CobranzaRecordatorioQueries {
         ne(planCuotas.estadoId, estadoPagadaId),
         estadoCondonadaId ? ne(planCuotas.estadoId, estadoCondonadaId) : undefined,
         sql`${planesPago.createdBy} IS NOT NULL`,
+        padresCasoClienteVivos({
+          casoId: planesPago.casoId,
+          casoDeletedAt: casos.deletedAt,
+          clienteId: planesPago.clienteId,
+          clienteDeletedAt: clientes.deletedAt,
+        }),
       ));
 
     return rows

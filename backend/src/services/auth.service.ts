@@ -11,7 +11,7 @@ import type {
   ResetPasswordInput,
   UpdateProfileInput,
 } from "../schemas/auth.schema.js";
-import { sendEmail } from "../utils/email.js";
+import { EmailService } from "./email.service.js";
 import { assertAccountNotLocked, clearLoginThrottle, registerFailedLogin } from "./login-throttle.js";
 
 type RefreshTokenMeta = { userAgent?: string; ip?: string };
@@ -204,13 +204,9 @@ export class AuthService {
       });
 
       const resetUrl = `${env.APP_URL}/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(user.email)}`;
-      await sendEmail(
+      await EmailService.sendRecuperarPassword(
+        { nombre: user.nombre, resetUrl },
         user.email,
-        "Iuris — Recuperar Contraseña",
-        buildPasswordResetEmail({
-          nombre: user.nombre,
-          resetUrl,
-        })
       );
     }
 
@@ -302,31 +298,4 @@ async function findMatchingPasswordResetToken(
 
 function hashRefreshTokenJti(jti: string) {
   return crypto.createHash("sha256").update(jti).digest("hex");
-}
-
-function buildPasswordResetEmail({ nombre, resetUrl }: { nombre: string; resetUrl: string }) {
-  return `
-    <div style="font-family: Inter, Arial, sans-serif; background:#f6f7fb; padding:32px;">
-      <div style="max-width:560px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:16px; overflow:hidden;">
-        <div style="height:4px; background:linear-gradient(90deg,#6366f1,#14b8a6);"></div>
-        <div style="padding:32px;">
-          <h1 style="margin:0 0 12px; color:#111827; font-size:24px;">Recuperar contraseña</h1>
-          <p style="margin:0 0 18px; color:#374151; line-height:1.6;">Hola ${escapeHtml(nombre)}, recibimos una solicitud para restablecer tu contraseña de Iuris.</p>
-          <p style="margin:0 0 24px; color:#374151; line-height:1.6;">Usá el siguiente botón para crear una nueva contraseña. El enlace expira en 1 hora.</p>
-          <a href="${resetUrl}" style="display:inline-block; background:#4f46e5; color:#ffffff; text-decoration:none; font-weight:700; padding:12px 18px; border-radius:10px;">Restablecer contraseña</a>
-          <p style="margin:24px 0 0; color:#6b7280; line-height:1.6; font-size:14px;">Si no solicitaste este cambio, podés ignorar este email.</p>
-          <p style="margin:16px 0 0; color:#9ca3af; line-height:1.6; font-size:12px; word-break:break-all;">${resetUrl}</p>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }

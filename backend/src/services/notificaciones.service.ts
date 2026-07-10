@@ -6,6 +6,12 @@ import { casos, clientes, eventos, subTareas, tareas, usuarios } from "../db/sch
 import { EmailService } from "./email.service.js";
 import { PushService } from "./push.service.js";
 import { procesarRecordatoriosCobranza } from "./cobranza-notificaciones.service.js";
+import {
+  buildEventoPushCopy,
+  buildTareaPushCopy,
+  NOTIFICATION_PATHS,
+  type CasoResumenNotificacion,
+} from "./notification-copy.js";
 
 let cronStarted = false;
 let isProcessing = false;
@@ -39,7 +45,8 @@ export function iniciarCronNotificaciones(logger: FastifyBaseLogger) {
   logger.info("Cron de notificaciones iniciado");
 }
 
-function casoPadreVivo(casoIdCol: typeof tareas.casoId | typeof eventos.casoId) {
+/** Caso vinculado vivo, o sin caso (FK null). Usado por cron y /notificaciones/pendientes. */
+export function casoPadreVivo(casoIdCol: typeof tareas.casoId | typeof eventos.casoId) {
   return or(
     isNull(casoIdCol),
     exists(
@@ -51,7 +58,8 @@ function casoPadreVivo(casoIdCol: typeof tareas.casoId | typeof eventos.casoId) 
   );
 }
 
-function clientePadreVivo(clienteIdCol: typeof tareas.clienteId | typeof eventos.clienteId) {
+/** Cliente vinculado vivo, o sin cliente (FK null). Usado por cron y /notificaciones/pendientes. */
+export function clientePadreVivo(clienteIdCol: typeof tareas.clienteId | typeof eventos.clienteId) {
   return or(
     isNull(clienteIdCol),
     exists(
@@ -63,10 +71,24 @@ function clientePadreVivo(clienteIdCol: typeof tareas.clienteId | typeof eventos
   );
 }
 
+async function liberarClaimTarea(tareaId: number) {
+  await db
+    .update(tareas)
+    .set({ recordatorioEnviado: false, updatedAt: new Date() })
+    .where(and(eq(tareas.id, tareaId), eq(tareas.recordatorioEnviado, true)));
+}
+
+async function liberarClaimEvento(eventoId: number) {
+  await db
+    .update(eventos)
+    .set({ recordatorioEnviado: false, updatedAt: new Date() })
+    .where(and(eq(eventos.id, eventoId), eq(eventos.recordatorioEnviado, true)));
+}
+
 async function procesarRecordatorios(logger: FastifyBaseLogger) {
   const now = new Date();
 
-  // Claim atómico: solo las filas reclamadas se envían (evita duplicados por doble instancia/reinicio).
+  // Claim atómico: evita duplicados entre instancias. Si ambos canales fallan, se libera.
   const tareasPendientes = await db
     .update(tareas)
     .set({ recordatorioEnviado: true, updatedAt: new Date() })
@@ -106,25 +128,52 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         continue;
       }
 
-      const casoCaratula = tarea.casoId ? await findCasoCaratula(tarea.casoId) : null;
+      const caso = tarea.casoId ? await findCasoResumen(tarea.casoId) : null;
       const subtareas = await findSubtareasTarea(tarea.id, tarea.estudioId);
 
-      await EmailService.sendRecordatorioTarea({
-        titulo: tarea.titulo,
-        descripcion: tarea.descripcion,
-        fechaLimite: tarea.fechaLimite,
-        casoCaratula,
-        subtareas,
-      }, usuario);
+      let enviadoEmail = false;
+      let enviadoPush = false;
 
-      await PushService.sendToUsuario(usuarioId, {
-        title: "Recordatorio de tarea",
-        body: tarea.titulo,
-        url: "/tareas",
-        tag: `tarea-${tarea.id}`,
-      }, logger);
+      try {
+        enviadoEmail = await EmailService.sendRecordatorioTarea({
+          id: tarea.id,
+          titulo: tarea.titulo,
+          descripcion: tarea.descripcion,
+          fechaLimite: tarea.fechaLimite,
+          caso,
+          subtareas,
+        }, usuario);
+      } catch (error) {
+        logger.error({ err: error, tareaId: tarea.id, canal: "email" }, "Error enviando recordatorio de tarea por email");
+      }
+
+      try {
+        const pushCopy = buildTareaPushCopy({
+          titulo: tarea.titulo,
+          fechaLimite: tarea.fechaLimite,
+          caso,
+        });
+        enviadoPush = await PushService.sendToUsuario(usuarioId, {
+          title: pushCopy.title,
+          body: pushCopy.body,
+          url: NOTIFICATION_PATHS.tarea(tarea.id),
+          tag: `tarea-${tarea.id}`,
+        }, logger);
+      } catch (error) {
+        logger.error({ err: error, tareaId: tarea.id, canal: "push" }, "Error enviando recordatorio de tarea por push");
+      }
+
+      if (!enviadoEmail && !enviadoPush) {
+        await liberarClaimTarea(tarea.id);
+        logger.warn({ tareaId: tarea.id }, "Recordatorio de tarea sin canales OK; claim liberado para reintento");
+      }
     } catch (error) {
       logger.error({ err: error, tareaId: tarea.id }, "Error enviando recordatorio de tarea");
+      try {
+        await liberarClaimTarea(tarea.id);
+      } catch (releaseError) {
+        logger.error({ err: releaseError, tareaId: tarea.id }, "Error liberando claim de recordatorio de tarea");
+      }
     }
   }
 
@@ -147,6 +196,7 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
       fechaInicio: eventos.fechaInicio,
       createdBy: eventos.createdBy,
       estudioId: eventos.estudioId,
+      casoId: eventos.casoId,
     });
 
   for (const evento of eventosPendientes) {
@@ -162,30 +212,60 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         continue;
       }
 
-      await EmailService.sendRecordatorioEvento({
-        descripcion: evento.descripcion,
-        fechaInicio: evento.fechaInicio,
-      }, usuario);
+      const caso = evento.casoId ? await findCasoResumen(evento.casoId) : null;
 
-      await PushService.sendToUsuario(evento.createdBy, {
-        title: "Recordatorio de evento",
-        body: evento.descripcion ?? "Evento próximo",
-        url: "/agenda",
-        tag: `evento-${evento.id}`,
-      }, logger);
+      let enviadoEmail = false;
+      let enviadoPush = false;
+
+      try {
+        enviadoEmail = await EmailService.sendRecordatorioEvento({
+          id: evento.id,
+          descripcion: evento.descripcion,
+          fechaInicio: evento.fechaInicio,
+          caso,
+        }, usuario);
+      } catch (error) {
+        logger.error({ err: error, eventoId: evento.id, canal: "email" }, "Error enviando recordatorio de evento por email");
+      }
+
+      try {
+        const pushCopy = buildEventoPushCopy({
+          descripcion: evento.descripcion,
+          fechaInicio: evento.fechaInicio,
+          caso,
+        });
+        enviadoPush = await PushService.sendToUsuario(evento.createdBy, {
+          title: pushCopy.title,
+          body: pushCopy.body,
+          url: NOTIFICATION_PATHS.evento(evento.id),
+          tag: `evento-${evento.id}`,
+        }, logger);
+      } catch (error) {
+        logger.error({ err: error, eventoId: evento.id, canal: "push" }, "Error enviando recordatorio de evento por push");
+      }
+
+      if (!enviadoEmail && !enviadoPush) {
+        await liberarClaimEvento(evento.id);
+        logger.warn({ eventoId: evento.id }, "Recordatorio de evento sin canales OK; claim liberado para reintento");
+      }
     } catch (error) {
       logger.error({ err: error, eventoId: evento.id }, "Error enviando recordatorio de evento");
+      try {
+        await liberarClaimEvento(evento.id);
+      } catch (releaseError) {
+        logger.error({ err: releaseError, eventoId: evento.id }, "Error liberando claim de recordatorio de evento");
+      }
     }
   }
 }
 
-async function findCasoCaratula(casoId: number) {
+async function findCasoResumen(casoId: number): Promise<CasoResumenNotificacion | null> {
   const [caso] = await db
-    .select({ caratula: casos.caratula })
+    .select({ caratula: casos.caratula, nroExpte: casos.nroExpte })
     .from(casos)
     .where(and(eq(casos.id, casoId), isNull(casos.deletedAt)))
     .limit(1);
-  return caso?.caratula ?? null;
+  return caso ?? null;
 }
 
 async function findUsuarioDestino(usuarioId: number) {

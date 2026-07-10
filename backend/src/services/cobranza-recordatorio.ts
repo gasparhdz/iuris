@@ -59,13 +59,13 @@ export function resolveNombreDeudorCobranza(input: {
   return input.clienteNombre?.trim() || "Sin cliente";
 }
 
-export function isPastDailyCobranzaWindow(now: Date): boolean {
+export function isPastDailyCobranzaWindow(now: Date, horaArt = 8): boolean {
   const hour = Number(new Intl.DateTimeFormat("en-US", {
     timeZone: APP_TIMEZONE,
     hour: "numeric",
     hour12: false,
   }).format(now));
-  return hour >= 8;
+  return hour >= horaArt;
 }
 
 function resolveJusPagados(
@@ -140,17 +140,4 @@ export function agruparCuotasPorUsuario(cuotas: CuotaRecordatorio[]): Map<number
     map.set(cuota.createdBy, list);
   }
   return map;
-}
-
-export function buildCobranzaPushBody(vencidasCount: number, porVencerCount: number): string {
-  const parts: string[] = [];
-  if (vencidasCount > 0) {
-    parts.push(`${vencidasCount} cuota${vencidasCount === 1 ? "" : "s"} vencida${vencidasCount === 1 ? "" : "s"}`);
-  }
-  if (porVencerCount > 0) {
-    parts.push(`${porVencerCount} por vencer`);
-  }
-  if (parts.length === 0) return "Cobranzas pendientes";
-  if (parts.length === 1) return parts[0];
-  return `${parts[0]} y ${parts[1]}`;
 }
