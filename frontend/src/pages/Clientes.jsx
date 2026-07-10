@@ -346,6 +346,18 @@ export default function Clientes() {
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}>
           <CircularProgress />
         </Box>
+      ) : clientesQuery.isError ? (
+        <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            No se pudieron cargar los clientes
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5, mb: 2 }}>
+            Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+          </Typography>
+          <Button variant="contained" onClick={() => clientesQuery.refetch()} sx={{ fontWeight: 800 }}>
+            Reintentar
+          </Button>
+        </Paper>
       ) : totalCount === 0 ? (
         <Paper elevation={0} sx={{ ...panelSx, p: 5, borderRadius: "16px", textAlign: "center" }}>
           <Person sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />

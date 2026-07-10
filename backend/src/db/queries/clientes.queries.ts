@@ -325,7 +325,13 @@ export class ClientesQueries {
       .from(honorarios)
       .leftJoin(concepto, eq(honorarios.conceptoId, concepto.id))
       .leftJoin(estado, eq(honorarios.estadoId, estado.id))
-      .where(and(eq(honorarios.clienteId, clienteId), eq(honorarios.estudioId, estudioId), isNull(honorarios.deletedAt)))
+      .where(and(
+        eq(honorarios.estudioId, estudioId),
+        isNull(honorarios.deletedAt),
+        // Solo honorarios cuyo deudor es este cliente (excluye obligado tercero).
+        isNull(honorarios.obligadoTerceroId),
+        sql`coalesce(${honorarios.obligadoClienteId}, ${honorarios.clienteId}) = ${clienteId}`,
+      ))
       .orderBy(desc(honorarios.fechaRegulacion), desc(honorarios.id));
   }
 
@@ -333,7 +339,7 @@ export class ClientesQueries {
     return await db
       .select()
       .from(gastos)
-      .where(and(eq(gastos.clienteId, clienteId), eq(gastos.estudioId, estudioId), eq(gastos.activo, true)))
+      .where(and(eq(gastos.clienteId, clienteId), eq(gastos.estudioId, estudioId), eq(gastos.activo, true), isNull(gastos.deletedAt)))
       .orderBy(desc(gastos.fechaGasto), desc(gastos.id));
   }
 
@@ -366,7 +372,7 @@ export class ClientesQueries {
       })
       .from(ingresos)
       .leftJoin(ingresoAplicaciones, and(eq(ingresoAplicaciones.ingresoId, ingresos.id), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)))
-      .where(and(eq(ingresos.clienteId, clienteId), eq(ingresos.estudioId, estudioId), eq(ingresos.activo, true)))
+      .where(and(eq(ingresos.clienteId, clienteId), eq(ingresos.estudioId, estudioId), eq(ingresos.activo, true), isNull(ingresos.deletedAt)))
       .groupBy(ingresos.id)
       .orderBy(desc(ingresos.fechaIngreso), desc(ingresos.id));
   }

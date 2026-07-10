@@ -132,6 +132,7 @@ export default function ClienteDetalle() {
   const honorariosPerm = usePermisos("HONORARIOS");
   const gastosPerm = usePermisos("GASTOS");
   const ingresosPerm = usePermisos("INGRESOS");
+  const { canEditar: canEditarCliente } = usePermisos("CLIENTES");
   const canCrearFinanzas = honorariosPerm.canCrear || gastosPerm.canCrear || ingresosPerm.canCrear;
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -378,9 +379,11 @@ export default function ClienteDetalle() {
               </Stack>
             </Box>
           </Stack>
-          <Button variant="outlined" onClick={() => navigate(`/clientes/editar/${id}`)} sx={{ borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" }, py: { xs: 1, sm: 0.5 } }}>
-            Editar Cliente
-          </Button>
+          {canEditarCliente && (
+            <Button variant="outlined" onClick={() => navigate(`/clientes/editar/${id}`)} sx={{ borderRadius: "10px", fontWeight: 900, width: { xs: "100%", sm: "auto" }, py: { xs: 1, sm: 0.5 } }}>
+              Editar Cliente
+            </Button>
+          )}
         </Stack>
 
         <Divider sx={{ my: 2.5 }} />
@@ -509,9 +512,11 @@ export default function ClienteDetalle() {
         <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, md: 3 } }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
             <Typography variant="h6" sx={{ fontWeight: 900 }}>Contactos secundarios</Typography>
-            <Button variant="outlined" size="small" onClick={() => navigate(`/clientes/editar/${id}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
-              Editar contactos
-            </Button>
+            {canEditarCliente && (
+              <Button variant="outlined" size="small" onClick={() => navigate(`/clientes/editar/${id}`)} sx={{ borderRadius: "10px", fontWeight: 900 }}>
+                Editar contactos
+              </Button>
+            )}
           </Stack>
           {contactos.length === 0 ? (
             <Typography variant="body2" sx={{ color: "text.secondary" }}>

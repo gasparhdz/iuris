@@ -23,8 +23,15 @@ function validarCuit(cuit: string): boolean {
   return verificadorCalculado === Number.parseInt(limpio[10], 10);
 }
 
+// TODO: migrar validación de tipoPersonaId a codigo (PERSONA_FISICA / PERSONA_JURIDICA)
+// en lugar de sets de IDs hardcodeados (dev vs prod pueden diferir).
+const TIPO_PERSONA_IDS_VALIDOS = new Set([...PERSONA_FISICA_IDS, ...PERSONA_JURIDICA_IDS]);
+
 const clienteBaseObjectSchema = z.object({
-  tipoPersonaId: positiveIntSchema,
+  tipoPersonaId: positiveIntSchema.refine(
+    (id) => TIPO_PERSONA_IDS_VALIDOS.has(id),
+    { message: "tipoPersonaId inválido: debe ser un ID de TIPO_PERSONA válido" },
+  ),
   nombre: z.string().max(100).optional().nullable(),
   apellido: z.string().max(100).optional().nullable(),
   razonSocial: z.string().max(255).optional().nullable(),
@@ -362,7 +369,10 @@ export const cuentaCorrienteResponseSchema = z.object({
 export const cuentaCorrienteResumenResponseSchema = z.object({
   data: z.object({
     items: z.array(z.object({
-      clienteId: z.number(),
+      tipoDeudor: z.enum(["cliente", "tercero"]),
+      clienteId: z.number().nullable(),
+      terceroId: z.number().nullable().optional(),
+      deudorNombre: z.string().optional(),
       totales: cuentaCorrienteTotalesSchema,
     })),
     meta: paginationMetaSchema,

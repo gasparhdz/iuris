@@ -24,9 +24,6 @@ export class ClientesController {
       if (error instanceof Error && error.message === "CLIENTE_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Cliente no encontrado" } });
       }
-      if (error instanceof Error && error.message === "CLIENTE_HAS_LIVE_INGRESOS") {
-        return reply.status(409).send({ error: { code: "CONFLICT", message: "No se puede eliminar un cliente con ingresos activos" } });
-      }
       throw error;
     }
   }
@@ -91,6 +88,14 @@ export class ClientesController {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "CLIENTE_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Cliente no encontrado" } });
+      }
+      if (error instanceof Error && error.message === "CLIENTE_HAS_LIVE_INGRESOS") {
+        return reply.status(409).send({
+          error: {
+            code: "CONFLICT",
+            message: "No se puede eliminar: el cliente tiene ingresos registrados",
+          },
+        });
       }
       throw error;
     }

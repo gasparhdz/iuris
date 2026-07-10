@@ -290,7 +290,7 @@ export default function ClienteForm() {
   const edadCliente = isFisica ? calcularEdad(form.fechaNacimiento) : null;
   const showMinorWarning = isFisica && edadCliente !== null && edadCliente < 18;
 
-  const { data: cliente, isLoading } = useQuery({
+  const { data: cliente, isLoading, isError } = useQuery({
     queryKey: ["clientes", id],
     queryFn: async () => {
       const { data } = await api.get(`/clientes/${id}/detalle`);
@@ -311,20 +311,37 @@ export default function ClienteForm() {
     mutationFn: async (payload) => {
       if (isEdit) {
         const { data } = await api.put(`/clientes/${id}`, mapFrontendToDb(payload));
-        return data?.data ?? data;
+        return { mode: "edit", cliente: data?.data ?? data };
       }
       const { data } = await api.post("/clientes", mapFrontendToDb(payload));
       const nuevoCliente = data?.data ?? data;
+      let contactosFallidos = 0;
       for (const contacto of localContactos) {
-        await api.post(`/clientes/${nuevoCliente.id}/contactos`, mapContactoToDb(contacto));
+        try {
+          await api.post(`/clientes/${nuevoCliente.id}/contactos`, mapContactoToDb(contacto));
+        } catch {
+          contactosFallidos += 1;
+        }
       }
-      return nuevoCliente;
+      return { mode: "create", cliente: nuevoCliente, contactosFallidos };
     },
-    onSuccess: () => {
-      enqueueSnackbar(isEdit ? "Cliente actualizado correctamente" : "Cliente creado correctamente", { variant: "success" });
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["clientes"] });
-      if (isEdit) queryClient.invalidateQueries({ queryKey: ["clientes", id] });
-      navigate("/clientes");
+      if (result.mode === "edit") {
+        enqueueSnackbar("Cliente actualizado correctamente", { variant: "success" });
+        queryClient.invalidateQueries({ queryKey: ["clientes", id] });
+        navigate("/clientes");
+        return;
+      }
+      if (result.contactosFallidos > 0) {
+        enqueueSnackbar(
+          `Cliente creado, pero no se pudieron guardar ${result.contactosFallidos} contactos — agregalos desde el detalle`,
+          { variant: "warning" },
+        );
+      } else {
+        enqueueSnackbar("Cliente creado correctamente", { variant: "success" });
+      }
+      navigate(`/clientes/${result.cliente.id}`);
     },
     onError: (error) => {
       enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo guardar el cliente", { variant: "error" });
@@ -499,6 +516,25 @@ export default function ClienteForm() {
       <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
         <CircularProgress />
       </Box>
+    );
+  }
+
+  if (isEdit && (isError || !cliente)) {
+    return (
+      <Paper
+        elevation={0}
+        sx={{
+          borderRadius: "16px",
+          border: "1px solid",
+          borderColor: "divider",
+          p: 4,
+          textAlign: "center",
+          bgcolor: "background.paper",
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 900 }}>No pudimos cargar el cliente</Typography>
+        <Button onClick={() => navigate("/clientes")} sx={{ mt: 2 }}>Volver</Button>
+      </Paper>
     );
   }
 
