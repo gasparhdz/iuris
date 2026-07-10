@@ -17,13 +17,13 @@ const notFoundCodes = new Set([
   "TAREA_NOT_FOUND",
   "SUBTAREA_NOT_FOUND",
   "PARTICIPANTE_NOT_FOUND",
+  "MOVIMIENTO_NOT_FOUND",
 ]);
 
 const conflictCodes = new Set([
   "EMAIL_IN_USE",
   "DUPLICATE_RESOURCE",
   "RESOURCE_CONFLICT",
-  "CLIENT_DUPLICATE_DNI_OR_CUIT",
   "CASO_DUPLICATE_NRO_EXPTE",
 ]);
 
@@ -126,6 +126,36 @@ export const errorHandlerPlugin = fp(async (fastify) => {
         error: {
           code: error.message,
           message: "No se puede editar el monto, la fecha ni la cotización de un cobro ya imputado. Eliminá el cobro y registralo de nuevo.",
+        },
+      });
+    }
+
+    if (error.message === "PADRE_ELIMINADO") {
+      logSystemError(request, {
+        nivel: "WARN",
+        statusCode: 409,
+        errorCode: error.message,
+        mensaje: "El expediente o cliente vinculado fue eliminado",
+      });
+      return reply.status(409).send({
+        error: {
+          code: error.message,
+          message: "No se puede modificar: el expediente o cliente vinculado fue eliminado",
+        },
+      });
+    }
+
+    if (error.message === "CLIENT_DUPLICATE_DNI_OR_CUIT") {
+      logSystemError(request, {
+        nivel: "WARN",
+        statusCode: 409,
+        errorCode: error.message,
+        mensaje: "Ya existe un cliente con ese DNI o CUIT",
+      });
+      return reply.status(409).send({
+        error: {
+          code: error.message,
+          message: "Ya existe un cliente con ese DNI o CUIT",
         },
       });
     }

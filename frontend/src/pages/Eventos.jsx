@@ -277,6 +277,18 @@ export default function Eventos() {
 
       {eventosQuery.isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
+      ) : eventosQuery.isError ? (
+        <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>
+            No se pudieron cargar los eventos
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5, mb: 2 }}>
+            Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+          </Typography>
+          <Button variant="contained" onClick={() => eventosQuery.refetch()} sx={{ fontWeight: 800 }}>
+            Reintentar
+          </Button>
+        </Paper>
       ) : totalCount === 0 && !eventosQuery.isFetching ? (
         <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
           <CalendarMonth sx={{ fontSize: 58, color: "text.disabled", mb: 1 }} />

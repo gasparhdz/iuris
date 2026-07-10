@@ -1,3 +1,4 @@
+import { db } from "../db/index.js";
 import { CasosQueries } from "../db/queries/casos.queries.js";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { EventosQueries } from "../db/queries/eventos.queries.js";
@@ -39,7 +40,7 @@ export class EventosService {
   static async create(estudioId: number, userId: number, data: CreateEventoInput) {
     await validateTenantReferences(estudioId, data.clienteId, data.casoId);
 
-    const evento = await EventosQueries.insert({
+    const evento = await EventosQueries.insert(db, {
       ...data,
       estudioId,
       createdBy: userId,
@@ -60,6 +61,7 @@ export class EventosService {
 
   static async update(id: number, estudioId: number, userId: number, data: UpdateEventoInput) {
     const before = await this.findById(id, estudioId);
+    await ensureLinkedParentsAlive(estudioId, before);
     await validateTenantReferences(estudioId, data.clienteId, data.casoId);
 
     const { fechaInicio, fechaFin, recordatorio, ...rest } = data;
@@ -67,6 +69,14 @@ export class EventosService {
     if (fechaInicio !== undefined) updateData.fechaInicio = new Date(fechaInicio);
     if (fechaFin !== undefined) updateData.fechaFin = fechaFin ? new Date(fechaFin) : null;
     if (recordatorio !== undefined) updateData.recordatorio = recordatorio ? new Date(recordatorio) : null;
+
+    const fechaInicioCambio = fechaInicio !== undefined
+      && toIsoOrNull(before.fechaInicio) !== (fechaInicio ?? null);
+    const recordatorioCambio = recordatorio !== undefined
+      && toIsoOrNull(before.recordatorio) !== (recordatorio ?? null);
+    if (fechaInicioCambio || recordatorioCambio) {
+      updateData.recordatorioEnviado = false;
+    }
 
     const evento = await EventosQueries.update(id, estudioId, updateData);
     const diff = calcDiff(before as Record<string, unknown>, serializeDates(evento) as Record<string, unknown>);
@@ -85,7 +95,8 @@ export class EventosService {
   }
 
   static async softDelete(id: number, estudioId: number, userId: number) {
-    await this.findById(id, estudioId);
+    const before = await this.findById(id, estudioId);
+    await ensureLinkedParentsAlive(estudioId, before);
     await EventosQueries.softDelete(id, estudioId, userId);
     await AuditoriaService.log({
       estudioId,
@@ -95,6 +106,20 @@ export class EventosService {
       accion: "DELETE",
       descripcion: "Evento eliminado",
     });
+  }
+}
+
+async function ensureLinkedParentsAlive(
+  estudioId: number,
+  item: { casoId?: number | null; clienteId?: number | null },
+) {
+  if (item.casoId != null) {
+    const caso = await CasosQueries.findById(item.casoId, estudioId);
+    if (!caso) throw new Error("PADRE_ELIMINADO");
+  }
+  if (item.clienteId != null) {
+    const cliente = await ClientesQueries.findById(item.clienteId, estudioId);
+    if (!cliente) throw new Error("PADRE_ELIMINADO");
   }
 }
 
@@ -108,4 +133,11 @@ async function validateTenantReferences(estudioId: number, clienteId?: number | 
     const caso = await CasosQueries.findById(casoId, estudioId);
     if (!caso) throw new Error("UNAUTHORIZED_TENANT_REFERENCE");
   }
+}
+
+function toIsoOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
 }

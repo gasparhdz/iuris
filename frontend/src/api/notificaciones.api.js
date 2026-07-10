@@ -20,6 +20,12 @@ export async function marcarNovedadesLeidas(movimientoIds) {
   return data;
 }
 
+/** Crea tarea/evento desde una novedad SISFE y la marca leída en una sola operación. */
+export async function agendarDesdeNovedad(payload) {
+  const { data } = await api.post("/notificaciones/novedades/agendar", payload);
+  return data;
+}
+
 export async function getPreferenciasCobranza() {
   const { data } = await api.get("/notificaciones/cobranza/preferencias");
   return data;

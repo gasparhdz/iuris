@@ -133,8 +133,8 @@ export default function Agenda() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  const { canCrear: canCrearEventos } = usePermisos("EVENTOS");
-  const { canCrear: canCrearTareas } = usePermisos("TAREAS");
+  const { canCrear: canCrearEventos, canEditar: canEditarEventos, canEliminar: canEliminarEventos } = usePermisos("EVENTOS");
+  const { canCrear: canCrearTareas, canEditar: canEditarTareas, canEliminar: canEliminarTareas } = usePermisos("TAREAS");
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -164,7 +164,7 @@ export default function Agenda() {
   const [newSlot, setNewSlot] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  // Calcular rango a consultar (formato ISO para Zod strict)
+  // Rango en Date local del navegador → ISO 8601 UTC para el backend (timestamptz).
   const { from, to } = useMemo(() => {
     const range = getCalendarRange(currentView, date);
     return {
@@ -271,7 +271,7 @@ export default function Agenda() {
       if (selectedItem && selectedItem.id === variables.id && selectedItem.tipo === "TAREA") {
         setSelectedItem((prev) => ({
           ...prev,
-          estadoId: variables.completada ? 1 : 0,
+          completada: variables.completada,
         }));
       }
     },
@@ -469,7 +469,7 @@ export default function Agenda() {
   // Formateador visual para los eventos individuales en el calendario
   const eventPropGetter = (event) => {
     const isTarea = event.resource.tipo === "TAREA";
-    const isCompletada = event.resource.estadoId === 1;
+    const isCompletada = Boolean(event.resource.completada);
 
     let bg = "rgba(29, 78, 216, 0.12)"; // Azul por defecto para Evento
     let color = "#3B82F6";
@@ -503,7 +503,7 @@ export default function Agenda() {
   // Renderizador personalizado del contenido del evento
   const customEventRenderer = ({ event }) => {
     const isTarea = event.resource.tipo === "TAREA";
-    const isCompletada = event.resource.estadoId === 1;
+    const isCompletada = Boolean(event.resource.completada);
     const Icon = isTarea ? (isCompletada ? CheckIcon : PendingIcon) : EventIcon;
 
     return (
@@ -726,6 +726,18 @@ export default function Agenda() {
           <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "500px" }}>
             <CircularProgress />
           </Box>
+        ) : agendaQuery.isError ? (
+          <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center", my: 4 }}>
+            <Typography variant="h6" sx={{ fontWeight: 900 }}>
+              No se pudo cargar la agenda
+            </Typography>
+            <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5, mb: 2 }}>
+              Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+            </Typography>
+            <Button variant="contained" onClick={() => agendaQuery.refetch()} sx={{ fontWeight: 800 }}>
+              Reintentar
+            </Button>
+          </Paper>
         ) : (
           <Calendar
             localizer={localizer}
@@ -790,16 +802,16 @@ export default function Agenda() {
                     sx={{
                       fontWeight: 800,
                       borderRadius: "8px",
-                      borderColor: selectedItem.estadoId === 1 ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)",
-                      color: selectedItem.estadoId === 1 ? "success.main" : "warning.main",
+                      borderColor: selectedItem.completada ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)",
+                      color: selectedItem.completada ? "success.main" : "warning.main",
                     }}
                   />
                 )}
 
                 {selectedItem.tipo === "TAREA" && (
                   <Chip
-                    label={selectedItem.estadoId === 1 ? "Completada" : "Pendiente"}
-                    color={selectedItem.estadoId === 1 ? "success" : "warning"}
+                    label={selectedItem.completada ? "Completada" : "Pendiente"}
+                    color={selectedItem.completada ? "success" : "warning"}
                     size="small"
                     sx={{ fontWeight: 800, fontSize: "0.72rem" }}
                   />
@@ -862,28 +874,6 @@ export default function Agenda() {
                 )}
               </Stack>
 
-              {/* Descripción */}
-              {selectedItem.titulo && selectedItem.titulo !== selectedItem.titulo && (
-                <Box sx={{ mb: 4 }}>
-                  <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
-                    Detalles
-                  </Typography>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      bgcolor: "action.hover",
-                      borderRadius: "12px",
-                      border: "1px solid",
-                      borderColor: "divider",
-                    }}
-                  >
-                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", color: "text.secondary", lineHeight: 1.5 }}>
-                      No se cargó ninguna descripción adicional para este registro.
-                    </Typography>
-                  </Paper>
-                </Box>
-              )}
             </Box>
 
             <Divider />
@@ -914,17 +904,17 @@ export default function Agenda() {
                 )}
 
                 {/* Acciones de Tareas (Toggle de completada) */}
-                {selectedItem.tipo === "TAREA" && (
+                {selectedItem.tipo === "TAREA" && canEditarTareas && (
                   <Button
                     variant="outlined"
                     fullWidth
-                    color={selectedItem.estadoId === 1 ? "warning" : "success"}
-                    startIcon={selectedItem.estadoId === 1 ? <PendingIcon /> : <CheckIcon />}
+                    color={selectedItem.completada ? "warning" : "success"}
+                    startIcon={selectedItem.completada ? <PendingIcon /> : <CheckIcon />}
                     disabled={toggleTareaMutation.isPending}
                     onClick={() =>
                       toggleTareaMutation.mutate({
                         id: selectedItem.id,
-                        completada: selectedItem.estadoId !== 1,
+                        completada: !selectedItem.completada,
                       })
                     }
                     sx={{
@@ -933,33 +923,37 @@ export default function Agenda() {
                       textTransform: "none",
                     }}
                   >
-                    {selectedItem.estadoId === 1 ? "Marcar como Pendiente" : "Marcar como Completada"}
+                    {selectedItem.completada ? "Marcar como Pendiente" : "Marcar como Completada"}
                   </Button>
                 )}
 
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<EditIcon />}
-                  onClick={() => {
-                    setDrawerOpen(false);
-                    navigate(selectedItem.tipo === "EVENTO" ? `/eventos/editar/${selectedItem.id}` : `/tareas/editar/${selectedItem.id}`, { state: { from: location.pathname + location.search } });
-                  }}
-                  sx={{ fontWeight: 700, borderRadius: "10px", textTransform: "none" }}
-                >
-                  Editar
-                </Button>
+                {((selectedItem.tipo === "EVENTO" && canEditarEventos) || (selectedItem.tipo === "TAREA" && canEditarTareas)) && (
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    startIcon={<EditIcon />}
+                    onClick={() => {
+                      setDrawerOpen(false);
+                      navigate(selectedItem.tipo === "EVENTO" ? `/eventos/editar/${selectedItem.id}` : `/tareas/editar/${selectedItem.id}`, { state: { from: location.pathname + location.search } });
+                    }}
+                    sx={{ fontWeight: 700, borderRadius: "10px", textTransform: "none" }}
+                  >
+                    Editar
+                  </Button>
+                )}
 
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  color="error"
-                  startIcon={<DeleteIcon />}
-                  onClick={() => setDeleteTarget(selectedItem)}
-                  sx={{ fontWeight: 700, borderRadius: "10px", textTransform: "none" }}
-                >
-                  Eliminar
-                </Button>
+                {((selectedItem.tipo === "EVENTO" && canEliminarEventos) || (selectedItem.tipo === "TAREA" && canEliminarTareas)) && (
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => setDeleteTarget(selectedItem)}
+                    sx={{ fontWeight: 700, borderRadius: "10px", textTransform: "none" }}
+                  >
+                    Eliminar
+                  </Button>
+                )}
 
                 <Button
                   variant="text"

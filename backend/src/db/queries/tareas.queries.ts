@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql }
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, parametros, subTareas, tareas } from "../schema.js";
+import { padresCasoClienteVivos } from "./padre-vivo.js";
 
 type NewTarea = typeof tareas.$inferInsert;
 type NewSubTarea = typeof subTareas.$inferInsert;
@@ -38,8 +39,6 @@ export class TareasQueries {
       conditions.push(or(ilike(tareas.titulo, term), ilike(tareas.descripcion, term))!);
     }
 
-    const whereCondition = and(...conditions);
-
     const prioridadParam = alias(parametros, "tarea_prioridad_sort");
     const sortDir = order === "desc" ? desc : asc;
     const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
@@ -66,6 +65,16 @@ export class TareasQueries {
       }
     })();
 
+    const whereCondition = and(
+      ...conditions,
+      padresCasoClienteVivos({
+        casoId: tareas.casoId,
+        casoDeletedAt: casos.deletedAt,
+        clienteId: tareas.clienteId,
+        clienteDeletedAt: clientes.deletedAt,
+      }),
+    );
+
     const data = await db
       .select(getTableColumns(tareas))
       .from(tareas)
@@ -80,6 +89,8 @@ export class TareasQueries {
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
       .from(tareas)
+      .leftJoin(clientes, eq(tareas.clienteId, clientes.id))
+      .leftJoin(casos, eq(tareas.casoId, casos.id))
       .where(whereCondition);
 
     return { data, count };
@@ -121,16 +132,37 @@ export class TareasQueries {
 
   static async findInRange(estudioId: number, from: Date, to: Date) {
     return await db
-      .select()
+      .select(getTableColumns(tareas))
       .from(tareas)
+      .leftJoin(clientes, eq(tareas.clienteId, clientes.id))
+      .leftJoin(casos, eq(tareas.casoId, casos.id))
       .where(
         and(
           eq(tareas.estudioId, estudioId),
           isNull(tareas.deletedAt),
           gte(tareas.fechaLimite, from),
-          lte(tareas.fechaLimite, to)
+          lte(tareas.fechaLimite, to),
+          padresCasoClienteVivos({
+            casoId: tareas.casoId,
+            casoDeletedAt: casos.deletedAt,
+            clienteId: tareas.clienteId,
+            clienteDeletedAt: clientes.deletedAt,
+          }),
         )
       );
+  }
+
+  static async findByMovimientoId(movimientoId: number, estudioId: number) {
+    const [tarea] = await db
+      .select()
+      .from(tareas)
+      .where(and(
+        eq(tareas.movimientoId, movimientoId),
+        eq(tareas.estudioId, estudioId),
+        isNull(tareas.deletedAt),
+      ))
+      .limit(1);
+    return tarea ?? null;
   }
 
   static async findSubtareas(tareaId: number, estudioId: number) {

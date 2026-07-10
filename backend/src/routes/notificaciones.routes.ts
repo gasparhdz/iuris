@@ -7,6 +7,7 @@ import { casos, eventos, movimientosJudiciales, movimientosVistos, sisfeSessions
 import { documentedResponses } from "../schemas/common.schema.js";
 import { AuthQueries } from "../db/queries/auth.queries.js";
 import { PushService } from "../services/push.service.js";
+import { AgendarMovimientoService } from "../services/agendar-movimiento.service.js";
 import { env } from "../env.js";
 import { PreferenciasCobranzaQueries } from "../db/queries/preferencias-cobranza.queries.js";
 
@@ -32,6 +33,34 @@ const novedadesResponseSchema = z.object({
 const marcarLeidoBodySchema = z.object({
   // Si se omite, marca como leídas TODAS las novedades SISFE no vistas del usuario.
   movimientoIds: z.array(z.number().int().positive()).optional(),
+});
+
+const agendarMovimientoBodySchema = z.discriminatedUnion("tipo", [
+  z.object({
+    tipo: z.literal("tarea"),
+    movimientoId: z.number().int().positive(),
+    titulo: z.string().min(3).max(255),
+    descripcion: z.string().optional().nullable(),
+    fechaLimite: z.string().datetime(),
+    recordatorio: z.string().datetime().optional().nullable(),
+  }).strict(),
+  z.object({
+    tipo: z.literal("evento"),
+    movimientoId: z.number().int().positive(),
+    descripcion: z.string().min(3).max(255),
+    fechaInicio: z.string().datetime(),
+    tipoId: z.number().int().positive(),
+    estadoId: z.number().int().positive().optional().nullable(),
+    recordatorio: z.string().datetime().optional().nullable(),
+  }).strict(),
+]);
+
+const agendarMovimientoResponseSchema = z.object({
+  data: z.object({
+    tipo: z.enum(["tarea", "evento"]),
+    alreadyExisted: z.boolean(),
+    item: z.record(z.string(), z.unknown()),
+  }),
 });
 
 const pushSubscribeBodySchema = z.object({
@@ -195,6 +224,7 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       eq(movimientosJudiciales.estudioId, estudioId),
       eq(movimientosJudiciales.origenSisfe, true),
       isNull(movimientosVistos.id),
+      isNull(casos.deletedAt),
       ...(matricula
         ? [or(
             isNull(movimientosJudiciales.descripcion),
@@ -216,7 +246,7 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
         createdAt: movimientosJudiciales.createdAt,
       })
       .from(movimientosJudiciales)
-      .leftJoin(casos, eq(movimientosJudiciales.casoId, casos.id))
+      .innerJoin(casos, eq(movimientosJudiciales.casoId, casos.id))
       .leftJoin(
         movimientosVistos,
         and(
@@ -231,6 +261,7 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
     const [{ total }] = await db
       .select({ total: sql<number>`cast(count(*) as int)` })
       .from(movimientosJudiciales)
+      .innerJoin(casos, eq(movimientosJudiciales.casoId, casos.id))
       .leftJoin(
         movimientosVistos,
         and(
@@ -250,6 +281,36 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
         total,
       },
     };
+  });
+
+  // Agendar tarea/evento desde una novedad SISFE (transaccional + marca leída).
+  server.post("/novedades/agendar", {
+    preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
+    schema: {
+      tags: ["Notificaciones"],
+      summary: "Agendar tarea o evento desde un movimiento SISFE",
+      security: [{ bearerAuth: [] }],
+      body: agendarMovimientoBodySchema,
+      response: documentedResponses(200, agendarMovimientoResponseSchema),
+    },
+  }, async (request, reply) => {
+    const body = request.body as z.infer<typeof agendarMovimientoBodySchema>;
+    const permisos = await AuthQueries.findUserPermisos(request.authUser.id);
+    const puedeCrear = body.tipo === "tarea"
+      ? permisos.some((p) => p.modulo === "TAREAS" && p.crear)
+      : permisos.some((p) => p.modulo === "EVENTOS" && p.crear);
+    if (!puedeCrear) {
+      return reply.status(403).send({
+        error: { code: "FORBIDDEN", message: "No tenés permiso para crear este tipo de ítem" },
+      });
+    }
+
+    const result = await AgendarMovimientoService.agendar(
+      request.authUser.estudioId,
+      request.authUser.id,
+      body,
+    );
+    return reply.send({ data: result });
   });
 
   // Marca novedades como leídas (idempotente). Sin body => marca todas.

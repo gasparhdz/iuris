@@ -2,8 +2,11 @@ import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql }
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, eventos, parametros } from "../schema.js";
+import { padresCasoClienteVivos } from "./padre-vivo.js";
 
 type NewEvento = typeof eventos.$inferInsert;
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DbExecutor = typeof db | DbTransaction;
 
 type EventoListFilters = {
   from?: Date;
@@ -44,8 +47,6 @@ export class EventosQueries {
       )!);
     }
 
-    const whereCondition = and(...conditions);
-
     const tipoParam = alias(parametros, "evento_tipo_sort");
     const estadoParam = alias(parametros, "evento_estado_sort");
     const sortDir = order === "desc" ? desc : asc;
@@ -67,6 +68,16 @@ export class EventosQueries {
       }
     })();
 
+    const whereCondition = and(
+      ...conditions,
+      padresCasoClienteVivos({
+        casoId: eventos.casoId,
+        casoDeletedAt: casos.deletedAt,
+        clienteId: eventos.clienteId,
+        clienteDeletedAt: clientes.deletedAt,
+      }),
+    );
+
     const data = await db
       .select(getTableColumns(eventos))
       .from(eventos)
@@ -84,6 +95,8 @@ export class EventosQueries {
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
       .from(eventos)
+      .leftJoin(clientes, eq(eventos.clienteId, clientes.id))
+      .leftJoin(casos, eq(eventos.casoId, casos.id))
       .where(whereCondition);
 
     return { data, count };
@@ -99,8 +112,8 @@ export class EventosQueries {
     return evento ?? null;
   }
 
-  static async insert(values: NewEvento) {
-    const [row] = await db.insert(eventos).values(values).returning();
+  static async insert(tx: DbExecutor, values: NewEvento) {
+    const [row] = await tx.insert(eventos).values(values).returning();
     return row;
   }
 
@@ -125,14 +138,22 @@ export class EventosQueries {
 
   static async findInRange(estudioId: number, from: Date, to: Date) {
     return await db
-      .select()
+      .select(getTableColumns(eventos))
       .from(eventos)
+      .leftJoin(clientes, eq(eventos.clienteId, clientes.id))
+      .leftJoin(casos, eq(eventos.casoId, casos.id))
       .where(
         and(
           eq(eventos.estudioId, estudioId),
           isNull(eventos.deletedAt),
           gte(eventos.fechaInicio, from),
-          lte(eventos.fechaInicio, to)
+          lte(eventos.fechaInicio, to),
+          padresCasoClienteVivos({
+            casoId: eventos.casoId,
+            casoDeletedAt: casos.deletedAt,
+            clienteId: eventos.clienteId,
+            clienteDeletedAt: clientes.deletedAt,
+          }),
         )
       );
   }

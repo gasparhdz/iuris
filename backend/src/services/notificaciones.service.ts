@@ -1,8 +1,8 @@
 import cron from "node-cron";
-import { and, eq, isNull, lte } from "drizzle-orm";
+import { and, eq, exists, isNull, lte, or } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/index.js";
-import { casos, eventos, subTareas, tareas, usuarios } from "../db/schema.js";
+import { casos, clientes, eventos, subTareas, tareas, usuarios } from "../db/schema.js";
 import { EmailService } from "./email.service.js";
 import { PushService } from "./push.service.js";
 import { procesarRecordatoriosCobranza } from "./cobranza-notificaciones.service.js";
@@ -39,11 +39,49 @@ export function iniciarCronNotificaciones(logger: FastifyBaseLogger) {
   logger.info("Cron de notificaciones iniciado");
 }
 
+function casoPadreVivo(casoIdCol: typeof tareas.casoId | typeof eventos.casoId) {
+  return or(
+    isNull(casoIdCol),
+    exists(
+      db
+        .select({ id: casos.id })
+        .from(casos)
+        .where(and(eq(casos.id, casoIdCol), isNull(casos.deletedAt))),
+    ),
+  );
+}
+
+function clientePadreVivo(clienteIdCol: typeof tareas.clienteId | typeof eventos.clienteId) {
+  return or(
+    isNull(clienteIdCol),
+    exists(
+      db
+        .select({ id: clientes.id })
+        .from(clientes)
+        .where(and(eq(clientes.id, clienteIdCol), isNull(clientes.deletedAt))),
+    ),
+  );
+}
+
 async function procesarRecordatorios(logger: FastifyBaseLogger) {
   const now = new Date();
 
+  // Claim atómico: solo las filas reclamadas se envían (evita duplicados por doble instancia/reinicio).
   const tareasPendientes = await db
-    .select({
+    .update(tareas)
+    .set({ recordatorioEnviado: true, updatedAt: new Date() })
+    .where(
+      and(
+        lte(tareas.recordatorio, now),
+        eq(tareas.recordatorioEnviado, false),
+        eq(tareas.completada, false),
+        eq(tareas.activo, true),
+        isNull(tareas.deletedAt),
+        casoPadreVivo(tareas.casoId),
+        clientePadreVivo(tareas.clienteId),
+      ),
+    )
+    .returning({
       id: tareas.id,
       titulo: tareas.titulo,
       descripcion: tareas.descripcion,
@@ -51,19 +89,8 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
       fechaLimite: tareas.fechaLimite,
       asignadoA: tareas.asignadoA,
       createdBy: tareas.createdBy,
-      casoCaratula: casos.caratula,
-    })
-    .from(tareas)
-    .leftJoin(casos, eq(tareas.casoId, casos.id))
-    .where(
-      and(
-        lte(tareas.recordatorio, now),
-        eq(tareas.recordatorioEnviado, false),
-        eq(tareas.completada, false),
-        eq(tareas.activo, true),
-        isNull(tareas.deletedAt)
-      )
-    );
+      casoId: tareas.casoId,
+    });
 
   for (const tarea of tareasPendientes) {
     try {
@@ -79,13 +106,14 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         continue;
       }
 
+      const casoCaratula = tarea.casoId ? await findCasoCaratula(tarea.casoId) : null;
       const subtareas = await findSubtareasTarea(tarea.id, tarea.estudioId);
 
       await EmailService.sendRecordatorioTarea({
         titulo: tarea.titulo,
         descripcion: tarea.descripcion,
         fechaLimite: tarea.fechaLimite,
-        casoCaratula: tarea.casoCaratula,
+        casoCaratula,
         subtareas,
       }, usuario);
 
@@ -95,32 +123,31 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         url: "/tareas",
         tag: `tarea-${tarea.id}`,
       }, logger);
-
-      await db
-        .update(tareas)
-        .set({ recordatorioEnviado: true, updatedAt: new Date() })
-        .where(eq(tareas.id, tarea.id));
     } catch (error) {
       logger.error({ err: error, tareaId: tarea.id }, "Error enviando recordatorio de tarea");
     }
   }
 
   const eventosPendientes = await db
-    .select({
-      id: eventos.id,
-      descripcion: eventos.descripcion,
-      fechaInicio: eventos.fechaInicio,
-      createdBy: eventos.createdBy,
-    })
-    .from(eventos)
+    .update(eventos)
+    .set({ recordatorioEnviado: true, updatedAt: new Date() })
     .where(
       and(
         lte(eventos.recordatorio, now),
         eq(eventos.recordatorioEnviado, false),
         eq(eventos.activo, true),
-        isNull(eventos.deletedAt)
-      )
-    );
+        isNull(eventos.deletedAt),
+        casoPadreVivo(eventos.casoId),
+        clientePadreVivo(eventos.clienteId),
+      ),
+    )
+    .returning({
+      id: eventos.id,
+      descripcion: eventos.descripcion,
+      fechaInicio: eventos.fechaInicio,
+      createdBy: eventos.createdBy,
+      estudioId: eventos.estudioId,
+    });
 
   for (const evento of eventosPendientes) {
     try {
@@ -146,15 +173,19 @@ async function procesarRecordatorios(logger: FastifyBaseLogger) {
         url: "/agenda",
         tag: `evento-${evento.id}`,
       }, logger);
-
-      await db
-        .update(eventos)
-        .set({ recordatorioEnviado: true, updatedAt: new Date() })
-        .where(eq(eventos.id, evento.id));
     } catch (error) {
       logger.error({ err: error, eventoId: evento.id }, "Error enviando recordatorio de evento");
     }
   }
+}
+
+async function findCasoCaratula(casoId: number) {
+  const [caso] = await db
+    .select({ caratula: casos.caratula })
+    .from(casos)
+    .where(and(eq(casos.id, casoId), isNull(casos.deletedAt)))
+    .limit(1);
+  return caso?.caratula ?? null;
 }
 
 async function findUsuarioDestino(usuarioId: number) {

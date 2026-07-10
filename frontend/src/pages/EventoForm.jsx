@@ -217,6 +217,25 @@ export default function EventoForm() {
     return <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}><CircularProgress /></Box>;
   }
 
+  if (isEdit && (eventoQuery.isError || !eventoQuery.data)) {
+    return (
+      <Paper
+        elevation={0}
+        sx={{
+          borderRadius: "16px",
+          border: "1px solid",
+          borderColor: "divider",
+          p: 4,
+          textAlign: "center",
+          bgcolor: "background.paper",
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 900 }}>No pudimos cargar el evento</Typography>
+        <Button onClick={() => navigate("/eventos")} sx={{ mt: 2 }}>Volver</Button>
+      </Paper>
+    );
+  }
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={es}>
       <Box component="form" onSubmit={handleSubmit}>

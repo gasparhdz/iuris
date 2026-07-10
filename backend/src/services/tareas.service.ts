@@ -85,12 +85,38 @@ export class TareasService {
   static async update(id: number, estudioId: number, userId: number, data: UpdateTareaInput) {
     const { items, fechaLimite, recordatorio, completarSubtareas, ...tareaData } = data;
     const before = await this.findById(id, estudioId);
+    await ensureLinkedParentsAlive(estudioId, before);
     await validateTenantReferences(estudioId, tareaData.clienteId, tareaData.casoId, tareaData.movimientoId);
+
+    const completadaYaCoincide =
+      tareaData.completada !== undefined && Boolean(before.completada) === tareaData.completada;
+
+    // Si solo piden el mismo estado de completada, devolver sin mutar ni re-auditar.
+    const soloCompletada =
+      Object.keys(data).every((key) => key === "completada" || key === "completarSubtareas");
+    if (completadaYaCoincide && soloCompletada) {
+      return before;
+    }
 
     const updateValues: Parameters<typeof TareasQueries.update>[2] = { ...tareaData, updatedAt: new Date(), updatedBy: userId };
     if (fechaLimite !== undefined) updateValues.fechaLimite = fechaLimite ? new Date(fechaLimite) : null;
     if (recordatorio !== undefined) updateValues.recordatorio = recordatorio ? new Date(recordatorio) : null;
-    if (tareaData.completada !== undefined) updateValues.completadaAt = tareaData.completada ? new Date() : null;
+
+    if (tareaData.completada !== undefined) {
+      if (completadaYaCoincide) {
+        delete updateValues.completada;
+      } else {
+        updateValues.completadaAt = tareaData.completada ? new Date() : null;
+      }
+    }
+
+    const fechaLimiteCambio = fechaLimite !== undefined
+      && toIsoOrNull(before.fechaLimite) !== (fechaLimite ?? null);
+    const recordatorioCambio = recordatorio !== undefined
+      && toIsoOrNull(before.recordatorio) !== (recordatorio ?? null);
+    if (fechaLimiteCambio || recordatorioCambio) {
+      updateValues.recordatorioEnviado = false;
+    }
 
     const updatedTarea = await db.transaction(async (tx) => {
       const [tarea] = await tx
@@ -101,7 +127,7 @@ export class TareasService {
 
       if (!tarea) throw new Error("TAREA_NOT_FOUND");
 
-      if (tareaData.completada && completarSubtareas) {
+      if (tareaData.completada && !completadaYaCoincide && completarSubtareas) {
         await tx
           .update(subTareas)
           .set({
@@ -133,7 +159,7 @@ export class TareasService {
       });
     }
 
-    if (data.completada === true) {
+    if (data.completada === true && !before.completada) {
       await AuditoriaService.log({
         estudioId,
         usuarioId: userId,
@@ -148,7 +174,8 @@ export class TareasService {
   }
 
   static async softDelete(id: number, estudioId: number, userId: number) {
-    await this.findById(id, estudioId);
+    const before = await this.findById(id, estudioId);
+    await ensureLinkedParentsAlive(estudioId, before);
     await TareasQueries.softDelete(id, estudioId, userId);
     await AuditoriaService.log({
       estudioId,
@@ -163,13 +190,15 @@ export class TareasService {
   // --- Sub-tareas ---
 
   static async addSubtarea(tareaId: number, estudioId: number, data: { titulo: string; orden?: number }) {
-    await this.findById(tareaId, estudioId);
+    const tarea = await this.findById(tareaId, estudioId);
+    await ensureLinkedParentsAlive(estudioId, tarea);
     const sub = await TareasQueries.insertSubtarea({ tareaId, titulo: data.titulo, orden: data.orden || 0 });
     return serializeDates(sub);
   }
 
   static async toggleSubtarea(id: number, tareaId: number, estudioId: number) {
-    await this.findById(tareaId, estudioId);
+    const tarea = await this.findById(tareaId, estudioId);
+    await ensureLinkedParentsAlive(estudioId, tarea);
 
     const sub = await TareasQueries.findSubtareaById(id, tareaId, estudioId);
     if (!sub) throw new Error("SUBTAREA_NOT_FOUND");
@@ -184,7 +213,8 @@ export class TareasService {
   }
 
   static async updateSubtarea(id: number, tareaId: number, estudioId: number, data: { titulo?: string; orden?: number }) {
-    await this.findById(tareaId, estudioId);
+    const tarea = await this.findById(tareaId, estudioId);
+    await ensureLinkedParentsAlive(estudioId, tarea);
 
     const sub = await TareasQueries.findSubtareaById(id, tareaId, estudioId);
     if (!sub) throw new Error("SUBTAREA_NOT_FOUND");
@@ -195,12 +225,27 @@ export class TareasService {
   }
 
   static async deleteSubtarea(id: number, tareaId: number, estudioId: number) {
-    await this.findById(tareaId, estudioId);
+    const tarea = await this.findById(tareaId, estudioId);
+    await ensureLinkedParentsAlive(estudioId, tarea);
 
     const sub = await TareasQueries.findSubtareaById(id, tareaId, estudioId);
     if (!sub) throw new Error("SUBTAREA_NOT_FOUND");
 
     await TareasQueries.deleteSubtarea(id, tareaId, estudioId);
+  }
+}
+
+async function ensureLinkedParentsAlive(
+  estudioId: number,
+  item: { casoId?: number | null; clienteId?: number | null },
+) {
+  if (item.casoId != null) {
+    const caso = await CasosQueries.findById(item.casoId, estudioId);
+    if (!caso) throw new Error("PADRE_ELIMINADO");
+  }
+  if (item.clienteId != null) {
+    const cliente = await ClientesQueries.findById(item.clienteId, estudioId);
+    if (!cliente) throw new Error("PADRE_ELIMINADO");
   }
 }
 
@@ -223,4 +268,11 @@ async function validateTenantReferences(estudioId: number, clienteId?: number | 
       .limit(1);
     if (!mov) throw new Error("UNAUTHORIZED_TENANT_REFERENCE");
   }
+}
+
+function toIsoOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
 }

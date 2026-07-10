@@ -14,6 +14,7 @@ export const agendaItemSchema = z.object({
   allDay: z.boolean(),
   subtipoId: z.number().nullable(),
   estadoId: z.number().nullable(),
+  completada: z.boolean().nullable(),
   color: z.string(),
   link: z.string(),
 });

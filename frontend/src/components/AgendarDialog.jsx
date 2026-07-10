@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import { AssignmentTurnedIn, Event as EventIcon } from "@mui/icons-material";
 import api from "../api/axios";
+import { agendarDesdeNovedad } from "../api/notificaciones.api";
 
 function normalizeCode(value) {
   return String(value ?? "")
@@ -38,9 +39,8 @@ function contextoExpediente(novedad) {
 }
 
 /**
- * Popover de "Agendar" desde una novedad de expediente: crea una tarea (con fecha límite y
- * recordatorio) o un evento (audiencia, vencimiento, etc.) ya vinculado al caso, sin salir
- * del dashboard. Al guardar, marca la novedad como leída via onCreated.
+ * Popover de "Agendar" desde una novedad de expediente: crea una tarea o evento
+ * y marca la novedad como leída en una sola operación transaccional del backend.
  */
 export default function AgendarDialog({ open, modo, novedad, onClose, onCreated }) {
   const queryClient = useQueryClient();
@@ -91,19 +91,22 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
   }, [open, modo, novedad]);
 
   const createMutation = useMutation({
-    mutationFn: async (payload) => {
-      const endpoint = esEvento ? "/eventos" : "/tareas";
-      const { data } = await api.post(endpoint, payload);
-      return data;
-    },
-    onSuccess: () => {
-      enqueueSnackbar(esEvento ? "Evento creado y vinculado al expediente" : "Tarea creada y vinculada al expediente", {
-        variant: "success",
-      });
+    mutationFn: async (payload) => agendarDesdeNovedad(payload),
+    onSuccess: (data) => {
+      const already = data?.data?.alreadyExisted;
+      enqueueSnackbar(
+        esEvento
+          ? "Evento creado y vinculado al expediente"
+          : already
+            ? "Ya existía una tarea para este movimiento"
+            : "Tarea creada y vinculada al expediente",
+        { variant: "success" },
+      );
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["tareas"] });
       queryClient.invalidateQueries({ queryKey: ["eventos"] });
       queryClient.invalidateQueries({ queryKey: ["agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] });
       onCreated?.(novedad);
       onClose?.();
     },
@@ -134,18 +137,24 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
       return;
     }
 
+    if (!novedad?.id) {
+      setError("No se pudo identificar el movimiento.");
+      return;
+    }
+
     if (esEvento) {
       if (!tipoId) {
         setError("Elegí el tipo de evento.");
         return;
       }
       createMutation.mutate({
+        tipo: "evento",
+        movimientoId: novedad.id,
         descripcion: tituloLimpio,
         fechaInicio: fechaIso,
         tipoId: Number(tipoId),
         estadoId: estadoPendienteId,
         recordatorio: recordatorioIso,
-        casoId: novedad?.casoId ?? null,
       });
     } else {
       if (!dayjs(fecha).isAfter(dayjs().startOf("day").subtract(1, "second"))) {
@@ -153,14 +162,12 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
         return;
       }
       createMutation.mutate({
+        tipo: "tarea",
+        movimientoId: novedad.id,
         titulo: tituloLimpio,
         descripcion: novedad?.novedad || null,
         fechaLimite: fechaIso,
         recordatorio: recordatorioIso,
-        casoId: novedad?.casoId ?? null,
-        // La novedad ES un movimiento judicial: vinculamos la tarea como su plazo, así
-        // el vencimiento se ve en el expediente sin cargarlo dos veces.
-        movimientoId: novedad?.id ?? null,
       });
     }
   };

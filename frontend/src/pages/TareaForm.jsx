@@ -52,8 +52,8 @@ export default function TareaForm() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
-  const currentUserId = user?.id ?? user?.userId ?? 1;
-  const [form, setForm] = useState({ ...EMPTY_TAREA_FORM, asignadoA: currentUserId });
+  const currentUserId = user?.id ?? user?.userId ?? null;
+  const [form, setForm] = useState({ ...EMPTY_TAREA_FORM, asignadoA: currentUserId ?? "" });
   const [errors, setErrors] = useState({});
   const [newInitialItem, setNewInitialItem] = useState("");
   const [newEditItem, setNewEditItem] = useState("");
@@ -96,14 +96,21 @@ export default function TareaForm() {
     staleTime: 1000 * 60 * 5,
   });
 
+  const miembrosQuery = useQuery({
+    queryKey: ["equipo", "miembros"],
+    queryFn: async () => {
+      const { data } = await api.get("/equipo/miembros");
+      return data?.data ?? [];
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+
   const teamOptions = useMemo(() => {
-    const currentLabel = [user?.nombre, user?.apellido].filter(Boolean).join(" ") || user?.email || "Usuario actual";
-    return [
-      { id: currentUserId, nombre: currentLabel },
-      { id: 2, nombre: "Dr. Gaspar Hernández" },
-      { id: 3, nombre: "Dra. Sofía Meotto" },
-    ].filter((item, index, arr) => arr.findIndex((other) => Number(other.id) === Number(item.id)) === index);
-  }, [currentUserId, user]);
+    return (miembrosQuery.data ?? []).map((m) => ({
+      id: m.id,
+      nombre: m.nombre || m.email || `Usuario #${m.id}`,
+    }));
+  }, [miembrosQuery.data]);
 
   useEffect(() => {
     if (isEdit && tareaQuery.data) {
@@ -111,7 +118,7 @@ export default function TareaForm() {
     } else if (!isEdit) {
       setForm((current) => ({
         ...current,
-        asignadoA: current.asignadoA || currentUserId,
+        asignadoA: current.asignadoA || currentUserId || "",
         fechaLimite: current.fechaLimite || formatQueryDateTime(searchParams.get("fechaLimite")),
       }));
     }
@@ -240,6 +247,25 @@ export default function TareaForm() {
 
   if (isEdit && tareaQuery.isLoading) {
     return <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}><CircularProgress /></Box>;
+  }
+
+  if (isEdit && (tareaQuery.isError || !tareaQuery.data)) {
+    return (
+      <Paper
+        elevation={0}
+        sx={{
+          borderRadius: "16px",
+          border: "1px solid",
+          borderColor: "divider",
+          p: 4,
+          textAlign: "center",
+          bgcolor: "background.paper",
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 900 }}>No pudimos cargar la tarea</Typography>
+        <Button onClick={() => navigate("/tareas")} sx={{ mt: 2 }}>Volver</Button>
+      </Paper>
+    );
   }
 
   const subtaskPending = addSubtaskMutation.isPending || toggleSubtaskMutation.isPending || updateSubtaskMutation.isPending || deleteSubtaskMutation.isPending;
