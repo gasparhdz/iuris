@@ -188,7 +188,7 @@ const EMPTY_FORM = {
 };
 
 const REQUIRED_FIELDS = {
-  honorario: ["_clienteOCaso", "conceptoId", "obligadoKey", "monedaCodigo", "monto", "fechaRegulacion"],
+  honorario: ["_clienteOCaso", "conceptoId", "_obligadoSiCaso", "monedaCodigo", "monto", "fechaRegulacion"],
   gasto:     ["_clienteOCaso", "monedaCodigo", "monto", "fechaGasto"],
   ingreso:   ["_clienteOCaso", "monedaCodigo", "monto", "fechaIngreso"],
   convenio:  ["_clienteOCaso", "convenioHonorarioId", "convenioPeriodicidad", "convenioCuotas", "convenioMontoCuota", "convenioFechaInicio"],
@@ -251,7 +251,7 @@ export default function FinanzasForm() {
       casoId: z.string().optional(),
       conceptoId: z.string().min(1, "Seleccioná un concepto"),
       parteId: z.string().optional(),
-      obligadoKey: z.string().min(1, "Seleccioná el obligado al pago"),
+      obligadoKey: z.string().optional(),
       estadoUi: z.string().optional(),
       monedaCodigo: z.string(),
       monto: z.union([z.number(), z.string(), z.null()]),
@@ -267,11 +267,19 @@ export default function FinanzasForm() {
       diaVencimiento: z.union([z.number(), z.string(), z.null()]).optional(),
       convenioDescripcion: z.string().optional(),
     }).superRefine((data, ctx) => {
-      if (!data.casoId && !data.clienteId) {
+      if (data.casoId) {
+        if (!data.obligadoKey) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["obligadoKey"],
+            message: "Seleccioná el obligado al pago",
+          });
+        }
+      } else if (!data.clienteId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["casoId"],
-          message: "Seleccioná un expediente o un cliente (extrajudicial)",
+          path: ["clienteId"],
+          message: "Seleccioná un cliente (extrajudicial)",
         });
       }
       const montoNum = Number(data.monto);
@@ -514,6 +522,7 @@ export default function FinanzasForm() {
     if (!fields.length) return 100;
     const completed = fields.filter((f) => {
       if (f === "_clienteOCaso") return Boolean(form.casoId || form.clienteId);
+      if (f === "_obligadoSiCaso") return form.casoId ? Boolean(form.obligadoKey) : true;
       const v = form[f];
       return v !== undefined && v !== "" && v !== null;
     }).length;
@@ -1197,17 +1206,30 @@ export default function FinanzasForm() {
       const monedaArs = findParamByCodigo(monedas, ["ARS", "PESO"]);
       const monedaUsd = findParamByCodigo(monedas, ["USD", "DOLAR", "DÓLAR"]);
       if (tipoMovimiento === "honorario") {
-        const obligado = obligadosOptions.find((o) => o.key === form.obligadoKey);
-        const parteId = Number(form.parteId || obligado?.parteId || parteClienteParam?.id);
-        if (!obligado || !parteId) {
-          throw new Error("Seleccioná el obligado al pago");
+        let obligadoClienteId = null;
+        let obligadoTerceroId = null;
+        let parteId = Number(form.parteId || parteClienteParam?.id);
+        if (form.casoId) {
+          const obligado = obligadosOptions.find((o) => o.key === form.obligadoKey);
+          parteId = Number(form.parteId || obligado?.parteId || parteClienteParam?.id);
+          if (!obligado || !parteId) {
+            throw new Error("Seleccioná el obligado al pago");
+          }
+          obligadoClienteId = obligado.tipo === "cliente" ? Number(obligado.id) : null;
+          obligadoTerceroId = obligado.tipo === "tercero" ? Number(obligado.id) : null;
+        } else {
+          if (!form.clienteId || !parteId) {
+            throw new Error("Seleccioná un cliente");
+          }
+          obligadoClienteId = Number(form.clienteId);
+          obligadoTerceroId = null;
         }
         const payload = {
           ...clienteCasoPayload(form),
           conceptoId: Number(form.conceptoId),
           parteId,
-          obligadoClienteId: obligado.tipo === "cliente" ? Number(obligado.id) : null,
-          obligadoTerceroId: obligado.tipo === "tercero" ? Number(obligado.id) : null,
+          obligadoClienteId,
+          obligadoTerceroId,
           fechaRegulacion: toIsoDateTimeLocal(form.fechaRegulacion),
           estadoId: resolveEstadoHonorarioId(catalog.ESTADO_HONORARIO, form.estadoUi),
           monedaId: isJus ? monedaJus?.id : (isUsd ? monedaUsd?.id : monedaArs?.id),
@@ -1517,7 +1539,7 @@ export default function FinanzasForm() {
         <Grid container spacing={2.5}>
           {tipoMovimiento !== "gasto" && tipoMovimiento !== "ingreso" && (
             <>
-          <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <Controller
               name="casoId"
               control={control}
@@ -1554,76 +1576,14 @@ export default function FinanzasForm() {
               )}
             />
           </Grid>
-          {form.casoId ? (
-            <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
-              <Box sx={{ width: "100%" }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
-                  Cliente del expediente
-                </Typography>
-                <Chip
-                  label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
-                  sx={{ fontWeight: 800, maxWidth: "100%" }}
-                />
-              </Box>
-            </Grid>
-          ) : (
+          {form.casoId && tipoMovimiento === "honorario" ? (
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller
-                name="clienteId"
+                name="obligadoKey"
                 control={control}
-                render={({ field, fieldState: { error } }) => (
-                  <Autocomplete
-                    options={clientes}
-                    value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                    disabled={Boolean(lockClienteId)}
-                    onChange={(_, val) => applyClienteExtrajudicial(val)}
-                    getOptionLabel={clienteLabel}
-                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        size="small"
-                        label="Cliente"
-                        error={Boolean(error)}
-                        helperText={error?.message || "Sin expediente (extrajudicial)"}
-                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio"}
-                        inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
-                      />
-                    )}
-                  />
-                )}
-              />
-            </Grid>
-          )}
-            </>
-          )}
-
-          {tipoMovimiento === "honorario" && (
-            <>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Controller
-                  name="conceptoId"
-                  control={control}
-                  render={({ field, fieldState: { error } }) => (
-                    <FormControl fullWidth size="small" error={Boolean(error)}>
-                      <InputLabel>Concepto</InputLabel>
-                      <Select label="Concepto" {...field}>
-                        {(catalog.CONCEPTO_HONORARIO ?? []).map((c) => (
-                          <MenuItem key={c.id} value={String(c.id)}>{c.nombre}</MenuItem>
-                        ))}
-                      </Select>
-                      {error && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>{error.message}</Typography>}
-                    </FormControl>
-                  )}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Controller
-                  name="obligadoKey"
-                  control={control}
-                  render={({ field, fieldState: { error } }) => {
-                    const obligadoLocked = isEdit && Boolean(entityQuery.data?.tienePagosImputados);
-                    return (
+                render={({ field, fieldState: { error } }) => {
+                  const obligadoLocked = isEdit && Boolean(entityQuery.data?.tienePagosImputados);
+                  return (
                     <FormControl fullWidth size="small" error={Boolean(error)} disabled={obligadoLocked}>
                       <InputLabel>Obligado al pago</InputLabel>
                       <Select
@@ -1647,22 +1607,73 @@ export default function FinanzasForm() {
                           No se puede cambiar el deudor: el honorario ya tiene pagos imputados
                         </Typography>
                       )}
-                      {!form.casoId && !form.clienteId && !obligadoLocked && (
-                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
-                          Seleccioná un expediente o un cliente para listar obligados
-                        </Typography>
-                      )}
-                      {form.casoId && participantesElegiblesQuery.isLoading && (
+                      {participantesElegiblesQuery.isLoading && (
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
                           Cargando participantes…
                         </Typography>
                       )}
                     </FormControl>
-                    );
-                  }}
+                  );
+                }}
+              />
+            </Grid>
+          ) : !form.casoId ? (
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Controller
+                name="clienteId"
+                control={control}
+                render={({ field, fieldState: { error } }) => (
+                  <Autocomplete
+                    options={clientes}
+                    value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
+                    disabled={Boolean(lockClienteId) || (tipoMovimiento === "honorario" && isEdit && Boolean(entityQuery.data?.tienePagosImputados))}
+                    onChange={(_, val) => applyClienteExtrajudicial(val)}
+                    getOptionLabel={clienteLabel}
+                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        label="Cliente"
+                        error={Boolean(error)}
+                        helperText={
+                          error?.message
+                          || (tipoMovimiento === "honorario"
+                            ? "Será el obligado al pago"
+                            : "Sin expediente (extrajudicial)")
+                        }
+                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio"}
+                        inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
+                      />
+                    )}
+                  />
+                )}
+              />
+            </Grid>
+          ) : null}
+            </>
+          )}
+
+          {tipoMovimiento === "honorario" && (
+            <>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Controller
+                  name="conceptoId"
+                  control={control}
+                  render={({ field, fieldState: { error } }) => (
+                    <FormControl fullWidth size="small" error={Boolean(error)}>
+                      <InputLabel>Concepto</InputLabel>
+                      <Select label="Concepto" {...field}>
+                        {(catalog.CONCEPTO_HONORARIO ?? []).map((c) => (
+                          <MenuItem key={c.id} value={String(c.id)}>{c.nombre}</MenuItem>
+                        ))}
+                      </Select>
+                      {error && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>{error.message}</Typography>}
+                    </FormControl>
+                  )}
                 />
               </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
+              <Grid size={{ xs: 12, md: 6 }}>
                 <Controller
                   name="estadoUi"
                   control={control}
@@ -2206,7 +2217,7 @@ export default function FinanzasForm() {
 
         {tipoMovimiento === "gasto" && (
           <Grid container spacing={2.5}>
-            <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
+            <Grid size={{ xs: 12, md: form.casoId ? 12 : 6 }}>
               <Controller
                 name="casoId"
                 control={control}
@@ -2243,19 +2254,7 @@ export default function FinanzasForm() {
                 )}
               />
             </Grid>
-            {form.casoId ? (
-              <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
-                <Box sx={{ width: "100%" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
-                    Cliente del expediente
-                  </Typography>
-                  <Chip
-                    label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
-                    sx={{ fontWeight: 800, maxWidth: "100%" }}
-                  />
-                </Box>
-              </Grid>
-            ) : (
+            {!form.casoId && (
               <Grid size={{ xs: 12, md: 6 }}>
                 <Controller
                   name="clienteId"
@@ -2422,7 +2421,7 @@ export default function FinanzasForm() {
 
         {tipoMovimiento === "ingreso" && (
           <Grid container spacing={2.5}>
-            <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
+            <Grid size={{ xs: 12, md: form.casoId ? 12 : 6 }}>
               <Controller
                 name="casoId"
                 control={control}
@@ -2459,19 +2458,7 @@ export default function FinanzasForm() {
                 )}
               />
             </Grid>
-            {form.casoId ? (
-              <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
-                <Box sx={{ width: "100%" }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
-                    Cliente del expediente
-                  </Typography>
-                  <Chip
-                    label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
-                    sx={{ fontWeight: 800, maxWidth: "100%" }}
-                  />
-                </Box>
-              </Grid>
-            ) : (
+            {!form.casoId && (
               <Grid size={{ xs: 12, md: 6 }}>
                 <Controller
                   name="clienteId"
