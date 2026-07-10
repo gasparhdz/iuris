@@ -11,6 +11,7 @@ const ALLOWED_EXTENSIONS = new Set([".pdf", ".jpg", ".jpeg", ".png", ".docx", ".
 
 export class AdjuntosService {
   static async findAdjuntos(scope: AdjuntoScope, scopeId: number, estudioId: number) {
+    await this.ensureScopeParent(scope, scopeId, estudioId);
     const adjuntos = await AdjuntosQueries.findAdjuntosByScope(scope, scopeId, estudioId);
     return serializeDates(adjuntos);
   }
@@ -41,6 +42,7 @@ export class AdjuntosService {
     size?: number;
   }) {
     validateFile(input.nombre, input.size);
+    await this.ensureScopeParent(input.scope, input.scopeId, input.estudioId);
     const folderId = await DriveService.resolveFolderForScope(input.scope, input.scopeId, input.estudioId);
     const storage = getStorage(input.estudioId);
     const uploaded = await storage.uploadStream({
@@ -81,6 +83,7 @@ export class AdjuntosService {
     const storage = getStorage(input.estudioId);
     if (storage.driver !== "s3") throw new Error("PRESIGNED_UPLOAD_NOT_SUPPORTED");
 
+    await this.ensureScopeParent(input.scope, input.scopeId, input.estudioId);
     await DriveService.resolveFolderForScope(input.scope, input.scopeId, input.estudioId);
     const key = buildAdjuntoKey(input.estudioId, input.scope, input.scopeId, input.nombre);
     const presigned = await storage.createPresignedUpload({
@@ -104,6 +107,7 @@ export class AdjuntosService {
   }) {
     validateFile(input.nombre, input.size);
     assertEstudioPrefix(input.key, input.estudioId);
+    await this.ensureScopeParent(input.scope, input.scopeId, input.estudioId);
     const folderId = await DriveService.resolveFolderForScope(input.scope, input.scopeId, input.estudioId);
     const storage = getStorage(input.estudioId);
     const object = await storage.confirmUpload({
@@ -127,13 +131,21 @@ export class AdjuntosService {
   static async deleteAdjunto(id: number, estudioId: number) {
     const adjunto = await AdjuntosQueries.findAdjuntoById(id, estudioId);
     if (!adjunto) throw new Error("ADJUNTO_NOT_FOUND");
+    await this.ensureScopeParent(adjunto.scope as AdjuntoScope, adjunto.scopeId, estudioId);
     const storage = getStorage(estudioId);
     await storage.deleteObject(adjunto.driveFileId);
     await AdjuntosQueries.softDeleteAdjunto(id, estudioId);
   }
 
   static async indexarAdjuntos(scope: AdjuntoScope, scopeId: number, estudioId: number) {
+    await this.ensureScopeParent(scope, scopeId, estudioId);
     return await DriveService.indexarFolder(scope, scopeId, estudioId);
+  }
+
+  private static async ensureScopeParent(scope: AdjuntoScope, scopeId: number, estudioId: number) {
+    if (scope !== "CASO") return;
+    const caso = await AdjuntosQueries.ensureCasoVivo(scopeId, estudioId);
+    if (!caso) throw new Error("CASO_NOT_FOUND");
   }
 }
 

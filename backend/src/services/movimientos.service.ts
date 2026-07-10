@@ -27,6 +27,10 @@ export class MovimientosService {
   }
 
   static async update(id: number, estudioId: number, data: UpdateMovimientoInput) {
+    const existing = await MovimientosQueries.findMovimientoById(id, estudioId);
+    if (!existing) throw new Error("MOVIMIENTO_NOT_FOUND");
+    await this.ensureCaso(existing.casoId, estudioId);
+
     const updateData: Parameters<typeof MovimientosQueries.updateMovimiento>[1] = {};
 
     if (data.fecha !== undefined) updateData.fecha = new Date(data.fecha);
@@ -44,6 +48,10 @@ export class MovimientosService {
   }
 
   static async delete(id: number, estudioId: number) {
+    const existing = await MovimientosQueries.findMovimientoById(id, estudioId);
+    if (!existing) throw new Error("MOVIMIENTO_NOT_FOUND");
+    await this.ensureCaso(existing.casoId, estudioId);
+
     const deleted = await MovimientosQueries.deleteMovimiento(id, estudioId);
     if (!deleted) throw new Error("MOVIMIENTO_NOT_FOUND");
   }

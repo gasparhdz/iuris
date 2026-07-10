@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
+import { z } from "zod";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
 import { fetchAllTerceros, fetchParticipantesCaso, addParticipanteCaso, updateParticipanteCaso, removeParticipanteCaso } from "../api/terceros";
@@ -27,7 +28,7 @@ import {
   Typography,
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
-import { ArrowBack, Save, Add, Delete, People } from "@mui/icons-material";
+import { ArrowBack, Save, Add, Delete } from "@mui/icons-material";
 
 const EMPTY_FORM = {
   clienteId: "",
@@ -40,6 +41,12 @@ const EMPTY_FORM = {
   descripcion: "",
   driveFolderId: "",
 };
+
+const expedienteFormSchema = z.object({
+  clienteId: z.union([z.string().min(1), z.number()]),
+  caratula: z.string().trim().min(3, "La carátula debe tener al menos 3 caracteres").max(500, "La carátula no puede superar 500 caracteres"),
+  tipoId: z.union([z.string().min(1), z.number()]),
+});
 
 function unwrapData(data) {
   return Array.isArray(data?.data) ? data.data : [];
@@ -64,6 +71,8 @@ function mapExpedienteDbToForm(c) {
 }
 
 function mapExpedienteFormToDb(form) {
+  // radicacionId / estadoRadicacionId no se envían: los gestiona SISFE.
+  // El update parcial del backend no toca campos omitidos (undefined).
   return {
     clienteId: Number(form.clienteId),
     caratula: form.caratula.trim(),
@@ -209,6 +218,7 @@ export default function ExpedienteForm() {
     return tercero.razonSocial || [tercero.apellido, tercero.nombre].filter(Boolean).join(", ") || tercero.nombre || `Tercero #${tercero.id}`;
   }
 
+  // TODO: endpoint transaccional expediente+participantes (guardado no atómico hoy).
   const saveMutation = useMutation({
     mutationFn: async (payload) => {
       let savedCaso;
@@ -222,10 +232,12 @@ export default function ExpedienteForm() {
 
       const lockCasoId = Number(savedCaso.id ?? id);
       const promises = [];
+      let newParticipantsCount = 0;
 
       if (!isEdit) {
         // Alta: todos los participantes agregados en la lista son nuevos
         for (const p of participants) {
+          newParticipantsCount += 1;
           promises.push(
             addParticipanteCaso(lockCasoId, {
               terceroId: p.terceroId,
@@ -240,6 +252,7 @@ export default function ExpedienteForm() {
         // A. Agregar nuevos
         const newPs = participants.filter((p) => p._isNew);
         for (const p of newPs) {
+          newParticipantsCount += 1;
           promises.push(
             addParticipanteCaso(lockCasoId, {
               terceroId: p.terceroId,
@@ -273,18 +286,36 @@ export default function ExpedienteForm() {
         }
       }
 
+      let failedNewParticipants = 0;
       if (promises.length > 0) {
-        await Promise.all(promises);
+        const results = await Promise.allSettled(promises);
+        // Contar fallos solo de altas de participantes (primeros N promises de add)
+        const addResults = results.slice(0, newParticipantsCount);
+        failedNewParticipants = addResults.filter((r) => r.status === "rejected").length;
+        const otherFailed = results.slice(newParticipantsCount).some((r) => r.status === "rejected");
+        if (otherFailed && failedNewParticipants === 0) {
+          // Falló update/remove de participantes, pero el expediente ya está guardado
+          failedNewParticipants = -1;
+        }
       }
 
-      return savedCaso;
+      return { savedCaso, failedNewParticipants };
     },
-    onSuccess: (saved) => {
-      enqueueSnackbar(isEdit ? "Expediente actualizado correctamente" : "Expediente creado correctamente", { variant: "success" });
+    onSuccess: ({ savedCaso, failedNewParticipants }) => {
+      if (failedNewParticipants > 0) {
+        enqueueSnackbar(
+          `Expediente guardado, pero no se pudieron agregar ${failedNewParticipants} participante${failedNewParticipants === 1 ? "" : "s"}`,
+          { variant: "warning" },
+        );
+      } else if (failedNewParticipants === -1) {
+        enqueueSnackbar("Expediente guardado, pero hubo un problema al actualizar participantes", { variant: "warning" });
+      } else {
+        enqueueSnackbar(isEdit ? "Expediente actualizado correctamente" : "Expediente creado correctamente", { variant: "success" });
+      }
       queryClient.invalidateQueries({ queryKey: ["expedientes"] });
-      queryClient.invalidateQueries({ queryKey: ["expedientes", saved.id ?? id] });
-      queryClient.invalidateQueries({ queryKey: ["expedientes", saved.id ?? id, "participantes"] });
-      navigate(`/expedientes/${saved.id ?? id}`);
+      queryClient.invalidateQueries({ queryKey: ["expedientes", savedCaso.id ?? id] });
+      queryClient.invalidateQueries({ queryKey: ["expedientes", savedCaso.id ?? id, "participantes"] });
+      navigate(`/expedientes/${savedCaso.id ?? id}`);
     },
     onError: (error) => enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo guardar el expediente", { variant: "error" }),
   });
@@ -304,8 +335,24 @@ export default function ExpedienteForm() {
   function validate() {
     const nextErrors = {};
     if (!form.clienteId) nextErrors.clienteId = "Seleccioná un cliente";
-    if (!form.caratula.trim()) nextErrors.caratula = "La carátula es obligatoria";
     if (!form.tipoId) nextErrors.tipoId = "Seleccioná un tipo de expediente";
+
+    const parsed = expedienteFormSchema.safeParse({
+      clienteId: form.clienteId,
+      caratula: form.caratula,
+      tipoId: form.tipoId,
+    });
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0];
+        if (key === "caratula") nextErrors.caratula = issue.message;
+        if (key === "clienteId" && !nextErrors.clienteId) nextErrors.clienteId = "Seleccioná un cliente";
+        if (key === "tipoId" && !nextErrors.tipoId) nextErrors.tipoId = "Seleccioná un tipo de expediente";
+      }
+    } else if (!form.caratula.trim()) {
+      nextErrors.caratula = "La carátula es obligatoria";
+    }
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -320,6 +367,25 @@ export default function ExpedienteForm() {
 
   if (isEdit && casoQuery.isLoading) {
     return <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}><CircularProgress /></Box>;
+  }
+
+  if (isEdit && (casoQuery.isError || !casoQuery.data)) {
+    return (
+      <Paper
+        elevation={0}
+        sx={{
+          borderRadius: "16px",
+          border: "1px solid",
+          borderColor: "divider",
+          p: 4,
+          textAlign: "center",
+          bgcolor: "background.paper",
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 900 }}>No pudimos cargar el expediente</Typography>
+        <Button onClick={() => navigate("/expedientes")} sx={{ mt: 2 }}>Volver</Button>
+      </Paper>
+    );
   }
 
   return (

@@ -1,16 +1,26 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../index.js";
-import { adjuntos } from "../schema.js";
+import { adjuntos, casos } from "../schema.js";
 
 export type AdjuntoScope = "CLIENTE" | "CASO";
 type NewAdjunto = typeof adjuntos.$inferInsert;
 
 export class AdjuntosQueries {
+  /** TODO: servir descargas de adjuntos vía backend en lugar de link directo a Drive. */
   static async findAdjuntosByScope(scope: AdjuntoScope, scopeId: number, estudioId: number) {
     return await db
       .select()
       .from(adjuntos)
       .where(and(eq(adjuntos.scope, scope), eq(adjuntos.scopeId, scopeId), eq(adjuntos.estudioId, estudioId), isNull(adjuntos.eliminadoEn)));
+  }
+
+  static async ensureCasoVivo(casoId: number, estudioId: number) {
+    const [caso] = await db
+      .select({ id: casos.id })
+      .from(casos)
+      .where(and(eq(casos.id, casoId), eq(casos.estudioId, estudioId), isNull(casos.deletedAt)))
+      .limit(1);
+    return caso ?? null;
   }
 
   static async findAdjuntoById(id: number, estudioId: number) {

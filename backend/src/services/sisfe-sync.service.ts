@@ -724,7 +724,11 @@ async function subirDocumentoADrive(
       driveFolderId: casos.driveFolderId,
     })
       .from(casos)
-      .where(eq(casos.id, casoId))
+      .where(and(
+        eq(casos.id, casoId),
+        eq(casos.estudioId, estudioId),
+        isNull(casos.deletedAt),
+      ))
       .limit(1);
 
     if (!caso) return;

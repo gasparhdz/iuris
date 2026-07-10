@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  adjuntos,
   auditoriaLogs,
   casos,
   clientes,
@@ -179,6 +180,20 @@ async function softDeleteCasoChildren(
       .where(and(inArray(planCuotas.planId, planIds), isNull(planCuotas.deletedAt)))
       .returning({ id: planCuotas.id });
     counts.planCuota = deletedCuotas.length;
+  }
+
+  // Adjuntos del caso: soft-delete en cascada. Movimientos/notas/participantes NO se cascaden;
+  // los endpoints de subrecursos validan que el caso padre esté vivo.
+  if (casoIds.length > 0) {
+    await tx
+      .update(adjuntos)
+      .set({ eliminadoEn: now })
+      .where(and(
+        eq(adjuntos.estudioId, estudioId),
+        eq(adjuntos.scope, "CASO"),
+        inArray(adjuntos.scopeId, casoIds),
+        isNull(adjuntos.eliminadoEn),
+      ));
   }
 
   if (caseCondition) {

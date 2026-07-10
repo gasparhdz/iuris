@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, exists, isNull } from "drizzle-orm";
 import { db } from "../index.js";
-import { notasCaso, notasCliente } from "../schema.js";
+import { casos, notasCaso, notasCliente } from "../schema.js";
 
 type NewNotaCliente = typeof notasCliente.$inferInsert;
 type NewNotaCaso = typeof notasCaso.$inferInsert;
@@ -20,6 +20,15 @@ export class NotasQueries {
       .from(notasCaso)
       .where(and(eq(notasCaso.casoId, casoId), eq(notasCaso.estudioId, estudioId)))
       .orderBy(desc(notasCaso.createdAt));
+  }
+
+  static async findNotaCasoById(id: number, estudioId: number) {
+    const [row] = await db
+      .select()
+      .from(notasCaso)
+      .where(and(eq(notasCaso.id, id), eq(notasCaso.estudioId, estudioId)))
+      .limit(1);
+    return row ?? null;
   }
 
   static async insertNotaCliente(data: Omit<NewNotaCliente, "estudioId">, estudioId: number) {
@@ -52,7 +61,20 @@ export class NotasQueries {
   static async deleteNotaCaso(id: number, estudioId: number) {
     const [row] = await db
       .delete(notasCaso)
-      .where(and(eq(notasCaso.id, id), eq(notasCaso.estudioId, estudioId)))
+      .where(and(
+        eq(notasCaso.id, id),
+        eq(notasCaso.estudioId, estudioId),
+        exists(
+          db
+            .select({ id: casos.id })
+            .from(casos)
+            .where(and(
+              eq(casos.id, notasCaso.casoId),
+              eq(casos.estudioId, estudioId),
+              isNull(casos.deletedAt),
+            )),
+        ),
+      ))
       .returning();
 
     return row ?? null;

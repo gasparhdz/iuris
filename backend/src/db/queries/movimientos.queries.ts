@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, getTableColumns, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, exists, getTableColumns, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../index.js";
-import { movimientosJudiciales, tareas } from "../schema.js";
+import { casos, movimientosJudiciales, tareas } from "../schema.js";
 
 type NewMovimiento = typeof movimientosJudiciales.$inferInsert;
 
@@ -37,6 +37,15 @@ export class MovimientosQueries {
       .orderBy(desc(movimientosJudiciales.fecha));
   }
 
+  static async findMovimientoById(id: number, estudioId: number) {
+    const [row] = await db
+      .select()
+      .from(movimientosJudiciales)
+      .where(and(eq(movimientosJudiciales.id, id), eq(movimientosJudiciales.estudioId, estudioId)))
+      .limit(1);
+    return row ?? null;
+  }
+
   static async insertMovimiento(data: Omit<NewMovimiento, "estudioId">, estudioId: number) {
     const [row] = await db
       .insert(movimientosJudiciales)
@@ -46,11 +55,28 @@ export class MovimientosQueries {
     return row;
   }
 
+  private static casoPadreVivo(estudioId: number) {
+    return exists(
+      db
+        .select({ id: casos.id })
+        .from(casos)
+        .where(and(
+          eq(casos.id, movimientosJudiciales.casoId),
+          eq(casos.estudioId, estudioId),
+          isNull(casos.deletedAt),
+        )),
+    );
+  }
+
   static async updateMovimiento(id: number, data: Partial<NewMovimiento>, estudioId: number) {
     const [row] = await db
       .update(movimientosJudiciales)
       .set(data)
-      .where(and(eq(movimientosJudiciales.id, id), eq(movimientosJudiciales.estudioId, estudioId)))
+      .where(and(
+        eq(movimientosJudiciales.id, id),
+        eq(movimientosJudiciales.estudioId, estudioId),
+        this.casoPadreVivo(estudioId),
+      ))
       .returning();
 
     return row ?? null;
@@ -59,7 +85,11 @@ export class MovimientosQueries {
   static async deleteMovimiento(id: number, estudioId: number) {
     const [row] = await db
       .delete(movimientosJudiciales)
-      .where(and(eq(movimientosJudiciales.id, id), eq(movimientosJudiciales.estudioId, estudioId)))
+      .where(and(
+        eq(movimientosJudiciales.id, id),
+        eq(movimientosJudiciales.estudioId, estudioId),
+        this.casoPadreVivo(estudioId),
+      ))
       .returning();
 
     return row ?? null;

@@ -177,6 +177,8 @@ export default function Expedientes() {
         ramaId: ramaFilter === "all" ? undefined : Number(ramaFilter),
         estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
         radicacionParentId: radicacionFilter === "all" ? undefined : Number(radicacionFilter),
+        orderBy,
+        order,
       };
       const allCasos = await fetchAllPages("/expedientes", exportBase);
       const exportRows = allCasos.map((caso) => {
@@ -246,6 +248,18 @@ export default function Expedientes() {
 
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
+      ) : casosQuery.isError ? (
+        <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
+          <Typography variant="h6" sx={{ fontWeight: 900 }}>
+            No se pudieron cargar los expedientes
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5, mb: 2 }}>
+            Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+          </Typography>
+          <Button variant="contained" onClick={() => casosQuery.refetch()} sx={{ fontWeight: 800 }}>
+            Reintentar
+          </Button>
+        </Paper>
       ) : totalCount === 0 && !casosQuery.isFetching ? (
         <Paper elevation={0} sx={{ p: 5, borderRadius: "16px", border: "1px solid", borderColor: "divider", textAlign: "center" }}>
           <FolderOpen sx={{ fontSize: 56, color: "text.disabled", mb: 1 }} />

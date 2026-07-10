@@ -13,6 +13,7 @@ import {
 
 export const notasRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
+  // TODO: permisos compuestos NOTAS×CASOS (hoy solo se autoriza el módulo NOTAS).
   const can = (accion: "ver" | "crear" | "editar" | "eliminar") => ({
     preHandler: [fastify.authenticate, fastify.authorize("NOTAS", accion)],
   });

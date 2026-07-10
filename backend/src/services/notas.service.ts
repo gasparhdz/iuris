@@ -45,6 +45,9 @@ export class NotasService {
   }
 
   static async deleteNotaCaso(id: number, estudioId: number) {
+    const nota = await NotasQueries.findNotaCasoById(id, estudioId);
+    if (!nota) throw new Error("NOTA_NOT_FOUND");
+    await this.ensureCaso(nota.casoId, estudioId);
     const deleted = await NotasQueries.deleteNotaCaso(id, estudioId);
     if (!deleted) throw new Error("NOTA_NOT_FOUND");
   }

@@ -478,6 +478,9 @@ export default function ExpedienteDetalle() {
       enqueueSnackbar("Nota agregada", { variant: "success" });
       queryClient.invalidateQueries({ queryKey: ["expedientes", casoId, "notas"] });
     },
+    onError: (error) => {
+      enqueueSnackbar(error?.response?.data?.error?.message ?? "No se pudo agregar la nota", { variant: "error" });
+    },
   });
 
   const addParticipantMutation = useMutation({
@@ -1228,6 +1231,7 @@ export default function ExpedienteDetalle() {
                             </TableCell>
                             <TableCell align="right" sx={{ py: 1 }}>
                               <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                {/* TODO: servir descargas de adjuntos vía backend en lugar de link directo a Drive */}
                                 <IconButton
                                   color="primary"
                                   href={`https://drive.google.com/file/d/${file.driveFileId}/view`}
@@ -1291,6 +1295,7 @@ export default function ExpedienteDetalle() {
                             </Typography>
                           </Stack>
                           <Stack direction="row" spacing={0.5}>
+                            {/* TODO: servir descargas de adjuntos vía backend en lugar de link directo a Drive */}
                             <IconButton
                               size="small"
                               color="primary"
@@ -1334,9 +1339,11 @@ export default function ExpedienteDetalle() {
       {tab === 5 && (
         <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, md: 3 } }}>
           <Stack spacing={2}>
-            <TextField multiline minRows={3} fullWidth label="Nueva nota" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
             {notasPerm.canCrear && (
-              <Button variant="contained" disabled={!newNote.trim() || addNoteMutation.isPending} onClick={() => addNoteMutation.mutate()} sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}>Agregar Nota</Button>
+              <>
+                <TextField multiline minRows={3} fullWidth label="Nueva nota" value={newNote} onChange={(e) => setNewNote(e.target.value)} />
+                <Button variant="contained" disabled={!newNote.trim() || addNoteMutation.isPending} onClick={() => addNoteMutation.mutate()} sx={{ alignSelf: { xs: "stretch", sm: "flex-end" }, width: { xs: "100%", sm: "auto" } }}>Agregar Nota</Button>
+              </>
             )}
             {(notasQuery.data ?? []).map((nota) => (
               <Paper key={nota.id} elevation={0} sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: "12px" }}>
@@ -1539,8 +1546,33 @@ function InfoCard({ label, value, wide = false }) {
 
 function ParticipantDialog({ open, onClose, terceros, roles, form, setForm, loading, onSubmit, onQuickCreate, quickCreating }) {
   const [quickOpen, setQuickOpen] = useState(false);
-  const [quickForm, setQuickForm] = useState({ tipoPersonaId: 1, nombre: "", apellido: "", razonSocial: "", email: "", telefono: "", observaciones: "" });
+  const [quickForm, setQuickForm] = useState({ nombre: "", apellido: "", razonSocial: "", email: "", telefono: "", observaciones: "" });
+
+  const tipoPersonaQuery = useQuery({
+    queryKey: ["catalogos", "parametros", "TIPO_PERSONA"],
+    queryFn: async () => {
+      const { data } = await api.get("/catalogos/parametros", { params: { categoria: "TIPO_PERSONA" } });
+      return Array.isArray(data?.data) ? data.data : [];
+    },
+    staleTime: 1000 * 60 * 30,
+  });
+
+  const tipoFisicaId = useMemo(
+    () => (tipoPersonaQuery.data ?? []).find((p) => /FISICA|HUMANA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id,
+    [tipoPersonaQuery.data],
+  );
+  const tipoJuridicaId = useMemo(
+    () => (tipoPersonaQuery.data ?? []).find((p) => /JURIDICA/i.test(`${p.codigo} ${p.nombre}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "")))?.id,
+    [tipoPersonaQuery.data],
+  );
+
   const selected = terceros.find((t) => Number(t.id) === Number(form.terceroId)) ?? null;
+
+  function resolveTipoPersonaId() {
+    if (quickForm.razonSocial) return tipoJuridicaId;
+    return tipoFisicaId;
+  }
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>Sumar Participante</DialogTitle>
@@ -1559,7 +1591,13 @@ function ParticipantDialog({ open, onClose, terceros, roles, form, setForm, load
                 <Grid size={{ xs: 12, md: 6 }}><TextField size="small" fullWidth label="Email" value={quickForm.email} onChange={(e) => setQuickForm((f) => ({ ...f, email: e.target.value }))} /></Grid>
                 <Grid size={{ xs: 12, md: 6 }}><TextField size="small" fullWidth label="Teléfono" value={quickForm.telefono} onChange={(e) => setQuickForm((f) => ({ ...f, telefono: e.target.value }))} /></Grid>
               </Grid>
-              <Button sx={{ mt: 1.5, fontWeight: 900 }} variant="outlined" size="small" disabled={quickCreating || (!quickForm.razonSocial && !quickForm.nombre)} onClick={() => onQuickCreate({ ...quickForm, tipoPersonaId: quickForm.razonSocial ? 2 : 1 })}>
+              <Button
+                sx={{ mt: 1.5, fontWeight: 900 }}
+                variant="outlined"
+                size="small"
+                disabled={quickCreating || (!quickForm.razonSocial && !quickForm.nombre) || !resolveTipoPersonaId()}
+                onClick={() => onQuickCreate({ ...quickForm, tipoPersonaId: resolveTipoPersonaId() })}
+              >
                 {quickCreating ? "Guardando..." : "Crear y seleccionar"}
               </Button>
             </Paper>

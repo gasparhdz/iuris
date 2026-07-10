@@ -44,6 +44,9 @@ export class MovimientosController {
       if (error instanceof Error && error.message === "MOVIMIENTO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Movimiento no encontrado" } });
       }
+      if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
+      }
       throw error;
     }
   }
@@ -58,6 +61,9 @@ export class MovimientosController {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "MOVIMIENTO_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Movimiento no encontrado" } });
+      }
+      if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
       }
       throw error;
     }

@@ -89,6 +89,9 @@ export class NotasController {
       if (error instanceof Error && error.message === "NOTA_NOT_FOUND") {
         return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Nota no encontrada" } });
       }
+      if (error instanceof Error && error.message === "CASO_NOT_FOUND") {
+        return reply.status(404).send({ error: { code: "NOT_FOUND", message: "Expediente no encontrado" } });
+      }
       throw error;
     }
   }
