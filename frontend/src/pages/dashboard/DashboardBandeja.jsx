@@ -127,7 +127,7 @@ function GroupHeader({ group, onMarkAll, collapsed, onToggle }) {
         {group.items.length}
       </Typography>
       <Box sx={{ flex: 1, minWidth: 48, height: 1, bgcolor: lineColor }} />
-      {group.showMarkAll && (
+      {group.showMarkAll && !collapsed && (
         <Button
           size="small"
           onClick={(e) => { e.stopPropagation(); onMarkAll(); }}
@@ -352,10 +352,8 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
         </Box>
         <Box sx={{ display: { xs: "none", md: "flex" } }}>{actions}</Box>
       </Stack>
-      <Box sx={{ mt: 0.75, display: { xs: "block", md: "none" } }}>
-        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-          {actions}
-        </Stack>
+      <Box sx={{ mt: 0.75, display: { xs: "flex", md: "none" }, justifyContent: "flex-end" }}>
+        {actions}
       </Box>
     </Box>
   );
@@ -439,7 +437,7 @@ function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, 
           </Stack>
         )}
         {checkbox && (
-          <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
+          <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0} sx={{ display: { xs: "none", sm: "flex" } }}>
             {checkbox}
           </Stack>
         )}
@@ -673,6 +671,8 @@ export default function DashboardBandeja() {
     toggleEventMutation,
     taskBusy,
     eventBusy,
+    tareasQuery,
+    eventosQuery,
   } = useDashboardData();
 
   const {
@@ -683,6 +683,7 @@ export default function DashboardBandeja() {
     marcarTodo,
     marcarUno,
     isLoading: novedadesLoading,
+    novedadesQuery,
   } = useNovedadesData();
 
   const eventCount = pastPendingEvents.length + futureEvents.length;
@@ -708,7 +709,11 @@ export default function DashboardBandeja() {
 
   const overdueCount = overdueTasks.length + pastPendingEvents.length;
 
+  const criticalQueryFailed =
+    tareasQuery.isError || eventosQuery.isError || novedadesQuery.isError;
+
   const allClear =
+    !criticalQueryFailed &&
     overdueCount === 0 &&
     totalNovedades === 0 &&
     upcomingTasks.length === 0 &&
@@ -830,59 +835,61 @@ export default function DashboardBandeja() {
       animate={{ opacity: 1 }}
       sx={{ pb: 4, width: "100%" }}
     >
-      <Stack
-        direction="row"
-        alignItems="flex-start"
-        justifyContent="space-between"
-        spacing={1.5}
-        sx={{ mb: 1.5 }}
-      >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
-            <GreetingIcon sx={{ fontSize: { xs: 26, sm: 30 }, color: greetingColor, flexShrink: 0 }} />
-            <Typography
-              variant="h5"
-              sx={{
-                fontWeight: 800,
-                letterSpacing: "-0.02em",
-                lineHeight: 1.2,
-              }}
-            >
-              {greetingText}
-            </Typography>
-          </Stack>
+      <Box sx={{ mb: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
+          <GreetingIcon sx={{ fontSize: { xs: 26, sm: 30 }, color: greetingColor, flexShrink: 0 }} />
           <Typography
+            variant="h5"
+            noWrap
             sx={{
-              mt: 0.4,
+              fontWeight: 800,
+              letterSpacing: "-0.02em",
+              lineHeight: 1.2,
+              fontSize: { xs: "1.25rem", sm: "1.5rem" },
+              minWidth: 0,
+            }}
+          >
+            {greetingText}
+          </Typography>
+        </Stack>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1.5} sx={{ mt: 0.4 }}>
+          <Typography
+            component="div"
+            sx={{
               fontWeight: 500,
               fontSize: "0.8125rem",
               color: "text.secondary",
               lineHeight: 1.45,
+              minWidth: 0,
             }}
           >
-            {displayDate()} — {urgencyText}
+            {displayDate()}
+            <Box component="span" sx={{ display: { xs: "block", sm: "inline" } }}>
+              <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>{" — "}</Box>
+              {urgencyText}
+            </Box>
           </Typography>
-        </Box>
 
-        {/* Acción de sincronización siempre disponible; el banner de abajo solo aparece
-            cuando la sincronización está vieja (>24h) y actúa como recordatorio. */}
-        <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexShrink: 0, pt: 0.5 }}>
-          <Stack
-            direction="row"
-            alignItems="center"
-            spacing={0.7}
-            sx={{ display: { xs: "none", sm: "flex" } }}
-          >
-            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: frescura.tono, flexShrink: 0 }} />
-            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, whiteSpace: "nowrap" }}>
-              {frescura.texto}
-            </Typography>
+          {/* Acción de sincronización siempre disponible; el banner de abajo solo aparece
+              cuando la sincronización está vieja (>24h) y actúa como recordatorio. */}
+          <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexShrink: 0 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={0.7}
+              sx={{ display: { xs: "none", sm: "flex" } }}
+            >
+              <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: frescura.tono, flexShrink: 0 }} />
+              <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, whiteSpace: "nowrap" }}>
+                {frescura.texto}
+              </Typography>
+            </Stack>
+            <SisfeSyncButton size="small" lastSyncAt={lastSyncAt} sx={{ height: 32, minWidth: 0, px: 1.5 }}>
+              Sincronizar
+            </SisfeSyncButton>
           </Stack>
-          <SisfeSyncButton size="small" lastSyncAt={lastSyncAt} sx={{ height: 32, minWidth: 0, px: 1.5 }}>
-            Sincronizar
-          </SisfeSyncButton>
         </Stack>
-      </Stack>
+      </Box>
 
       <SisfeBanner lastSyncAt={lastSyncAt} frescura={frescura} />
 
@@ -921,6 +928,7 @@ export default function DashboardBandeja() {
                   borderRadius: "8px",
                   minWidth: "auto",
                   whiteSpace: "nowrap",
+                  flexShrink: 0,
                   fontWeight: 600,
                   fontSize: "0.8125rem",
                   color: active ? "primary.main" : "text.secondary",
@@ -989,7 +997,37 @@ export default function DashboardBandeja() {
         </Box>
       </Stack>
 
-      {novedadesLoading && filter !== "tareas" && filter !== "eventos" ? (
+      {criticalQueryFailed ? (
+        <Paper
+          elevation={0}
+          sx={{
+            mt: 3,
+            p: 3,
+            borderRadius: "13px",
+            border: "1px solid",
+            borderColor: "divider",
+            textAlign: "center",
+          }}
+        >
+          <Typography sx={{ fontWeight: 700, fontSize: "1rem" }}>
+            No se pudo cargar la bandeja
+          </Typography>
+          <Typography sx={{ mt: 0.5, mb: 2, color: "text.secondary", fontSize: "0.875rem" }}>
+            Hubo un problema de conexión o el servidor no respondió. Probá de nuevo.
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={() => {
+              tareasQuery.refetch();
+              eventosQuery.refetch();
+              novedadesQuery.refetch();
+            }}
+            sx={{ fontWeight: 800 }}
+          >
+            Reintentar
+          </Button>
+        </Paper>
+      ) : novedadesLoading && filter !== "tareas" && filter !== "eventos" ? (
         <Box sx={{ py: 6, display: "flex", justifyContent: "center" }}>
           <CircularProgress size={28} />
         </Box>
@@ -1065,8 +1103,8 @@ export default function DashboardBandeja() {
         modo={dialog.modo}
         novedad={dialog.novedad}
         onClose={() => setDialog((d) => ({ ...d, open: false }))}
-        onCreated={(novedad) => {
-          if (novedad?.id) marcarUno.mutate(novedad.id);
+        onCreated={() => {
+          // El backend ya marca la novedad como leída en la misma transacción.
         }}
       />
 
