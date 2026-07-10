@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idParamSchema, paginationMetaSchema, paginationQuerySchema, positiveIntSchema } from "./common.schema.js";
+import { startOfDayArgentina } from "../utils/timezone.js";
 
 export const subtareaInputSchema = z.object({
   titulo: z.string().min(2).max(255),
@@ -40,8 +41,7 @@ function recordatorioAntesDeLimite(data: { recordatorio?: string | null; fechaLi
 
 function fechaLimiteNoPasada(data: { fechaLimite?: string | null }) {
   if (data.fechaLimite) {
-    const inicioHoy = new Date();
-    inicioHoy.setHours(0, 0, 0, 0);
+    const inicioHoy = startOfDayArgentina(new Date());
     return new Date(data.fechaLimite) >= inicioHoy;
   }
   return true;

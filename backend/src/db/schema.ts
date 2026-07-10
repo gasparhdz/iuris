@@ -13,7 +13,7 @@ export const planesSuscripcion = pgTable("planes_suscripcion", {
   precioMensualArs: decimal("precio_mensual_ars", { precision: 14, scale: 2 }).notNull(),
   precioMensualJus: decimal("precio_mensual_jus", { precision: 14, scale: 4 }).notNull(),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const estudios = pgTable("estudios", {
@@ -36,8 +36,8 @@ export const estudios = pgTable("estudios", {
   logoUrl: varchar("logo_url", { length: 500 }),
   driveFolderId: varchar("drive_folder_id", { length: 255 }),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // ==========================================
@@ -49,7 +49,7 @@ export const categorias = pgTable("categorias", {
   nombre: varchar("nombre", { length: 100 }).notNull(),
   descripcion: text("descripcion"),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const parametros = pgTable("parametros", {
@@ -61,7 +61,7 @@ export const parametros = pgTable("parametros", {
   orden: integer("orden").default(0).notNull(),
   activo: boolean("activo").default(true).notNull(),
   extra: json("extra"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 
@@ -69,11 +69,11 @@ export const valoresJus = pgTable("valores_jus", {
   id: serial("id").primaryKey(),
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   valor: decimal("valor", { precision: 14, scale: 4 }).notNull(),
-  fecha: timestamp("fecha").notNull(),
+  fecha: timestamp("fecha", { withTimezone: true }).notNull(),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("valores_jus_estudio_fecha_unique").on(table.estudioId, table.fecha),
 ]);
@@ -126,10 +126,10 @@ export const usuarios = pgTable("usuarios", {
   telefono: varchar("telefono", { length: 50 }),
   activo: boolean("activo").default(true).notNull(),
   tokenVersion: integer("token_version").default(0).notNull(),
-  lastLoginAt: timestamp("last_login_at"),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   mustChangePass: boolean("must_change_pass").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const usuarioRoles = pgTable("usuario_roles", {
@@ -155,10 +155,10 @@ export const refreshTokens = pgTable("refresh_tokens", {
   familyId: uuid("family_id"),
   userAgent: varchar("user_agent", { length: 255 }),
   ip: varchar("ip", { length: 50 }),
-  expiresAt: timestamp("expires_at").notNull(),
-  rotatedAt: timestamp("rotated_at"),
-  revokedAt: timestamp("revoked_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("refresh_tokens_jti_hash_unique").on(table.jtiHash),
   index("refresh_tokens_family_id_idx").on(table.familyId),
@@ -168,9 +168,9 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   id: serial("id").primaryKey(),
   usuarioId: integer("usuario_id").references(() => usuarios.id).notNull(),
   tokenHash: varchar("token_hash", { length: 500 }).notNull(),
-  expiresAt: timestamp("expires_at").notNull(),
-  usedAt: timestamp("used_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const sisfeSessions = pgTable("sisfe_sessions", {
@@ -183,14 +183,14 @@ export const sisfeSessions = pgTable("sisfe_sessions", {
   // al iniciar sesión. Sirve para descartar de las novedades los movimientos que el
   // propio usuario presentó (la observación incluye "Presentante: ... - <matrícula>").
   sisfeMatricula: varchar("sisfe_matricula", { length: 50 }),
-  lastVerifiedAt: timestamp("last_verified_at"),
-  lastSyncAt: timestamp("last_sync_at"),
+  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
   syncStatus: varchar("sync_status", { length: 20 }).default("idle").notNull(),
   syncProgress: integer("sync_progress").default(0).notNull(),
   syncMessage: text("sync_message"),
   syncStats: json("sync_stats"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("sisfe_sessions_usuario_unique").on(table.usuarioId),
 ]);
@@ -203,8 +203,8 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
   userAgent: varchar("user_agent", { length: 255 }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("push_subscriptions_endpoint_unico").on(table.endpoint),
   index("push_subscriptions_usuario_idx").on(table.usuarioId),
@@ -217,8 +217,8 @@ export const preferenciasCobranza = pgTable("preferencias_cobranza", {
   diasAnticipacion: integer("dias_anticipacion").default(3).notNull(),
   porEmail: boolean("por_email").default(true).notNull(),
   porPush: boolean("por_push").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("preferencias_cobranza_usuario_unique").on(table.usuarioId),
 ]);
@@ -227,7 +227,7 @@ export const recordatoriosCobranzaLog = pgTable("recordatorios_cobranza_log", {
   id: serial("id").primaryKey(),
   usuarioId: integer("usuario_id").references(() => usuarios.id, { onDelete: "cascade" }).notNull(),
   fecha: date("fecha").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("recordatorios_cobranza_log_usuario_fecha_unique").on(table.usuarioId, table.fecha),
 ]);
@@ -244,7 +244,7 @@ export const clientes = pgTable("clientes", {
   razonSocial: varchar("razon_social", { length: 255 }),
   dni: varchar("dni", { length: 50 }),
   cuit: varchar("cuit", { length: 50 }),
-  fechaNacimiento: timestamp("fecha_nacimiento"),
+  fechaNacimiento: timestamp("fecha_nacimiento", { withTimezone: true }),
   email: varchar("email", { length: 255 }),
   telFijo: varchar("tel_fijo", { length: 50 }),
   telCelular: varchar("tel_celular", { length: 50 }),
@@ -258,11 +258,11 @@ export const clientes = pgTable("clientes", {
   observaciones: text("observaciones"),
   activo: boolean("activo").default(true).notNull(),
   driveFolderId: varchar("drive_folder_id", { length: 255 }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   unique("clientes_id_estudio_id_unique").on(table.id, table.estudioId),
@@ -280,11 +280,11 @@ export const contactosClientes = pgTable("contactos_clientes", {
   telefono: varchar("telefono", { length: 50 }),
   observaciones: text("observaciones"),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 });
 
@@ -297,7 +297,7 @@ export const terceros = pgTable("terceros", {
   razonSocial: varchar("razon_social", { length: 255 }),
   dni: varchar("dni", { length: 50 }),
   cuit: varchar("cuit", { length: 50 }),
-  fechaNacimiento: timestamp("fecha_nacimiento"),
+  fechaNacimiento: timestamp("fecha_nacimiento", { withTimezone: true }),
   email: varchar("email", { length: 255 }),
   telefono: varchar("telefono", { length: 50 }),
   dirCalle: varchar("dir_calle", { length: 255 }),
@@ -309,11 +309,11 @@ export const terceros = pgTable("terceros", {
   localidadId: integer("localidad_id").references(() => localidades.id),
   observaciones: text("observaciones"),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   // Invariante tenant: permite FK compuestas (id, estudio_id) desde tablas hijas.
@@ -330,36 +330,36 @@ export const casos = pgTable("casos", {
   nroExpte: varchar("nro_expte", { length: 100 }),
   nroExpteNorm: varchar("nro_expte_norm", { length: 100 }),
   sisfeExpteId: varchar("sisfe_expte_id", { length: 50 }),
-  sisfeLastSyncAt: timestamp("sisfe_last_sync_at"),
+  sisfeLastSyncAt: timestamp("sisfe_last_sync_at", { withTimezone: true }),
   sisfeSyncedBy: integer("sisfe_synced_by").references(() => usuarios.id),
   sisfeRadicadoEn: varchar("sisfe_radicado_en", { length: 500 }),
   sisfeLocalidad: varchar("sisfe_localidad", { length: 255 }),
-  sisfeFechaIngresoMeu: timestamp("sisfe_fecha_ingreso_meu"),
+  sisfeFechaIngresoMeu: timestamp("sisfe_fecha_ingreso_meu", { withTimezone: true }),
   sisfeUbicacionActual: varchar("sisfe_ubicacion_actual", { length: 500 }),
-  sisfeFechaUbicacionActual: timestamp("sisfe_fecha_ubicacion_actual"),
+  sisfeFechaUbicacionActual: timestamp("sisfe_fecha_ubicacion_actual", { withTimezone: true }),
   sisfeSoloDigital: boolean("sisfe_solo_digital"),
-  sisfeFechaUltimaActualizacion: timestamp("sisfe_fecha_ultima_actualizacion"),
+  sisfeFechaUltimaActualizacion: timestamp("sisfe_fecha_ultima_actualizacion", { withTimezone: true }),
   // Fecha del último expediente digital (PDF consolidado) descargado con éxito.
   // Junto con sisfeFechaUltimaActualizacion permite saltear la descarga del PDF
   // cuando el expediente no tuvo novedades desde el último sync.
-  sisfeExpedienteDigitalAt: timestamp("sisfe_expediente_digital_at"),
+  sisfeExpedienteDigitalAt: timestamp("sisfe_expediente_digital_at", { withTimezone: true }),
   caratula: varchar("caratula", { length: 500 }),
   tipoId: integer("tipo_id").references(() => parametros.id).notNull(),
   descripcion: text("descripcion"),
   estadoId: integer("estado_id").references(() => parametros.id),
-  fechaEstado: timestamp("fecha_estado").defaultNow().notNull(),
+  fechaEstado: timestamp("fecha_estado", { withTimezone: true }).defaultNow().notNull(),
   radicacionId: integer("radicacion_id").references(() => parametros.id),
   estadoRadicacionId: integer("estado_radicacion_id").references(() => parametros.id),
-  fechaEstadoRadicacion: timestamp("fecha_estado_radicacion"),
+  fechaEstadoRadicacion: timestamp("fecha_estado_radicacion", { withTimezone: true }),
   responsableId: integer("responsable_id").references(() => usuarios.id),
   driveFolderId: varchar("drive_folder_id", { length: 255 }),
   numeroDrive: integer("numero_drive"),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   unique("casos_id_estudio_id_unique").on(table.id, table.estudioId),
@@ -383,8 +383,8 @@ export const casoTrazabilidad = pgTable("caso_trazabilidad", {
   casoId: integer("caso_id").notNull(),
   estudioId: integer("estudio_id").references(() => estudios.id, { onDelete: "cascade" }).notNull(),
   ubicacion: varchar("ubicacion", { length: 500 }).notNull(),
-  fechaDesde: timestamp("fecha_desde").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  fechaDesde: timestamp("fecha_desde", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   foreignKey({
     name: "caso_trazabilidad_caso_estudio_fk",
@@ -430,15 +430,15 @@ export const movimientosJudiciales = pgTable("movimientos_judiciales", {
   id: serial("id").primaryKey(),
   casoId: integer("caso_id").notNull(),
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
-  fecha: timestamp("fecha").notNull(),
+  fecha: timestamp("fecha", { withTimezone: true }).notNull(),
   tipo: varchar("tipo", { length: 100 }).notNull(), 
   novedad: text("novedad"),
   descripcion: text("descripcion"),
   foja: varchar("foja", { length: 50 }),
-  vencimiento: timestamp("vencimiento"),
+  vencimiento: timestamp("vencimiento", { withTimezone: true }),
   sisfeMovId: varchar("sisfe_mov_id", { length: 500 }),
   origenSisfe: boolean("origen_sisfe").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -465,7 +465,7 @@ export const movimientosVistos = pgTable("movimientos_vistos", {
     .references(() => movimientosJudiciales.id, { onDelete: "cascade" })
     .notNull(),
   usuarioId: integer("usuario_id").references(() => usuarios.id).notNull(),
-  vistoAt: timestamp("visto_at").defaultNow().notNull(),
+  vistoAt: timestamp("visto_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("movimientos_vistos_usuario_mov_unico").on(table.usuarioId, table.movimientoId),
   index("movimientos_vistos_estudio_usuario_idx").on(table.estudioId, table.usuarioId),
@@ -476,7 +476,7 @@ export const notasCaso = pgTable("notas_caso", {
   casoId: integer("caso_id").notNull(),
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   contenido: text("contenido").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -491,7 +491,7 @@ export const notasCliente = pgTable("notas_cliente", {
   clienteId: integer("cliente_id").notNull(),
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   contenido: text("contenido").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -509,22 +509,22 @@ export const eventos = pgTable("eventos", {
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   casoId: integer("caso_id"),
   clienteId: integer("cliente_id"),
-  fechaInicio: timestamp("fecha_inicio").notNull(),
-  fechaFin: timestamp("fecha_fin"),
+  fechaInicio: timestamp("fecha_inicio", { withTimezone: true }).notNull(),
+  fechaFin: timestamp("fecha_fin", { withTimezone: true }),
   allDay: boolean("all_day").default(false).notNull(),
   tipoId: integer("tipo_id").references(() => parametros.id).notNull(),
   estadoId: integer("estado_id").references(() => parametros.id),
   descripcion: text("descripcion"),
   observaciones: text("observaciones"),
-  recordatorio: timestamp("recordatorio"),
+  recordatorio: timestamp("recordatorio", { withTimezone: true }),
   recordatorioEnviado: boolean("recordatorio_enviado").default(false).notNull(),
   ubicacion: varchar("ubicacion", { length: 255 }),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -553,11 +553,11 @@ export const tareas = pgTable("tareas", {
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   titulo: varchar("titulo", { length: 255 }).notNull(),
   descripcion: text("descripcion"),
-  fechaLimite: timestamp("fecha_limite"),
+  fechaLimite: timestamp("fecha_limite", { withTimezone: true }),
   prioridadId: integer("prioridad_id").references(() => parametros.id),
-  recordatorio: timestamp("recordatorio"),
+  recordatorio: timestamp("recordatorio", { withTimezone: true }),
   completada: boolean("completada").default(false).notNull(),
-  completadaAt: timestamp("completada_at"),
+  completadaAt: timestamp("completada_at", { withTimezone: true }),
   asignadoA: integer("asignado_a").references(() => usuarios.id),
   clienteId: integer("cliente_id"),
   casoId: integer("caso_id"),
@@ -567,10 +567,10 @@ export const tareas = pgTable("tareas", {
   recordatorioEnviado: boolean("recordatorio_enviado").default(false).notNull(),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -595,6 +595,10 @@ export const tareas = pgTable("tareas", {
   index("tareas_movimiento_idx")
     .on(table.movimientoId)
     .where(sql`${table.deletedAt} IS NULL`),
+  // Una sola tarea viva por movimiento (idempotencia al agendar desde SISFE).
+  uniqueIndex("tareas_movimiento_vivo_unique")
+    .on(table.movimientoId)
+    .where(sql`${table.deletedAt} IS NULL AND ${table.movimientoId} IS NOT NULL`),
 ]);
 
 export const subTareas = pgTable("sub_tareas", {
@@ -603,10 +607,10 @@ export const subTareas = pgTable("sub_tareas", {
   titulo: varchar("titulo", { length: 255 }).notNull(),
   descripcion: text("descripcion"),
   completada: boolean("completada").default(false).notNull(),
-  completadaAt: timestamp("completada_at"),
+  completadaAt: timestamp("completada_at", { withTimezone: true }),
   orden: integer("orden").default(0).notNull(),
   activo: boolean("activo").default(true).notNull(),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 // ==========================================
@@ -618,22 +622,25 @@ export const honorarios = pgTable("honorarios", {
   clienteId: integer("cliente_id"),
   casoId: integer("caso_id"),
   conceptoId: integer("concepto_id").references(() => parametros.id).notNull(),
+  // Rol de catálogo (PARTES / ROL_PARTICIPANTE). El obligado real es cliente o tercero.
   parteId: integer("parte_id").references(() => parametros.id).notNull(),
+  obligadoClienteId: integer("obligado_cliente_id"),
+  obligadoTerceroId: integer("obligado_tercero_id"),
   jus: decimal("jus", { precision: 14, scale: 4 }),
   montoPesos: decimal("monto_pesos", { precision: 14, scale: 2 }),
   monedaId: integer("moneda_id").references(() => parametros.id),
   valorJusRef: decimal("valor_jus_ref", { precision: 14, scale: 4 }),
   politicaJusId: integer("politica_jus_id").references(() => parametros.id),
-  fechaRegulacion: timestamp("fecha_regulacion").notNull(),
-  fechaVencimiento: timestamp("fecha_vencimiento"),
+  fechaRegulacion: timestamp("fecha_regulacion", { withTimezone: true }).notNull(),
+  fechaVencimiento: timestamp("fecha_vencimiento", { withTimezone: true }),
   tasaInteresMensual: decimal("tasa_interes_mensual", { precision: 5, scale: 2 }),
   estadoId: integer("estado_id").references(() => parametros.id),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -646,6 +653,20 @@ export const honorarios = pgTable("honorarios", {
     columns: [table.casoId, table.estudioId],
     foreignColumns: [casos.id, casos.estudioId],
   }).onDelete("cascade"),
+  foreignKey({
+    name: "honorarios_obligado_cliente_estudio_fk",
+    columns: [table.obligadoClienteId, table.estudioId],
+    foreignColumns: [clientes.id, clientes.estudioId],
+  }),
+  foreignKey({
+    name: "honorarios_obligado_tercero_estudio_fk",
+    columns: [table.obligadoTerceroId, table.estudioId],
+    foreignColumns: [terceros.id, terceros.estudioId],
+  }),
+  check(
+    "honorarios_obligado_xor_check",
+    sql`(${table.obligadoClienteId} IS NULL OR ${table.obligadoTerceroId} IS NULL)`
+  ),
   index("honorarios_estudio_created_idx")
     .on(table.estudioId, table.createdAt)
     .where(sql`${table.deletedAt} IS NULL`),
@@ -664,17 +685,17 @@ export const gastos = pgTable("gastos", {
   casoId: integer("caso_id"),
   conceptoId: integer("concepto_id").references(() => parametros.id),
   descripcion: text("descripcion"),
-  fechaGasto: timestamp("fecha_gasto").notNull(),
+  fechaGasto: timestamp("fecha_gasto", { withTimezone: true }).notNull(),
   monto: decimal("monto", { precision: 14, scale: 2 }).notNull(),
   monedaId: integer("moneda_id").references(() => parametros.id),
   cotizacionArs: decimal("cotizacion_ars", { precision: 14, scale: 4 }),
   estadoId: integer("estado_id").references(() => parametros.id),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -709,15 +730,15 @@ export const ingresos = pgTable("ingresos", {
   monedaId: integer("moneda_id").references(() => parametros.id),
   cotizacionArs: decimal("cotizacion_ars", { precision: 14, scale: 4 }),
   valorJusAlCobro: decimal("valor_jus_al_cobro", { precision: 14, scale: 4 }),
-  fechaIngreso: timestamp("fecha_ingreso").notNull(),
+  fechaIngreso: timestamp("fecha_ingreso", { withTimezone: true }).notNull(),
   tipoId: integer("tipo_id").references(() => parametros.id),
   estadoId: integer("estado_id").references(() => parametros.id),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -755,11 +776,11 @@ export const ingresoAplicaciones = pgTable("ingreso_aplicaciones", {
   montoInteres: decimal("monto_interes", { precision: 14, scale: 2 }).default("0").notNull(),
   valorJusAlCobro: decimal("valor_jus_al_cobro", { precision: 14, scale: 4 }),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  updatedAt: timestamp("updated_at"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   index("ingreso_aplicaciones_estudio_created_idx")
@@ -788,7 +809,7 @@ export const planesPago = pgTable("planes_pago", {
   clienteId: integer("cliente_id"),
   casoId: integer("caso_id"),
   descripcion: text("descripcion"),
-  fechaInicio: timestamp("fecha_inicio"),
+  fechaInicio: timestamp("fecha_inicio", { withTimezone: true }),
   periodicidadId: integer("periodicidad_id").references(() => parametros.id),
   montoCuotaPesos: decimal("monto_cuota_pesos", { precision: 14, scale: 2 }),
   montoCuotaJus: decimal("monto_cuota_jus", { precision: 14, scale: 4 }),
@@ -800,10 +821,10 @@ export const planesPago = pgTable("planes_pago", {
   diaVencimiento: integer("dia_vencimiento"),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   foreignKey({
@@ -835,7 +856,7 @@ export const planCuotas = pgTable("plan_cuotas", {
   id: serial("id").primaryKey(),
   planId: integer("plan_id").references(() => planesPago.id).notNull(),
   numero: integer("numero").notNull(),
-  vencimiento: timestamp("vencimiento").notNull(),
+  vencimiento: timestamp("vencimiento", { withTimezone: true }).notNull(),
   montoPesos: decimal("monto_pesos", { precision: 14, scale: 2 }),
   montoJus: decimal("monto_jus", { precision: 14, scale: 4 }),
   valorJusRef: decimal("valor_jus_ref", { precision: 14, scale: 4 }),
@@ -846,10 +867,10 @@ export const planCuotas = pgTable("plan_cuotas", {
   estadoId: integer("estado_id").references(() => parametros.id),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   updatedBy: integer("updated_by").references(() => usuarios.id),
-  deletedAt: timestamp("deleted_at"),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   deletedBy: integer("deleted_by").references(() => usuarios.id),
 }, (table) => [
   uniqueIndex("plan_cuotas_plan_numero_unique").on(table.planId, table.numero),
@@ -881,8 +902,8 @@ export const adjuntos = pgTable("adjuntos", {
   driveFolderId: varchar("storage_folder_key", { length: 255 }).notNull(),
   storageDriver: varchar("storage_driver", { length: 50 }).default("google-drive").notNull(),
   etag: varchar("etag", { length: 255 }),
-  creadoEn: timestamp("creado_en").defaultNow().notNull(),
-  eliminadoEn: timestamp("eliminado_en"),
+  creadoEn: timestamp("creado_en", { withTimezone: true }).defaultNow().notNull(),
+  eliminadoEn: timestamp("eliminado_en", { withTimezone: true }),
 });
 
 export const storageWatches = pgTable("storage_watches", {
@@ -892,9 +913,9 @@ export const storageWatches = pgTable("storage_watches", {
   channelId: varchar("channel_id", { length: 255 }).unique().notNull(),
   resourceId: varchar("resource_id", { length: 255 }),
   pageToken: varchar("page_token", { length: 255 }),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const plantillas = pgTable("plantillas", {
@@ -903,7 +924,7 @@ export const plantillas = pgTable("plantillas", {
   titulo: varchar("titulo", { length: 255 }).notNull(),
   contenidoHtml: text("contenido_html").notNull(),
   activo: boolean("activo").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const auditoriaLogs = pgTable("auditoria_logs", {
@@ -918,7 +939,7 @@ export const auditoriaLogs = pgTable("auditoria_logs", {
   descripcion: text("descripcion"),
   cambios: json("cambios"),
   ip: varchar("ip", { length: 100 }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const auditoriaLogsRelations = relations(auditoriaLogs, ({ one }) => ({
@@ -945,7 +966,7 @@ export const systemErrorLogs = pgTable("system_error_logs", {
   estudioId: integer("estudio_id").references(() => estudios.id, { onDelete: "set null" }),
   stackTrace: text("stack_trace"),
   contexto: json("contexto"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const securityAudit = pgTable("security_audit", {
@@ -962,7 +983,7 @@ export const securityAudit = pgTable("security_audit", {
   metadata: json("metadata"),
   previousHash: varchar("previous_hash", { length: 64 }),
   rowHash: varchar("row_hash", { length: 64 }).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   index("security_audit_estudio_created_idx").on(table.estudioId, table.createdAt),
   index("security_audit_usuario_evento_idx").on(table.usuarioId, table.evento),

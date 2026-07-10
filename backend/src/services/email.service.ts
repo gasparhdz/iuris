@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { env } from "../env.js";
+import { APP_TIMEZONE } from "../utils/timezone.js";
 
 type UsuarioEmail = {
   email: string;
@@ -41,7 +42,7 @@ type CobranzaRecordatorio = {
 };
 
 const DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  timeZone: "America/Argentina/Buenos_Aires",
+  timeZone: APP_TIMEZONE,
   dateStyle: "medium",
   timeStyle: "short",
 };

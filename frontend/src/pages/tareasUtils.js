@@ -47,11 +47,15 @@ export function nullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Convierte valor de datetime-local (hora del navegador) a ISO 8601 UTC para la API. */
 export function toIsoOrNull(localValue) {
   if (!localValue) return null;
-  return new Date(localValue).toISOString();
+  const date = new Date(localValue);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
 }
 
+/** ISO 8601 de la API → valor para input datetime-local en hora del navegador. */
 export function formatToLocalDatetime(isoString) {
   if (!isoString) return "";
   const date = new Date(isoString);
@@ -64,9 +68,10 @@ export function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+/** Vencida si el instante de fechaLimite (ISO UTC de la API) ya pasó. */
 export function isOverdue(task) {
   if (task?.completada || !task?.fechaLimite) return false;
-  return new Date(task.fechaLimite) < new Date();
+  return new Date(task.fechaLimite).getTime() < Date.now();
 }
 
 export function isToday(task) {

@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { systemErrorLogs } from "../db/schema.js";
+import { endOfDayArgentina, startOfDayArgentina } from "../utils/timezone.js";
 
 export interface RegistrarErrorInput {
   nivel: "ERROR" | "WARN";
@@ -54,11 +55,9 @@ export const SystemErrorLogsService = {
 
     if (filtros.nivel) conditions.push(eq(systemErrorLogs.nivel, filtros.nivel));
     if (filtros.statusCode) conditions.push(eq(systemErrorLogs.statusCode, filtros.statusCode));
-    if (filtros.desde) conditions.push(gte(systemErrorLogs.createdAt, new Date(filtros.desde)));
+    if (filtros.desde) conditions.push(gte(systemErrorLogs.createdAt, startOfDayArgentina(new Date(filtros.desde))));
     if (filtros.hasta) {
-      const hasta = new Date(filtros.hasta);
-      hasta.setHours(23, 59, 59, 999);
-      conditions.push(lte(systemErrorLogs.createdAt, hasta));
+      conditions.push(lte(systemErrorLogs.createdAt, endOfDayArgentina(new Date(filtros.hasta))));
     }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;

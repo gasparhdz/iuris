@@ -20,7 +20,7 @@
     "test:soft-delete-rollback": "tsx scripts/soft-delete-cascade.rollback.test.ts",
     "test:imputacion-concurrencia": "tsx src/tests/imputacion-concurrencia.test.ts",
     "drive:refresh-token": "tsx refresh-drive-token.ts",
-    "test": "vitest run --pool=threads src/tests/decimal.test.ts src/tests/imputacion.test.ts src/tests/mora.test.ts src/tests/capital-interes.test.ts src/tests/cuenta-corriente.test.ts src/tests/security-audit-chain.test.ts src/tests/permissions.test.ts src/tests/cobranza-recordatorio.test.ts"
+    "test": "vitest run --pool=threads src/tests/decimal.test.ts src/tests/imputacion.test.ts src/tests/mora.test.ts src/tests/capital-interes.test.ts src/tests/cuenta-corriente.test.ts src/tests/security-audit-chain.test.ts src/tests/permissions.test.ts src/tests/cobranza-recordatorio.test.ts src/tests/planes-deudor.test.ts src/tests/casos-update-partial.test.ts src/tests/timezone.test.ts"
   },
   "keywords": [],
   "author": "",

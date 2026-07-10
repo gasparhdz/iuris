@@ -115,7 +115,7 @@ export async function crearContextoAutenticadoDesdeBrowser(
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport: { width: 1366, height: 768 },
     locale: "es-AR",
-    timezoneId: "America/Argentina/Buenos_Aires",
+    timezoneId: "America/Argentina/Cordoba",
   });
   // tsx/esbuild (keepNames) inyecta un helper `__name(fn, "name")` en las funciones.
   // Al serializar callbacks para page.evaluate/$$eval, el navegador no conoce `__name`

@@ -1,4 +1,16 @@
-const TIMEZONE = "America/Argentina/Buenos_Aires";
+import {
+  APP_TIMEZONE,
+  endOfDayArgentina,
+  startOfDayArgentina,
+  toArgentinaDateString,
+} from "../utils/timezone.js";
+
+export {
+  APP_TIMEZONE,
+  endOfDayArgentina,
+  startOfDayArgentina,
+  toArgentinaDateString,
+} from "../utils/timezone.js";
 
 export type CuotaRecordatorio = {
   cuotaId: number;
@@ -20,26 +32,29 @@ export const PREFERENCIAS_COBRANZA_DEFAULTS = {
   porPush: true,
 } as const;
 
-export function toArgentinaDateString(date: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(date);
-}
-
-export function startOfDayArgentina(date: Date): Date {
-  const dateStr = toArgentinaDateString(date);
-  return new Date(`${dateStr}T03:00:00.000Z`);
-}
-
-export function endOfDayArgentina(date: Date): Date {
-  const start = startOfDayArgentina(date);
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  end.setUTCMilliseconds(-1);
-  return end;
+/**
+ * Prioridad del nombre en recordatorios (igual al CASE de CobranzaRecordatorioQueries):
+ * tercero → obligadoCliente → cliente del plan.
+ */
+export function resolveNombreDeudorCobranza(input: {
+  obligadoTerceroId?: number | null;
+  obligadoClienteId?: number | null;
+  terceroNombre?: string | null;
+  obligadoClienteNombre?: string | null;
+  clienteNombre?: string | null;
+}): string {
+  if (input.obligadoTerceroId != null) {
+    return input.terceroNombre?.trim() || "Sin nombre";
+  }
+  if (input.obligadoClienteId != null) {
+    return input.obligadoClienteNombre?.trim() || "Sin cliente";
+  }
+  return input.clienteNombre?.trim() || "Sin cliente";
 }
 
 export function isPastDailyCobranzaWindow(now: Date): boolean {
   const hour = Number(new Intl.DateTimeFormat("en-US", {
-    timeZone: TIMEZONE,
+    timeZone: APP_TIMEZONE,
     hour: "numeric",
     hour12: false,
   }).format(now));
@@ -130,7 +145,7 @@ export function buildCobranzaPushBody(vencidas: number, porVencer: number): stri
 
 export function formatVencimientoArgentina(date: Date): string {
   return date.toLocaleDateString("es-AR", {
-    timeZone: TIMEZONE,
+    timeZone: APP_TIMEZONE,
     dateStyle: "medium",
   });
 }
