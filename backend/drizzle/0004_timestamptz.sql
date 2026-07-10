@@ -1,4 +1,4 @@
-ALTER TABLE "adjuntos" ALTER COLUMN "creado_en" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
+﻿ALTER TABLE "adjuntos" ALTER COLUMN "creado_en" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "adjuntos" ALTER COLUMN "creado_en" SET DEFAULT now();--> statement-breakpoint
 ALTER TABLE "adjuntos" ALTER COLUMN "eliminado_en" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "auditoria_logs" ALTER COLUMN "created_at" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
@@ -140,4 +140,4 @@ ALTER TABLE "valores_jus" ALTER COLUMN "fecha" SET DATA TYPE timestamp with time
 ALTER TABLE "valores_jus" ALTER COLUMN "created_at" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "valores_jus" ALTER COLUMN "created_at" SET DEFAULT now();--> statement-breakpoint
 ALTER TABLE "valores_jus" ALTER COLUMN "deleted_at" SET DATA TYPE timestamp with time zone;--> statement-breakpoint
-CREATE UNIQUE INDEX "tareas_movimiento_vivo_unique" ON "tareas" USING btree ("movimiento_id") WHERE "tareas"."deleted_at" IS NULL AND "tareas"."movimiento_id" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "tareas_movimiento_vivo_unique" ON "tareas" USING btree ("movimiento_id") WHERE "tareas"."deleted_at" IS NULL AND "tareas"."movimiento_id" IS NOT NULL;
