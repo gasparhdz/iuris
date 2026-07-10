@@ -862,32 +862,35 @@ export default function FinanzasForm() {
     () => planesIngreso.reduce((acc, plan) => acc + Number(plan.totalHonorarioArs ?? 0), 0),
     [planesIngreso],
   );
-  const totalCuotasSeleccionadas = useMemo(
-    () => selectedCuotas.reduce((acc, cuota) => acc + Number(cuota.totalAPagarPesos ?? cuota.saldoPesos ?? cuota.saldo ?? 0), 0),
+  const totalCuotasSeleccionadasCents = useMemo(
+    () => selectedCuotas.reduce(
+      (acc, cuota) => acc + Math.round(Number(cuota.totalAPagarPesos ?? cuota.saldoPesos ?? cuota.saldo ?? 0) * 100),
+      0,
+    ),
     [selectedCuotas],
   );
   const gastoSimulation = useMemo(() => {
-    let restante = importeIngresoArs;
+    let restanteCents = Math.round(importeIngresoArs * 100);
     return selectedGastos
       .slice()
       .sort((a, b) => new Date(a.fechaGasto).getTime() - new Date(b.fechaGasto).getTime())
       .map((gasto) => {
-        const saldo = Number(gasto.monto ?? 0);
-        const aplicado = Math.min(Math.max(restante, 0), saldo);
-        restante -= aplicado;
+        const saldoCents = Math.round(Number(gasto.monto ?? 0) * 100);
+        const aplicadoCents = Math.min(Math.max(restanteCents, 0), saldoCents);
+        restanteCents -= aplicadoCents;
         return {
           id: Number(gasto.id),
-          aplicado,
-          saldoRestante: Math.max(0, saldo - aplicado),
-          cancelado: saldo > 0 && saldo - aplicado <= 0.0001,
+          aplicado: aplicadoCents / 100,
+          saldoRestante: Math.max(0, saldoCents - aplicadoCents) / 100,
+          cancelado: saldoCents > 0 && saldoCents - aplicadoCents <= 0,
         };
       });
   }, [importeIngresoArs, selectedGastos]);
   const gastoSimulationById = useMemo(() => {
     return new Map(gastoSimulation.map((item) => [item.id, item]));
   }, [gastoSimulation]);
-  const totalGastosSeleccionados = useMemo(
-    () => selectedGastos.reduce((acc, gasto) => acc + Number(gasto.monto ?? 0), 0),
+  const totalGastosSeleccionadosCents = useMemo(
+    () => selectedGastos.reduce((acc, gasto) => acc + Math.round(Number(gasto.monto ?? 0) * 100), 0),
     [selectedGastos],
   );
   // Honorarios que cobran de forma directa (sin plan de pago activo). Un honorario con plan
@@ -918,12 +921,20 @@ export default function FinanzasForm() {
     if (fromHon) return deudorKeyFromItem(fromHon);
     return null;
   }, [selectedCuotas, selectedHonorariosDirectos]);
-  const totalHonorariosDirectosSeleccionados = useMemo(
-    () => selectedHonorariosDirectos.reduce((acc, h) => acc + Number(honorarioMontoBase(h) ?? 0), 0),
+  const totalHonorariosDirectosSeleccionadosCents = useMemo(
+    () => selectedHonorariosDirectos.reduce(
+      (acc, h) => acc + Math.round(Number(honorarioMontoBase(h) ?? 0) * 100),
+      0,
+    ),
     [selectedHonorariosDirectos],
   );
-  const totalSeleccionadoIngreso = totalCuotasSeleccionadas + totalGastosSeleccionados + totalHonorariosDirectosSeleccionados;
-  const disponibleIngreso = Math.max(0, importeIngresoArs - totalSeleccionadoIngreso);
+  const totalSeleccionadoIngresoCents = totalCuotasSeleccionadasCents + totalGastosSeleccionadosCents + totalHonorariosDirectosSeleccionadosCents;
+  const totalSeleccionadoIngreso = totalSeleccionadoIngresoCents / 100;
+  const importeIngresoCents = Math.round(importeIngresoArs * 100);
+  const disponibleIngreso = Math.max(0, importeIngresoCents - totalSeleccionadoIngresoCents) / 100;
+  const excedentePagoACuenta = totalSeleccionadoIngresoCents > 0
+    ? Math.max(0, importeIngresoCents - totalSeleccionadoIngresoCents) / 100
+    : 0;
 
   useEffect(() => {
     if (tipoMovimiento !== "ingreso") return;
@@ -2612,7 +2623,7 @@ export default function FinanzasForm() {
                 {form.selectedCuotaIds.length === 0 && form.selectedGastoIds.length === 0 && form.selectedHonorarioIds.length === 0 && (
                   <Grid size={{ xs: 12 }} sx={{ mb: 1 }}>
                     <Alert severity="info" sx={{ borderRadius: "12px", "& .MuiAlert-message": { fontWeight: 700 } }}>
-                      Si no seleccionás ninguna cuota, gasto u honorario, el ingreso se aplicará automáticamente al primer movimiento en vencer.
+                      Si no seleccionás ninguna cuota, gasto u honorario, el ingreso se imputa a la deuda más antigua.
                     </Alert>
                   </Grid>
                 )}
@@ -2833,7 +2844,7 @@ export default function FinanzasForm() {
                     <Stack direction="row" spacing={1.5} alignItems="center">
                       <Chip size="small" label={`${form.selectedGastoIds.length} gastos seleccionados`} sx={{ fontWeight: 800 }} />
                       <Typography variant="body2" sx={{ fontWeight: 950 }}>
-                        {formatMoneyAr(totalGastosSeleccionados)}
+                        {formatMoneyAr(totalGastosSeleccionadosCents / 100)}
                       </Typography>
                       <IconButton
                         size="small"
@@ -2981,7 +2992,7 @@ export default function FinanzasForm() {
                     <Stack direction="row" spacing={1.5} alignItems="center">
                       <Chip size="small" label={`${form.selectedHonorarioIds.length} honorarios seleccionados`} sx={{ fontWeight: 800 }} />
                       <Typography variant="body2" sx={{ fontWeight: 950 }}>
-                        {formatMoneyAr(totalHonorariosDirectosSeleccionados)}
+                        {formatMoneyAr(totalHonorariosDirectosSeleccionadosCents / 100)}
                       </Typography>
                       <IconButton
                         size="small"
@@ -3116,7 +3127,7 @@ export default function FinanzasForm() {
                 )}
               />
             </Grid>
-            {planesIngreso.length > 0 && (
+            {(planesIngreso.length > 0 || totalSeleccionadoIngresoCents > 0) && (
               <Grid size={{ xs: 12 }}>
                 <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, p: 2 }}>
                   <Grid container spacing={2}>
@@ -3135,6 +3146,11 @@ export default function FinanzasForm() {
                       </Typography>
                     </Grid>
                   </Grid>
+                  {excedentePagoACuenta > 0.009 && (
+                    <Alert severity="warning" sx={{ mt: 1.5, borderRadius: "12px", "& .MuiAlert-message": { fontWeight: 700 } }}>
+                      El excedente de {formatMoneyAr(excedentePagoACuenta)} quedará como pago a cuenta
+                    </Alert>
+                  )}
                 </Paper>
               </Grid>
             )}
@@ -3190,6 +3206,20 @@ export default function FinanzasForm() {
                   ) : null}
                 </Typography>
               )}
+              {selectedConvenioHonorario && isConvenioHonorarioJus && (() => {
+                const pol = (catalog.POLITICA_JUS ?? []).find(
+                  (p) => Number(p.id) === Number(selectedConvenioHonorario.politicaJusId),
+                );
+                const isAlCobroPol = !pol || pol.codigo === "AL_COBRO";
+                const valorRef = Number(selectedConvenioHonorario.valorJusRef ?? 0);
+                return (
+                  <Alert severity="info" sx={{ mt: 1.5, borderRadius: "12px", "& .MuiAlert-message": { fontWeight: 700 } }}>
+                    {isAlCobroPol
+                      ? "Cuotas en JUS, se actualizan al cobro"
+                      : `Cuotas al JUS de la regulación: ${valorRef > 0 ? formatMoneyAr(valorRef) : "—"}`}
+                  </Alert>
+                );
+              })()}
               {!form.clienteId && !form.casoId && !lockClienteId && !lockCasoId && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
                   Seleccioná un expediente o un cliente para ver honorarios pendientes.

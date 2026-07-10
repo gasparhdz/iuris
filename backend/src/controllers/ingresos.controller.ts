@@ -48,6 +48,15 @@ function getAuthContext(request: FastifyRequest, reply: FastifyReply): { estudio
 function handleKnownError(error: unknown, reply: FastifyReply) {
   if (!(error instanceof Error)) throw error;
 
+  if (error.message === "INGRESO_IMPUTADO_NO_EDITABLE") {
+    return reply.status(409).send({
+      error: {
+        code: "INGRESO_IMPUTADO_NO_EDITABLE",
+        message: "El cobro ya está imputado: anulalo y cargalo nuevamente",
+      },
+    });
+  }
+
   const errors: Record<string, string> = {
     INGRESO_NOT_FOUND: "Ingreso no encontrado",
     CUOTA_NOT_FOUND: "Cuota no encontrada",

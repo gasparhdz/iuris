@@ -6,12 +6,15 @@ import {
   categorias,
   clientes,
   honorarios,
+  ingresoAplicaciones,
+  ingresos,
   parametros,
   planCuotas,
   planesPago,
   preferenciasCobranza,
   recordatoriosCobranzaLog,
   terceros,
+  usuarios,
 } from "../schema.js";
 import type { CuotaRecordatorio } from "../../services/cobranza-recordatorio.js";
 import { PREFERENCIAS_COBRANZA_DEFAULTS } from "../../services/cobranza-recordatorio.js";
@@ -24,7 +27,7 @@ export type PreferenciasCobranza = {
 };
 
 export class PreferenciasCobranzaQueries {
-  static async findByUsuarioId(usuarioId: number) {
+  static async findByUsuarioId(usuarioId: number, estudioId: number) {
     const [row] = await db
       .select({
         habilitado: preferenciasCobranza.habilitado,
@@ -33,16 +36,38 @@ export class PreferenciasCobranzaQueries {
         porPush: preferenciasCobranza.porPush,
       })
       .from(preferenciasCobranza)
-      .where(eq(preferenciasCobranza.usuarioId, usuarioId))
+      .innerJoin(usuarios, and(
+        eq(usuarios.id, preferenciasCobranza.usuarioId),
+        eq(usuarios.estudioId, estudioId),
+        eq(usuarios.activo, true),
+        isNull(usuarios.deletedAt),
+      ))
+      .where(and(
+        eq(preferenciasCobranza.usuarioId, usuarioId),
+        eq(preferenciasCobranza.estudioId, estudioId),
+      ))
       .limit(1);
 
     return row ?? null;
   }
 
-  static async upsert(usuarioId: number, data: PreferenciasCobranza) {
+  static async upsert(usuarioId: number, estudioId: number, data: PreferenciasCobranza) {
+    const [usuario] = await db
+      .select({ id: usuarios.id })
+      .from(usuarios)
+      .where(and(
+        eq(usuarios.id, usuarioId),
+        eq(usuarios.estudioId, estudioId),
+        eq(usuarios.activo, true),
+        isNull(usuarios.deletedAt),
+      ))
+      .limit(1);
+    if (!usuario) return null;
+
     const [row] = await db
       .insert(preferenciasCobranza)
       .values({
+        estudioId,
         usuarioId,
         habilitado: data.habilitado,
         diasAnticipacion: data.diasAnticipacion,
@@ -53,6 +78,7 @@ export class PreferenciasCobranzaQueries {
       .onConflictDoUpdate({
         target: preferenciasCobranza.usuarioId,
         set: {
+          estudioId,
           habilitado: data.habilitado,
           diasAnticipacion: data.diasAnticipacion,
           porEmail: data.porEmail,
@@ -102,6 +128,26 @@ export class CobranzaRecordatorioQueries {
       ELSE ${clienteNombreFallback}
     END`;
 
+    const politicaCodigo = sql<string | null>`(select ${parametros.codigo} from ${parametros} where ${parametros.id} = ${planesPago.politicaJusId})`;
+    // Mismo criterio que calcularSaldoCuota: AL_COBRO usa valorJusAlCobro por aplicación.
+    const jusPagados = sql<string>`coalesce((
+      select sum(
+        ${ingresoAplicaciones.montoCapital} / nullif(
+          case
+            when (select p.codigo from parametros p where p.id = ${planesPago.politicaJusId}) = 'AL_COBRO'
+              then coalesce(${ingresoAplicaciones.valorJusAlCobro}, ${planCuotas.valorJusRef}, 1)
+            else coalesce(${planCuotas.valorJusRef}, 1)
+          end
+        , 0)
+      )
+      from ${ingresoAplicaciones}
+      inner join ${ingresos} on ${ingresos.id} = ${ingresoAplicaciones.ingresoId}
+      where ${ingresoAplicaciones.cuotaId} = ${planCuotas.id}
+        and ${ingresoAplicaciones.activo} = true
+        and ${ingresoAplicaciones.deletedAt} is null
+        and ${ingresos.deletedAt} is null
+    ), 0)`;
+
     const rows = await db
       .select({
         cuotaId: planCuotas.id,
@@ -111,6 +157,8 @@ export class CobranzaRecordatorioQueries {
         montoJus: planCuotas.montoJus,
         montoAplicado: planCuotas.montoAplicado,
         valorJusRef: planCuotas.valorJusRef,
+        politicaCodigo,
+        jusPagados,
         clienteNombre,
         casoCaratula: casos.caratula,
         createdBy: planesPago.createdBy,
@@ -131,6 +179,8 @@ export class CobranzaRecordatorioQueries {
         eq(honorarios.obligadoClienteId, obligadoCliente.id),
         eq(obligadoCliente.estudioId, planesPago.estudioId),
       ))
+      // LEFT JOIN: no filtrar deletedAt en WHERE (un plan sin caso/cliente o con
+      // caso/cliente soft-deleted sigue entrando a recordatorios).
       .leftJoin(clientes, and(
         eq(planesPago.clienteId, clientes.id),
         eq(clientes.estudioId, planesPago.estudioId),
@@ -144,8 +194,6 @@ export class CobranzaRecordatorioQueries {
         isNull(planesPago.deletedAt),
         eq(planCuotas.activo, true),
         isNull(planCuotas.deletedAt),
-        isNull(clientes.deletedAt),
-        isNull(casos.deletedAt),
         ne(planCuotas.estadoId, estadoPagadaId),
         estadoCondonadaId ? ne(planCuotas.estadoId, estadoCondonadaId) : undefined,
         sql`${planesPago.createdBy} IS NOT NULL`,
@@ -161,6 +209,8 @@ export class CobranzaRecordatorioQueries {
         montoJus: row.montoJus,
         montoAplicado: row.montoAplicado,
         valorJusRef: row.valorJusRef,
+        politicaCodigo: row.politicaCodigo,
+        jusPagados: String(row.jusPagados ?? "0"),
         clienteNombre: row.clienteNombre,
         casoCaratula: row.casoCaratula,
         createdBy: row.createdBy,

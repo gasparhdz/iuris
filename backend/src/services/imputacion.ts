@@ -18,10 +18,14 @@ export type MovimientoImputacion = {
   total: Decimal;
 };
 
-export function ordenarPrelacion(deudas: DeudaImputable[], fechaCorte: Date = new Date()): DeudaImputable[] {
+/**
+ * FIFO por antigüedad exigible (ascendente), sin prioridad por tipo.
+ * Fechas: gasto→fechaGasto; cuota→fechaVencimiento; honorario→fechaVencimiento ?? fechaRegulacion
+ * (el caller ya las normaliza en `vencimiento`). Dentro de cada deuda, el motor
+ * imputa interés antes que capital.
+ */
+export function ordenarPrelacion(deudas: DeudaImputable[], _fechaCorte: Date = new Date()): DeudaImputable[] {
   return [...deudas].sort((a, b) => {
-    const prelacion = rangoPrelacion(a, fechaCorte) - rangoPrelacion(b, fechaCorte);
-    if (prelacion !== 0) return prelacion;
     const fecha = a.vencimiento.getTime() - b.vencimiento.getTime();
     if (fecha !== 0) return fecha;
     return a.id.localeCompare(b.id);
@@ -53,9 +57,4 @@ export function imputarIngreso(monto: Decimal, deudasOrdenadas: DeudaImputable[]
   }
 
   return { movimientos, remanente };
-}
-
-function rangoPrelacion(deuda: DeudaImputable, fechaCorte: Date): number {
-  if (deuda.tipo === "GASTO") return 0;
-  return deuda.vencimiento < fechaCorte ? 1 : 2;
 }

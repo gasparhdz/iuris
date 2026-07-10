@@ -90,37 +90,29 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
 
   const errors409: Record<string, string> = {
     MONTO_EXCEDE_SALDO_CUOTA: "El monto excede el saldo pendiente de la cuota",
+    PLAN_DEUDORES_DISTINTOS: "No se pueden mezclar honorarios de distintos deudores en el mismo cobro o plan",
+    HONORARIO_SIN_DEUDOR: "El honorario no tiene un deudor válido",
+    VALOR_JUS_NOT_FOUND: "No hay valor JUS cargado — cargalo en Valores JUS antes de registrar honorarios en JUS",
   };
   const msg409 = errors409[error.message];
-  if (msg409) return reply.status(409).send({ error: { code: "CONFLICT", message: msg409 } });
+  if (msg409) return reply.status(409).send({ error: { code: error.message === "MONTO_EXCEDE_SALDO_CUOTA" ? "CONFLICT" : error.message, message: msg409 } });
 
-  const errors: Record<string, string> = {
+  if (error.message === "PARAMETRO_PENDIENTE_NOT_FOUND") {
+    return reply.status(400).send({
+      error: { code: "PARAMETRO_PENDIENTE_NOT_FOUND", message: "No se encontró el estado pendiente" },
+    });
+  }
+
+  const errors404: Record<string, string> = {
     PLAN_NOT_FOUND: "Plan no encontrado",
     CUOTA_NOT_FOUND: "Cuota no encontrada",
     HONORARIO_NOT_FOUND: "Honorario no encontrado",
     CLIENTE_NOT_FOUND: "Cliente no encontrado",
     CASO_NOT_FOUND: "Expediente no encontrado",
     PERIODICIDAD_NOT_FOUND: "Periodicidad no encontrada",
-    VALOR_JUS_NOT_FOUND: "No hay valor JUS disponible",
-    PARAMETRO_PENDIENTE_NOT_FOUND: "No se encontró el estado pendiente",
-    PLAN_DEUDORES_DISTINTOS: "No se pueden mezclar honorarios de distintos deudores en el mismo cobro o plan",
-    HONORARIO_SIN_DEUDOR: "El honorario no tiene un deudor válido",
   };
 
-  if (error.message === "PLAN_DEUDORES_DISTINTOS" || error.message === "HONORARIO_SIN_DEUDOR") {
-    return reply.status(409).send({ error: { code: error.message, message: errors[error.message] } });
-  }
-
-  if (error.message === "VALOR_JUS_NOT_FOUND") {
-    return reply.status(409).send({
-      error: {
-        code: "VALOR_JUS_NOT_FOUND",
-        message: "No hay valor JUS cargado — cargalo en Valores JUS antes de registrar honorarios en JUS",
-      },
-    });
-  }
-
-  const message = errors[error.message];
+  const message = errors404[error.message];
   if (message) return reply.status(404).send({ error: { code: "NOT_FOUND", message } });
 
   throw error;

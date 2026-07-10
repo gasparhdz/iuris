@@ -49,6 +49,23 @@ describe("cobranza-recordatorio", () => {
       montoAplicado: "4000.00",
       valorJusRef: "2000.0000",
     })).toBe(true);
+
+    // AL_COBRO: jusPagados con valorJusAlCobro por aplicación (no montoAplicado/valorJusRef)
+    expect(cuotaTieneSaldoPendiente({
+      montoPesos: null,
+      montoJus: "10.0000",
+      montoAplicado: "4000.00",
+      valorJusRef: "2000.0000",
+      jusPagados: "10.0000",
+    })).toBe(false);
+
+    expect(cuotaTieneSaldoPendiente({
+      montoPesos: null,
+      montoJus: "10.0000",
+      montoAplicado: "4000.00",
+      valorJusRef: "2000.0000",
+      jusPagados: "2.0000",
+    })).toBe(true);
   });
 
   it("formatea saldo en pesos y JUS", () => {

@@ -14,10 +14,40 @@ import type { CreateIngresoInput, CreatePlanPagoInput, PlanPagoQuery } from "../
 import { planCuotas, planesPago, gastos, honorarios } from "../db/schema.js";
 import { and, eq, ne, isNull, sql } from "drizzle-orm";
 import { assertMismoDeudor } from "./honorario-deudor.js";
+import { endOfDayArgentina, startOfDayArgentina } from "../utils/timezone.js";
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type PlanCuotaDetalle = NonNullable<Awaited<ReturnType<typeof PlanesQueries.findCuotaById>>>;
 type GastoDetalle = NonNullable<Awaited<ReturnType<typeof GastosQueries.findGastoById>>>;
+
+/**
+ * El plan hereda la política JUS del honorario subyacente.
+ * - AL_COBRO: cuotas en JUS; valorJusRef null (cada cobro usa valorJusAlCobro).
+ * - Cotización fija: cuotas con el valorJusRef del honorario (nunca el del día de creación).
+ */
+export function heredarPoliticaJusDelHonorario(input: {
+  honorarioPoliticaCodigo: string | null;
+  honorarioPoliticaJusId: number | null;
+  honorarioValorJusRef: string | number | null;
+  dataPoliticaJusId?: number | null;
+  dataValorJusRef?: number | null;
+  montoCuotaJus?: number | null;
+}): { politicaJusId: number | null; valorJusRef: number | null } {
+  const politicaJusId = input.honorarioPoliticaJusId ?? input.dataPoliticaJusId ?? null;
+  if (input.montoCuotaJus == null) {
+    return {
+      politicaJusId,
+      valorJusRef: input.dataValorJusRef ?? null,
+    };
+  }
+  if (input.honorarioPoliticaCodigo === "AL_COBRO") {
+    return { politicaJusId, valorJusRef: null };
+  }
+  const ref = input.honorarioValorJusRef != null
+    ? Number(input.honorarioValorJusRef)
+    : (input.dataValorJusRef ?? null);
+  return { politicaJusId, valorJusRef: ref };
+}
 
 export class PlanesService {
   static async findPlanes(estudioId: number, filters: PlanPagoQuery = {}) {
@@ -77,10 +107,21 @@ export class PlanesService {
     if (estadoPendienteId === null) throw new Error("PARAMETRO_PENDIENTE_NOT_FOUND");
 
     const fechaInicio = new Date(data.fechaInicio);
-    const valorJusRef = data.montoCuotaJus
-      ? await ValorJusService.getValorJusSnapshot(new Date(), estudioId)
-      : data.valorJusRef ?? null;
-    if (data.montoCuotaJus && valorJusRef === null) throw new Error("VALOR_JUS_NOT_FOUND");
+    const politicaHonorario = honorario.politicaJusId
+      ? await PlanesQueries.findParametroById(honorario.politicaJusId)
+      : null;
+    const inherited = heredarPoliticaJusDelHonorario({
+      honorarioPoliticaCodigo: politicaHonorario?.codigo ?? null,
+      honorarioPoliticaJusId: honorario.politicaJusId ?? null,
+      honorarioValorJusRef: honorario.valorJusRef,
+      dataPoliticaJusId: data.politicaJusId,
+      dataValorJusRef: data.valorJusRef,
+      montoCuotaJus: data.montoCuotaJus,
+    });
+    const valorJusRef = inherited.valorJusRef;
+    if (data.montoCuotaJus && politicaHonorario?.codigo !== "AL_COBRO" && valorJusRef === null) {
+      throw new Error("VALOR_JUS_NOT_FOUND");
+    }
 
     const montoCuotaPesos = data.montoCuotaPesos ?? (
       data.montoCuotaJus && valorJusRef
@@ -103,7 +144,7 @@ export class PlanesService {
         montoCuotaPesos: montoCuotaPesos !== null ? montoCuotaPesos.toFixed(2) : null,
         montoCuotaJus: data.montoCuotaJus !== undefined && data.montoCuotaJus !== null ? data.montoCuotaJus.toFixed(4) : null,
         valorJusRef: valorJusRef !== null ? valorJusRef.toFixed(4) : null,
-        politicaJusId: data.politicaJusId ?? null,
+        politicaJusId: inherited.politicaJusId,
         monedaId: data.montoCuotaJus ? null : (honorario.monedaId ?? null),
         tasaInteresMensual: tasaInteresMensual !== null ? tasaInteresMensual.toFixed(6) : null,
         regimenMora: data.regimenMora ?? "SIMPLE",
@@ -170,7 +211,7 @@ export class PlanesService {
         cuotas: cuotas.map((cuota) => normalizeCuota({ ...cuota, montoCobrado: 0 }, {
           tasaInteresMensual,
           regimenMora: data.regimenMora ?? "SIMPLE",
-          politicaCodigo: data.politicaJusId ? undefined : null,
+          politicaCodigo: inherited.politicaJusId ? (politicaHonorario?.codigo ?? undefined) : null,
           aplicacionesByCuota: [],
         })),
       };
@@ -417,12 +458,26 @@ export class PlanesService {
         createdBy: userId,
       });
 
-      // Lock cuotas with FOR UPDATE in ascending ID order (deadlock prevention)
+      // Lock cuotas / gastos / honorarios con FOR UPDATE en orden ASC de ID (anti-deadlock)
       if (cuotasDetalle.length > 0) {
         const cuotaIdsOrdenados = cuotasDetalle.map(c => c.id).sort((a, b) => a - b);
         const cuotasBloqueadas = await PlanesQueries.lockCuotasForUpdate(cuotaIdsOrdenados, estudioId, tx);
         if (cuotasBloqueadas.length !== cuotaIdsOrdenados.length) {
           throw new Error("CUOTA_NOT_FOUND");
+        }
+      }
+      if (gastosDetalle.length > 0) {
+        const gastoIdsOrdenados = gastosDetalle.map(g => g.id).sort((a, b) => a - b);
+        const gastosBloqueados = await PlanesQueries.lockGastosForUpdate(gastoIdsOrdenados, estudioId, tx);
+        if (gastosBloqueados.length !== gastoIdsOrdenados.length) {
+          throw new Error("GASTO_NOT_FOUND");
+        }
+      }
+      if (honorariosDetalle.length > 0) {
+        const honorarioIdsOrdenados = honorariosDetalle.map(h => h.id).sort((a, b) => a - b);
+        const honorariosBloqueados = await PlanesQueries.lockHonorariosForUpdate(honorarioIdsOrdenados, estudioId, tx);
+        if (honorariosBloqueados.length !== honorarioIdsOrdenados.length) {
+          throw new Error("HONORARIO_NOT_FOUND");
         }
       }
 
@@ -615,6 +670,9 @@ export class PlanesService {
   static async deletePlan(id: number, estudioId: number, userId: number) {
     const deleted = await PlanesQueries.deletePlanPago(id, estudioId, userId);
     if (!deleted) throw new Error("PLAN_NOT_FOUND");
+    // Tras desactivar aplicaciones de cuotas, el honorario vuelve a PENDIENTE/PARCIAL
+    // según lo efectivamente cobrado restante (aplicaciones directas al honorario).
+    await PlanesService.recomputeHonorarioEstado(deleted.honorarioId, estudioId);
   }
 
   static async recomputeCuotaEstado(cuotaId: number, estudioId: number, tx?: DbTransaction) {
@@ -641,8 +699,8 @@ export class PlanesService {
       return;
     }
 
-    const hoy = new Date();
-    const vencida = cuota.vencimiento < hoy;
+    const hoyInicio = startOfDayArgentina(new Date());
+    const vencida = endOfDayArgentina(cuota.vencimiento) < hoyInicio;
     let nuevoEstadoCodigo: "PENDIENTE" | "PARCIAL" | "VENCIDA" | "PAGADA";
     if (saldo.capitalNativo.isZeroOrLess()) {
       nuevoEstadoCodigo = "PAGADA";

@@ -75,17 +75,31 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
 
   const cobrarMutation = useMutation({
     mutationFn: async (cuota) => {
+      // Refrescar cuotas antes de cobrar para no partir de un saldo viejo.
+      await queryClient.invalidateQueries({ queryKey: ["planes", plan.id, "cuotas"] });
+      const freshCuotas = await queryClient.fetchQuery({
+        queryKey: ["planes", plan.id, "cuotas"],
+        queryFn: async () => {
+          const { data } = await api.get(`/planes/${plan.id}/cuotas`);
+          return unwrapArray(data);
+        },
+      });
+      const fresh = (freshCuotas ?? []).find((c) => Number(c.id) === Number(cuota.id)) ?? cuota;
+      const saldoFresh = Number(fresh.saldoPesos ?? fresh.saldo ?? 0);
+      if (saldoFresh <= 0) {
+        throw new Error("La cuota ya no tiene saldo pendiente");
+      }
       const conceptoPagoHonorarios = findParamByCodigo(conceptoIngresoQuery.data ?? [], ["PAGO_DE_HONORARIOS"]);
       const payload = {
-        cuotaIds: [cuota.id],
-        monto: cuota.totalAPagarPesos ?? cuota.saldoPesos,
+        cuotaIds: [fresh.id],
+        monto: fresh.totalAPagarPesos ?? fresh.saldoPesos,
         clienteId: plan.clienteId,
         casoId: plan.casoId,
-        descripcion: `Pago cuota ${cuota.numero}`,
+        descripcion: `Pago cuota ${fresh.numero}`,
         tipoId: conceptoPagoHonorarios?.id ?? null,
         fechaIngreso: new Date().toISOString(),
       };
-      if (cuota.valorJusAlCobro != null) payload.valorJusAlCobro = cuota.valorJusAlCobro;
+      if (fresh.valorJusAlCobro != null) payload.valorJusAlCobro = fresh.valorJusAlCobro;
       const { data } = await api.post("/ingresos", payload);
       return data?.data ?? data;
     },

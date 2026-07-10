@@ -20,6 +20,13 @@ export type CuotaRecordatorio = {
   montoJus: string | null;
   montoAplicado: string;
   valorJusRef: string | null;
+  /** Política JUS del plan (AL_COBRO / FECHA_REGULACION). */
+  politicaCodigo?: string | null;
+  /**
+   * JUS ya cobrados según calcularSaldoCuota (valorJusAlCobro por aplicación cuando AL_COBRO).
+   * Si falta, se usa el fallback montoAplicado/valorJusRef (tests unitarios).
+   */
+  jusPagados?: string | null;
   clienteNombre: string;
   casoCaratula: string | null;
   createdBy: number;
@@ -61,12 +68,21 @@ export function isPastDailyCobranzaWindow(now: Date): boolean {
   return hour >= 8;
 }
 
+function resolveJusPagados(
+  cuota: Pick<CuotaRecordatorio, "montoAplicado" | "valorJusRef" | "jusPagados">,
+): number {
+  if (cuota.jusPagados != null && cuota.jusPagados !== "") {
+    return Number(cuota.jusPagados);
+  }
+  const valorRef = cuota.valorJusRef ? Number(cuota.valorJusRef) : 1;
+  return Number(cuota.montoAplicado) / (valorRef || 1);
+}
+
 export function cuotaTieneSaldoPendiente(
-  cuota: Pick<CuotaRecordatorio, "montoPesos" | "montoJus" | "montoAplicado" | "valorJusRef">,
+  cuota: Pick<CuotaRecordatorio, "montoPesos" | "montoJus" | "montoAplicado" | "valorJusRef" | "jusPagados">,
 ): boolean {
   if (cuota.montoJus !== null && Number(cuota.montoJus) > 0) {
-    const valorRef = cuota.valorJusRef ? Number(cuota.valorJusRef) : 1;
-    const jusPagados = Number(cuota.montoAplicado) / valorRef;
+    const jusPagados = resolveJusPagados(cuota);
     return Number(cuota.montoJus) - jusPagados > 0.0001;
   }
 
@@ -74,11 +90,10 @@ export function cuotaTieneSaldoPendiente(
 }
 
 export function formatSaldoCuota(
-  cuota: Pick<CuotaRecordatorio, "montoPesos" | "montoJus" | "montoAplicado" | "valorJusRef">,
+  cuota: Pick<CuotaRecordatorio, "montoPesos" | "montoJus" | "montoAplicado" | "valorJusRef" | "jusPagados">,
 ): string {
   if (cuota.montoJus !== null && Number(cuota.montoJus) > 0) {
-    const valorRef = cuota.valorJusRef ? Number(cuota.valorJusRef) : 1;
-    const jusPagados = Number(cuota.montoAplicado) / valorRef;
+    const jusPagados = resolveJusPagados(cuota);
     const saldoJus = Math.max(0, Number(cuota.montoJus) - jusPagados);
     return `${saldoJus.toFixed(4).replace(/\.?0+$/, "")} JUS`;
   }
@@ -119,33 +134,23 @@ export function clasificarCuotasCobranza(
 
 export function agruparCuotasPorUsuario(cuotas: CuotaRecordatorio[]): Map<number, CuotaRecordatorio[]> {
   const map = new Map<number, CuotaRecordatorio[]>();
-
   for (const cuota of cuotas) {
-    if (!cuota.createdBy) continue;
     const list = map.get(cuota.createdBy) ?? [];
     list.push(cuota);
     map.set(cuota.createdBy, list);
   }
-
   return map;
 }
 
-export function buildCobranzaPushBody(vencidas: number, porVencer: number): string {
+export function buildCobranzaPushBody(vencidasCount: number, porVencerCount: number): string {
   const parts: string[] = [];
-
-  if (vencidas > 0) {
-    parts.push(`${vencidas} cuota${vencidas === 1 ? "" : "s"} vencida${vencidas === 1 ? "" : "s"}`);
+  if (vencidasCount > 0) {
+    parts.push(`${vencidasCount} cuota${vencidasCount === 1 ? "" : "s"} vencida${vencidasCount === 1 ? "" : "s"}`);
   }
-  if (porVencer > 0) {
-    parts.push(`${porVencer} por vencer`);
+  if (porVencerCount > 0) {
+    parts.push(`${porVencerCount} por vencer`);
   }
-
-  return parts.join(" y ");
-}
-
-export function formatVencimientoArgentina(date: Date): string {
-  return date.toLocaleDateString("es-AR", {
-    timeZone: APP_TIMEZONE,
-    dateStyle: "medium",
-  });
+  if (parts.length === 0) return "Cobranzas pendientes";
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} y ${parts[1]}`;
 }

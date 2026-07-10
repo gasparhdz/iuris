@@ -28,13 +28,8 @@ export const createPlanPagoSchema = z.object({
     message: "Debe informar montoCuotaPesos o montoCuotaJus.",
     path: ["montoCuotaPesos"],
   }
-).refine(
-  (data) => !(data.montoCuotaJus && data.montoCuotaJus > 0 && !data.politicaJusId),
-  {
-    message: "politicaJusId es requerido cuando se usa montoCuotaJus",
-    path: ["politicaJusId"],
-  }
 );
+// politicaJusId: el plan hereda la del honorario en el service; el cliente puede omitirla.
 
 export const createIngresoSchema = z.object({
   clienteId: positiveIntSchema.optional().nullable(),

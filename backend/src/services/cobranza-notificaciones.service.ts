@@ -39,7 +39,13 @@ export async function procesarRecordatoriosCobranza(logger: FastifyBaseLogger) {
       const yaEnviado = await CobranzaRecordatorioQueries.yaEnviadoHoy(usuarioId, fechaLog);
       if (yaEnviado) continue;
 
-      const preferenciasRaw = await PreferenciasCobranzaQueries.findByUsuarioId(usuarioId);
+      const usuario = await findUsuarioDestino(usuarioId);
+      if (!usuario) {
+        logger.warn({ usuarioId }, "Usuario destino no encontrado para recordatorio de cobranza");
+        continue;
+      }
+
+      const preferenciasRaw = await PreferenciasCobranzaQueries.findByUsuarioId(usuarioId, usuario.estudioId);
       const preferencias = PreferenciasCobranzaQueries.resolveDefaults(preferenciasRaw);
       if (!preferencias.habilitado) continue;
 
@@ -53,26 +59,38 @@ export async function procesarRecordatoriosCobranza(logger: FastifyBaseLogger) {
 
       if (!preferencias.porEmail && !preferencias.porPush) continue;
 
-      const registrado = await CobranzaRecordatorioQueries.registrarEnvio(usuarioId, fechaLog);
-      if (!registrado) continue;
-
-      const usuario = await findUsuarioDestino(usuarioId);
-      if (!usuario) {
-        logger.warn({ usuarioId }, "Usuario destino no encontrado para recordatorio de cobranza");
-        continue;
-      }
+      let enviadoEmail = false;
+      let enviadoPush = false;
 
       if (preferencias.porEmail) {
-        await EmailService.sendRecordatorioCobranza({ vencidas, porVencer }, usuario);
+        try {
+          await EmailService.sendRecordatorioCobranza({ vencidas, porVencer }, usuario);
+          enviadoEmail = true;
+          logger.info({ usuarioId, canal: "email" }, "Recordatorio de cobranza enviado");
+        } catch (error) {
+          logger.error({ err: error, usuarioId, canal: "email" }, "Error enviando recordatorio de cobranza por email");
+        }
       }
 
       if (preferencias.porPush) {
-        await PushService.sendToUsuario(usuarioId, {
-          title: "Cobranzas pendientes",
-          body: buildCobranzaPushBody(vencidas.length, porVencer.length),
-          url: "/finanzas",
-          tag: "cobranza-diaria",
-        }, logger);
+        try {
+          await PushService.sendToUsuario(usuarioId, {
+            title: "Cobranzas pendientes",
+            body: buildCobranzaPushBody(vencidas.length, porVencer.length),
+            url: "/finanzas",
+            tag: "cobranza-diaria",
+          }, logger);
+          enviadoPush = true;
+          logger.info({ usuarioId, canal: "push" }, "Recordatorio de cobranza enviado");
+        } catch (error) {
+          logger.error({ err: error, usuarioId, canal: "push" }, "Error enviando recordatorio de cobranza por push");
+        }
+      }
+
+      // Registrar DESPUÉS del envío exitoso por canal: un fallo de SMTP no debe
+      // marcar el día como enviado y dejar al usuario sin recordatorio.
+      if (enviadoEmail || enviadoPush) {
+        await CobranzaRecordatorioQueries.registrarEnvio(usuarioId, fechaLog);
       }
     } catch (error) {
       logger.error({ err: error, usuarioId }, "Error enviando recordatorio de cobranza");
@@ -84,6 +102,7 @@ async function findUsuarioDestino(usuarioId: number) {
   const [usuario] = await db
     .select({
       id: usuarios.id,
+      estudioId: usuarios.estudioId,
       email: usuarios.email,
       nombre: usuarios.nombre,
       apellido: usuarios.apellido,

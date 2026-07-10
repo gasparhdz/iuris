@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, categorias, clientes, honorarios, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago, terceros } from "../schema.js";
+import { casos, categorias, clientes, gastos, honorarios, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago, terceros } from "../schema.js";
 
 type NewPlanPago = typeof planesPago.$inferInsert;
 type NewPlanCuota = typeof planCuotas.$inferInsert;
@@ -92,6 +92,7 @@ export class PlanesQueries {
         },
       })
       .from(planesPago)
+      // Política histórica: los planes muestran cliente/caso/obligado aunque estén soft-deleted.
       .leftJoin(clientes, eq(planesPago.clienteId, clientes.id))
       .leftJoin(casos, eq(planesPago.casoId, casos.id))
       .leftJoin(parametros, eq(planesPago.periodicidadId, parametros.id))
@@ -258,6 +259,54 @@ export class PlanesQueries {
         )
       )
       .orderBy(asc(planCuotas.id))
+      .for("update");
+  }
+
+  /**
+   * Lock pesimista (SELECT ... FOR UPDATE) sobre gastos.
+   * IDs en orden ASC para evitar deadlocks.
+   */
+  static async lockGastosForUpdate(gastoIds: number[], estudioId: number, tx: DbTransaction) {
+    if (gastoIds.length === 0) return [];
+    const sortedIds = [...gastoIds].sort((a, b) => a - b);
+    return await tx
+      .select({ id: gastos.id, monto: gastos.monto, fechaGasto: gastos.fechaGasto })
+      .from(gastos)
+      .where(
+        and(
+          inArray(gastos.id, sortedIds),
+          eq(gastos.estudioId, estudioId),
+          eq(gastos.activo, true),
+          isNull(gastos.deletedAt),
+        ),
+      )
+      .orderBy(asc(gastos.id))
+      .for("update");
+  }
+
+  /**
+   * Lock pesimista (SELECT ... FOR UPDATE) sobre honorarios de cobro directo.
+   * IDs en orden ASC para evitar deadlocks.
+   */
+  static async lockHonorariosForUpdate(honorarioIds: number[], estudioId: number, tx: DbTransaction) {
+    if (honorarioIds.length === 0) return [];
+    const sortedIds = [...honorarioIds].sort((a, b) => a - b);
+    return await tx
+      .select({
+        id: honorarios.id,
+        jus: honorarios.jus,
+        montoPesos: honorarios.montoPesos,
+        valorJusRef: honorarios.valorJusRef,
+      })
+      .from(honorarios)
+      .where(
+        and(
+          inArray(honorarios.id, sortedIds),
+          eq(honorarios.estudioId, estudioId),
+          isNull(honorarios.deletedAt),
+        ),
+      )
+      .orderBy(asc(honorarios.id))
       .for("update");
   }
 

@@ -431,7 +431,11 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       response: documentedResponses(200, preferenciasCobranzaResponseSchema),
     },
   }, async (request) => {
-    const preferencias = await PreferenciasCobranzaQueries.findByUsuarioId(request.authUser.id);
+    const estudioId = request.user.estudioId;
+    if (!estudioId) {
+      return { data: PreferenciasCobranzaQueries.resolveDefaults(null) };
+    }
+    const preferencias = await PreferenciasCobranzaQueries.findByUsuarioId(request.authUser.id, estudioId);
     return {
       data: PreferenciasCobranzaQueries.resolveDefaults(preferencias),
     };
@@ -446,9 +450,16 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       body: preferenciasCobranzaSchema,
       response: documentedResponses(200, preferenciasCobranzaResponseSchema),
     },
-  }, async (request) => {
+  }, async (request, reply) => {
+    const estudioId = request.user.estudioId;
+    if (!estudioId) {
+      return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Sesion invalida" } });
+    }
     const body = request.body as z.infer<typeof preferenciasCobranzaSchema>;
-    const saved = await PreferenciasCobranzaQueries.upsert(request.authUser.id, body);
+    const saved = await PreferenciasCobranzaQueries.upsert(request.authUser.id, estudioId, body);
+    if (!saved) {
+      return reply.status(403).send({ error: { code: "FORBIDDEN", message: "Usuario inactivo" } });
+    }
     return { data: saved };
   });
 };

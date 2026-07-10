@@ -215,6 +215,7 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
 
 export const preferenciasCobranza = pgTable("preferencias_cobranza", {
   id: serial("id").primaryKey(),
+  estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   usuarioId: integer("usuario_id").references(() => usuarios.id, { onDelete: "cascade" }).notNull(),
   habilitado: boolean("habilitado").default(true).notNull(),
   diasAnticipacion: integer("dias_anticipacion").default(3).notNull(),
@@ -224,6 +225,7 @@ export const preferenciasCobranza = pgTable("preferencias_cobranza", {
   updatedAt: timestamp("updated_at", { withTimezone: true }),
 }, (table) => [
   uniqueIndex("preferencias_cobranza_usuario_unique").on(table.usuarioId),
+  index("preferencias_cobranza_estudio_idx").on(table.estudioId),
 ]);
 
 export const recordatoriosCobranzaLog = pgTable("recordatorios_cobranza_log", {

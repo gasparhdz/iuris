@@ -3,7 +3,7 @@ import { pesos } from "../utils/decimal.js";
 import { imputarIngreso, ordenarPrelacion, type DeudaImputable } from "../services/imputacion.js";
 
 describe("imputacion", () => {
-  it("aplica gasto, cuota vencida interes antes que capital, y remanente a cuota futura", () => {
+  it("FIFO por antigüedad exigible: sin prioridad por tipo; interés antes que capital", () => {
     const deudas: DeudaImputable[] = [
       {
         id: "cuota:futura",
@@ -29,16 +29,19 @@ describe("imputacion", () => {
     ];
 
     const ordenadas = ordenarPrelacion(deudas, new Date("2026-06-15T00:00:00.000Z"));
-    const resultado = imputarIngreso(pesos("50000"), ordenadas);
+    // Orden solo por fecha: cuota mayo → gasto junio → cuota julio
+    expect(ordenadas.map((d) => d.id)).toEqual(["cuota:vencida", "gasto:1", "cuota:futura"]);
 
-    expect(resultado.movimientos.map((m) => m.deudaId)).toEqual(["gasto:1", "cuota:vencida", "cuota:futura"]);
-    expect(resultado.movimientos[1].aInteres.toPg()).toBe("5000.00");
-    expect(resultado.movimientos[1].aCapital.toPg()).toBe("30000.00");
+    const resultado = imputarIngreso(pesos("50000"), ordenadas);
+    expect(resultado.movimientos.map((m) => m.deudaId)).toEqual(["cuota:vencida", "gasto:1", "cuota:futura"]);
+    expect(resultado.movimientos[0].aInteres.toPg()).toBe("5000.00");
+    expect(resultado.movimientos[0].aCapital.toPg()).toBe("30000.00");
+    expect(resultado.movimientos[1].aCapital.toPg()).toBe("10000.00");
     expect(resultado.movimientos[2].aCapital.toPg()).toBe("5000.00");
     expect(resultado.remanente.toPg()).toBe("0.00");
   });
 
-  it("honorario sin plan prelaciona como cuota (gasto primero, luego por vencimiento)", () => {
+  it("honorarios y gastos se ordenan solo por antigüedad exigible", () => {
     const deudas: DeudaImputable[] = [
       {
         id: "honorario:futuro",
@@ -64,15 +67,12 @@ describe("imputacion", () => {
     ];
 
     const ordenadas = ordenarPrelacion(deudas, new Date("2026-06-15T00:00:00.000Z"));
-    // Gasto siempre primero; entre honorarios, primero el vencido (interes antes que capital).
-    expect(ordenadas.map((d) => d.id)).toEqual(["gasto:1", "honorario:vencido", "honorario:futuro"]);
+    expect(ordenadas.map((d) => d.id)).toEqual(["honorario:vencido", "honorario:futuro", "gasto:1"]);
 
     const resultado = imputarIngreso(pesos("10000"), ordenadas);
-    expect(resultado.movimientos[0].deudaId).toBe("gasto:1");
-    expect(resultado.movimientos[0].aCapital.toPg()).toBe("5000.00");
-    expect(resultado.movimientos[1].deudaId).toBe("honorario:vencido");
-    expect(resultado.movimientos[1].aInteres.toPg()).toBe("3000.00");
-    expect(resultado.movimientos[1].aCapital.toPg()).toBe("2000.00");
+    expect(resultado.movimientos[0].deudaId).toBe("honorario:vencido");
+    expect(resultado.movimientos[0].aInteres.toPg()).toBe("3000.00");
+    expect(resultado.movimientos[0].aCapital.toPg()).toBe("7000.00");
     expect(resultado.remanente.toPg()).toBe("0.00");
   });
 });

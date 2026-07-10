@@ -21,6 +21,8 @@ import {
   ingresoAplicaciones,
   parametros,
   categorias,
+  clientes,
+  gastos,
 } from "../db/schema.js";
 import { eq, and, isNull, sql } from "drizzle-orm";
 
@@ -398,6 +400,156 @@ async function main() {
     await db.delete(planCuotas).where(eq(planCuotas.id, c2.id));
 
     console.log("\n  ✅ Test 5 PASADO\n");
+
+    // ─── Test 6: Carrera gasto vs gasto ────────────────────────────────
+    console.log("─── Test 6: Dos cobros simultáneos sobre el mismo gasto ───\n");
+
+    const [clienteExistente] = await db
+      .select({ id: clientes.id })
+      .from(clientes)
+      .where(and(eq(clientes.estudioId, data.estudioId), isNull(clientes.deletedAt)))
+      .limit(1);
+
+    let clienteId = clienteExistente?.id;
+    let createdCliente = false;
+    if (!clienteId) {
+      const tipoPersona = await PlanesQueries.findParametroByCodigo("TIPO_PERSONA", "FISICA")
+        ?? await PlanesQueries.findParametroByCodigo("TIPO_PERSONA", "HUMANA");
+      const [tipoPersonaAny] = tipoPersona
+        ? [tipoPersona]
+        : await db
+          .select({ id: parametros.id })
+          .from(parametros)
+          .innerJoin(categorias, eq(parametros.categoriaId, categorias.id))
+          .where(eq(categorias.codigo, "TIPO_PERSONA"))
+          .limit(1);
+      if (!tipoPersonaAny) {
+        throw new Error("No hay parametro TIPO_PERSONA para crear cliente de test");
+      }
+      const [nuevoCliente] = await db
+        .insert(clientes)
+        .values({
+          estudioId: data.estudioId,
+          tipoPersonaId: tipoPersonaAny.id,
+          nombre: "Test",
+          apellido: "Concurrencia",
+          createdBy: data.userId,
+        })
+        .returning({ id: clientes.id });
+      clienteId = nuevoCliente.id;
+      createdCliente = true;
+    }
+
+    const [gasto] = await db
+      .insert(gastos)
+      .values({
+        estudioId: data.estudioId,
+        clienteId,
+        descripcion: TEST_MARKER + "_gasto",
+        fechaGasto: new Date(),
+        monto: "5000.00",
+        createdBy: data.userId,
+      })
+      .returning();
+
+    const [gA, gB] = await Promise.allSettled([
+      PlanesService.registrarIngreso(data.estudioId, data.userId, {
+        gastoIds: [gasto.id],
+        monto: 5000,
+        fechaIngreso: new Date().toISOString(),
+      } as any),
+      PlanesService.registrarIngreso(data.estudioId, data.userId, {
+        gastoIds: [gasto.id],
+        monto: 5000,
+        fechaIngreso: new Date().toISOString(),
+      } as any),
+    ]);
+
+    console.log(`  TX gasto A: ${gA.status}`);
+    console.log(`  TX gasto B: ${gB.status}`);
+
+    const totalGasto = await PlanesQueries.sumAplicacionesByGasto(gasto.id);
+    console.log(`  Total aplicado a gasto: $${totalGasto}`);
+    assert(totalGasto <= 5000 + 0.01, `Sobre-imputación gasto: $${totalGasto} > $5000`);
+    assert(Math.abs(totalGasto - 5000) < 0.01, `Se esperaba $5000 en gasto, hubo $${totalGasto}`);
+
+    const ingresoIdsGasto: number[] = [];
+    if (gA.status === "fulfilled" && (gA.value as any)?.id) ingresoIdsGasto.push((gA.value as any).id);
+    if (gB.status === "fulfilled" && (gB.value as any)?.id) ingresoIdsGasto.push((gB.value as any).id);
+    if (ingresoIdsGasto.length) {
+      await db.delete(ingresoAplicaciones).where(
+        sql`${ingresoAplicaciones.ingresoId} IN (${sql.join(ingresoIdsGasto.map((x) => sql`${x}`), sql`, `)})`
+      );
+      await db.delete(ingresos).where(
+        sql`${ingresos.id} IN (${sql.join(ingresoIdsGasto.map((x) => sql`${x}`), sql`, `)})`
+      );
+    }
+    await db.delete(gastos).where(eq(gastos.id, gasto.id));
+
+    console.log("\n  ✅ Test 6 PASADO\n");
+
+    // ─── Test 7: Carrera honorario directo vs honorario directo ────────
+    console.log("─── Test 7: Dos cobros simultáneos sobre el mismo honorario ───\n");
+
+    const estadoHonPend = await PlanesQueries.findParametroByCodigo("ESTADO_HONORARIO", "PENDIENTE");
+    const allParams = await db
+      .select({ id: parametros.id })
+      .from(parametros)
+      .where(eq(parametros.activo, true))
+      .limit(2);
+    const [honDirecto] = await db
+      .insert(honorarios)
+      .values({
+        estudioId: data.estudioId,
+        clienteId,
+        obligadoClienteId: clienteId,
+        conceptoId: allParams[0].id,
+        parteId: allParams[1].id,
+        fechaRegulacion: new Date(),
+        montoPesos: "8000.00",
+        estadoId: estadoHonPend?.id,
+        createdBy: data.userId,
+      })
+      .returning();
+
+    const [hA, hB] = await Promise.allSettled([
+      PlanesService.registrarIngreso(data.estudioId, data.userId, {
+        honorarioIds: [honDirecto.id],
+        monto: 8000,
+        fechaIngreso: new Date().toISOString(),
+      } as any),
+      PlanesService.registrarIngreso(data.estudioId, data.userId, {
+        honorarioIds: [honDirecto.id],
+        monto: 8000,
+        fechaIngreso: new Date().toISOString(),
+      } as any),
+    ]);
+
+    console.log(`  TX honorario A: ${hA.status}`);
+    console.log(`  TX honorario B: ${hB.status}`);
+
+    const totalHon = await PlanesQueries.sumAplicacionesByHonorario(honDirecto.id);
+    console.log(`  Total aplicado a honorario: $${totalHon}`);
+    assert(totalHon <= 8000 + 0.01, `Sobre-imputación honorario: $${totalHon} > $8000`);
+    assert(Math.abs(totalHon - 8000) < 0.01, `Se esperaba $8000 en honorario, hubo $${totalHon}`);
+
+    const ingresoIdsHon: number[] = [];
+    if (hA.status === "fulfilled" && (hA.value as any)?.id) ingresoIdsHon.push((hA.value as any).id);
+    if (hB.status === "fulfilled" && (hB.value as any)?.id) ingresoIdsHon.push((hB.value as any).id);
+    if (ingresoIdsHon.length) {
+      await db.delete(ingresoAplicaciones).where(
+        sql`${ingresoAplicaciones.ingresoId} IN (${sql.join(ingresoIdsHon.map((x) => sql`${x}`), sql`, `)})`
+      );
+      await db.delete(ingresos).where(
+        sql`${ingresos.id} IN (${sql.join(ingresoIdsHon.map((x) => sql`${x}`), sql`, `)})`
+      );
+    }
+    await db.delete(honorarios).where(eq(honorarios.id, honDirecto.id));
+    if (createdCliente) {
+      await db.delete(clientes).where(eq(clientes.id, clienteId));
+    }
+
+    console.log("\n  ✅ Test 7 PASADO\n");
 
   } finally {
     await cleanup(data);
