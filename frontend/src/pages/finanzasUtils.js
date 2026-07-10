@@ -413,7 +413,31 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
   const isJus = currency === "JUS";
   const isUsd = currency === "USD";
 
-  const fechaReg = item.fechaRegulacion;
+  // Preferir saldo calculado por el motor de CC del backend (intereses + JUS AL_COBRO).
+  const backendSaldo = item?.calc?.saldoPesos;
+  const backendInteres = item?.calc?.interesDevengadoPesos;
+  const totalPesosRef = item?.calc?.totalPesosRef ?? item?.montoPesos ?? null;
+
+  if (backendSaldo != null && Number.isFinite(Number(backendSaldo))) {
+    const originalVal = Number(totalPesosRef ?? 0);
+    const interes = Number(backendInteres ?? 0);
+    const updatedVal = originalVal + interes;
+    let originalRef = "";
+    let updatedRef = "";
+    if (isJus) {
+      const quantityJus = Number(item.jus ?? 0);
+      const fmt = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      originalRef = `(${fmt.format(quantityJus)} JUS)`;
+      updatedRef = originalRef;
+    } else if (!isUsd && valorJusActual > 0) {
+      const fmt = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      originalRef = `(${fmt.format(originalVal / valorJusActual)} JUS)`;
+      updatedRef = `(${fmt.format(updatedVal / valorJusActual)} JUS)`;
+    }
+    return { currency, originalVal, updatedVal, originalRef, updatedRef, saldoPesos: Number(backendSaldo) };
+  }
+
+  const fechaBase = item.fechaVencimiento || item.fechaRegulacion;
   const appliesInterest = !!item.tasaInteresMensual && Number(item.tasaInteresMensual) > 0;
   const tasaMensual = Number(item.tasaInteresMensual || 0);
 
@@ -423,16 +447,14 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
   let updatedRef = "";
 
   if (isUsd) {
-    // USD
     originalVal = Number(item.montoPesos ?? 0);
     let interest = 0;
-    if (appliesInterest && fechaReg) {
-      const days = getDaysBetween(fechaReg, new Date());
+    if (appliesInterest && fechaBase) {
+      const days = getDaysBetween(fechaBase, new Date());
       interest = originalVal * (tasaMensual / 100) * (days / 30);
     }
     updatedVal = originalVal + interest;
   } else if (isJus) {
-    // JUS
     const quantityJus = Number(item.jus ?? 0);
     const valorJusRef = Number(item.valorJusRef ?? 0);
 
@@ -449,8 +471,8 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
     } else {
       originalVal = quantityJus * valorJusRef;
       let interestJus = 0;
-      if (appliesInterest && fechaReg) {
-        const days = getDaysBetween(fechaReg, new Date());
+      if (appliesInterest && fechaBase) {
+        const days = getDaysBetween(fechaBase, new Date());
         interestJus = quantityJus * (tasaMensual / 100) * (days / 30);
       }
       const updatedJus = quantityJus + interestJus;
@@ -460,11 +482,10 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
       updatedRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(updatedJus)} JUS)`;
     }
   } else {
-    // ARS
     originalVal = Number(item.montoPesos ?? 0);
     let interest = 0;
-    if (appliesInterest && fechaReg) {
-      const days = getDaysBetween(fechaReg, new Date());
+    if (appliesInterest && fechaBase) {
+      const days = getDaysBetween(fechaBase, new Date());
       interest = originalVal * (tasaMensual / 100) * (days / 30);
     }
     updatedVal = originalVal + interest;

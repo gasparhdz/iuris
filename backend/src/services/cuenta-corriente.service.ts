@@ -7,7 +7,7 @@ import { IngresosQueries } from "../db/queries/ingresos.queries.js";
 import { PlanesQueries } from "../db/queries/planes.queries.js";
 import { TercerosQueries } from "../db/queries/terceros.queries.js";
 import { db } from "../db/index.js";
-import { honorarios, ingresoAplicaciones, ingresos, planCuotas, planesPago } from "../db/schema.js";
+import { gastos, honorarios, ingresoAplicaciones, ingresos, planCuotas, planesPago } from "../db/schema.js";
 import { ValorJusService } from "./valorjus.service.js";
 import {
   buildCuentaCorriente,
@@ -18,6 +18,7 @@ import {
   type CCResult,
 } from "./cuenta-corriente.js";
 import {
+  atribuirMontosPorDeudor,
   deudorKey,
   honorarioDeudorEsCliente,
   resolveHonorarioDeudor,
@@ -114,13 +115,14 @@ export class CuentaCorrienteService {
       ensure({ tipo: "cliente", id: g.clienteId }).gastos.push(g);
     }
 
-    // Ingresos: atribuir al deudor de las deudas imputadas; sin apps → cliente del ingreso.
+    // Ingresos: atribuir al deudor de las deudas imputadas (monto partido por aplicación);
+    // sin apps → cliente del ingreso.
     const ingresoDeudores = await this.mapIngresosADeudores(estudioId, datos.ingresos, datos.honorarios);
     for (const ingreso of datos.ingresos) {
-      const deudores = ingresoDeudores.get(ingreso.id);
-      if (deudores && deudores.length > 0) {
-        for (const deudor of deudores) {
-          ensure(deudor).ingresos.push(ingreso);
+      const atribuciones = ingresoDeudores.get(ingreso.id);
+      if (atribuciones && atribuciones.length > 0) {
+        for (const { deudor, monto } of atribuciones) {
+          ensure(deudor).ingresos.push({ ...ingreso, monto: monto.toFixed(2) });
         }
       } else if (ingreso.clienteId) {
         ensure({ tipo: "cliente", id: ingreso.clienteId }).ingresos.push(ingreso);
@@ -234,15 +236,15 @@ export class CuentaCorrienteService {
   }
 
   /**
-   * Atribuye cada ingreso a los deudores de las deudas imputadas.
-   * Si no hay aplicaciones, no entra en el map (caller usa clienteId del ingreso).
+   * Atribuye cada ingreso a los deudores de las deudas imputadas, partiendo el monto
+   * por aplicación (cada app va al deudor de su deuda). Sin apps → caller usa clienteId.
    */
   private static async mapIngresosADeudores(
     estudioId: number,
     ingresosList: CCIngresoConMeta[],
     honorariosList: CCHonorarioConMeta[],
-  ): Promise<Map<number, DeudorResuelto[]>> {
-    const result = new Map<number, DeudorResuelto[]>();
+  ): Promise<Map<number, Array<{ deudor: DeudorResuelto; monto: number }>>> {
+    const result = new Map<number, Array<{ deudor: DeudorResuelto; monto: number }>>();
     if (ingresosList.length === 0) return result;
 
     const honorarioById = new Map(honorariosList.map((h) => [h.id, h]));
@@ -255,6 +257,8 @@ export class CuentaCorrienteService {
         honorarioId: ingresoAplicaciones.honorarioId,
         cuotaId: ingresoAplicaciones.cuotaId,
         gastoId: ingresoAplicaciones.gastoId,
+        montoCapital: ingresoAplicaciones.montoCapital,
+        montoInteres: ingresoAplicaciones.montoInteres,
       })
       .from(ingresoAplicaciones)
       .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
@@ -315,25 +319,56 @@ export class CuentaCorrienteService {
       }
     }
 
+    // Gastos: deudor = cliente del gasto (o del ingreso como fallback).
+    const gastoIds = [...new Set(apps.map((a) => a.gastoId).filter((id): id is number => id != null))];
+    const gastoClienteById = new Map<number, number>();
+    if (gastoIds.length > 0) {
+      const gastoRows = await db
+        .select({ id: gastos.id, clienteId: gastos.clienteId })
+        .from(gastos)
+        .where(and(eq(gastos.estudioId, estudioId), inArray(gastos.id, gastoIds)));
+      for (const g of gastoRows) {
+        if (g.clienteId != null) gastoClienteById.set(g.id, g.clienteId);
+      }
+    }
+
+    const appsByIngreso = new Map<number, typeof apps>();
     for (const app of apps) {
-      if (result.has(app.ingresoId)) continue; // un ingreso se atribuye a un solo deudor (primera imputación)
+      const list = appsByIngreso.get(app.ingresoId) ?? [];
+      list.push(app);
+      appsByIngreso.set(app.ingresoId, list);
+    }
 
-      let honorarioId = app.honorarioId;
-      if (!honorarioId && app.cuotaId) {
-        honorarioId = cuotaToHonorario.get(app.cuotaId) ?? null;
-      }
+    for (const [ingresoId, ingresoApps] of appsByIngreso) {
+      const resolved = ingresoApps.map((app) => {
+        let honorarioId = app.honorarioId;
+        if (!honorarioId && app.cuotaId) {
+          honorarioId = cuotaToHonorario.get(app.cuotaId) ?? null;
+        }
 
-      let deudor: DeudorResuelto | null = null;
-      if (honorarioId) {
-        const h = honorarioById.get(honorarioId);
-        if (h) deudor = resolveHonorarioDeudor(h);
-      } else if (app.gastoId) {
-        const ingreso = ingresosList.find((i) => i.id === app.ingresoId);
-        if (ingreso?.clienteId) deudor = { tipo: "cliente", id: ingreso.clienteId };
-      }
+        let deudor: DeudorResuelto | null = null;
+        if (honorarioId) {
+          const h = honorarioById.get(honorarioId);
+          if (h) deudor = resolveHonorarioDeudor(h);
+        } else if (app.gastoId) {
+          const gastoClienteId = gastoClienteById.get(app.gastoId);
+          if (gastoClienteId != null) {
+            deudor = { tipo: "cliente", id: gastoClienteId };
+          } else {
+            const ingreso = ingresosList.find((i) => i.id === ingresoId);
+            if (ingreso?.clienteId) deudor = { tipo: "cliente", id: ingreso.clienteId };
+          }
+        }
 
-      if (!deudor) continue;
-      result.set(app.ingresoId, [deudor]);
+        return {
+          deudor,
+          montoCapital: Number(app.montoCapital ?? 0),
+          montoInteres: Number(app.montoInteres ?? 0),
+        };
+      });
+
+      const atribuciones = atribuirMontosPorDeudor(resolved);
+      if (atribuciones.length > 0) result.set(ingresoId, atribuciones);
     }
 
     return result;
@@ -348,17 +383,22 @@ export class CuentaCorrienteService {
   ): Promise<CCIngresoConMeta[]> {
     const map = await this.mapIngresosADeudores(estudioId, ingresosList, honorariosList);
 
-    return ingresosList.filter((ingreso) => {
-      const deudores = map.get(ingreso.id);
-      if (deudores && deudores.length > 0) {
-        return deudores.some((d) => d.tipo === deudor.tipo && d.id === deudor.id);
+    const result: CCIngresoConMeta[] = [];
+    for (const ingreso of ingresosList) {
+      const atribuciones = map.get(ingreso.id);
+      if (atribuciones && atribuciones.length > 0) {
+        const match = atribuciones.find((a) => a.deudor.tipo === deudor.tipo && a.deudor.id === deudor.id);
+        if (match) {
+          result.push({ ...ingreso, monto: match.monto.toFixed(2) });
+        }
+        continue;
       }
       // Sin aplicaciones: pago a cuenta del cliente.
-      if (deudor.tipo === "cliente" && fallbackClienteId != null) {
-        return ingreso.clienteId === fallbackClienteId;
+      if (deudor.tipo === "cliente" && fallbackClienteId != null && ingreso.clienteId === fallbackClienteId) {
+        result.push(ingreso);
       }
-      return false;
-    });
+    }
+    return result;
   }
 
   private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {

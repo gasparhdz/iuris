@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planesPago, terceros } from "../schema.js";
+import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planCuotas, planesPago, terceros } from "../schema.js";
 
 type NewHonorario = typeof honorarios.$inferInsert;
 
@@ -177,6 +177,42 @@ export class HonorariosQueries {
 
     return row ?? null;
   }
+
+  /** True si hay aplicaciones activas directas o vía cuotas de un plan del honorario. */
+  static async hasPagosImputados(honorarioId: number, estudioId: number): Promise<boolean> {
+    const [directo] = await db
+      .select({ id: ingresoAplicaciones.id })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresos.id, ingresoAplicaciones.ingresoId))
+      .where(and(
+        eq(ingresoAplicaciones.honorarioId, honorarioId),
+        eq(ingresoAplicaciones.activo, true),
+        isNull(ingresoAplicaciones.deletedAt),
+        isNull(ingresos.deletedAt),
+        eq(ingresos.estudioId, estudioId),
+      ))
+      .limit(1);
+    if (directo) return true;
+
+    const [viaPlan] = await db
+      .select({ id: ingresoAplicaciones.id })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresos.id, ingresoAplicaciones.ingresoId))
+      .innerJoin(planCuotas, eq(ingresoAplicaciones.cuotaId, planCuotas.id))
+      .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+      .where(and(
+        eq(planesPago.honorarioId, honorarioId),
+        eq(planesPago.estudioId, estudioId),
+        eq(ingresoAplicaciones.activo, true),
+        isNull(ingresoAplicaciones.deletedAt),
+        isNull(ingresos.deletedAt),
+        isNull(planCuotas.deletedAt),
+        isNull(planesPago.deletedAt),
+      ))
+      .limit(1);
+
+    return Boolean(viaPlan);
+  }
 }
 
 function baseHonorariosSelect() {
@@ -280,6 +316,7 @@ function baseHonorariosSelect() {
       },
     })
     .from(honorarios)
+    // Política histórica: los honorarios muestran cliente/caso/obligado aunque estén soft-deleted.
     .leftJoin(clientes, eq(honorarios.clienteId, clientes.id))
     .leftJoin(casos, eq(honorarios.casoId, casos.id))
     .leftJoin(concepto, eq(honorarios.conceptoId, concepto.id))
@@ -290,8 +327,6 @@ function baseHonorariosSelect() {
       eq(honorarios.obligadoClienteId, obligadoCliente.id),
       eq(honorarios.estudioId, obligadoCliente.estudioId),
     ))
-    // Sin filtrar deletedAt: honorarios históricos deben seguir mostrando el nombre
-    // del tercero obligado aunque esté soft-deleted.
     .leftJoin(obligadoTercero, and(
       eq(honorarios.obligadoTerceroId, obligadoTercero.id),
       eq(honorarios.estudioId, obligadoTercero.estudioId),

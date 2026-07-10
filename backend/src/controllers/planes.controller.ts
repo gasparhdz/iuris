@@ -108,7 +108,16 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
   };
 
   if (error.message === "PLAN_DEUDORES_DISTINTOS" || error.message === "HONORARIO_SIN_DEUDOR") {
-    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: errors[error.message] } });
+    return reply.status(409).send({ error: { code: error.message, message: errors[error.message] } });
+  }
+
+  if (error.message === "VALOR_JUS_NOT_FOUND") {
+    return reply.status(409).send({
+      error: {
+        code: "VALOR_JUS_NOT_FOUND",
+        message: "No hay valor JUS cargado — cargalo en Valores JUS antes de registrar honorarios en JUS",
+      },
+    });
   }
 
   const message = errors[error.message];

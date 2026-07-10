@@ -58,3 +58,51 @@ export function assertMismoDeudor(honorarios: HonorarioDeudorRef[]): DeudorResue
   }
   return primero;
 }
+
+/**
+ * Regla de inmutabilidad del deudor al editar un honorario.
+ * - Sin cambio real de campos → noop.
+ * - Con pagos imputados → 409 HONORARIO_DEUDOR_INMUTABLE.
+ * - En plan sin pagos → assertMismoDeudor; sync de datos derivados del plan.
+ * - Sin plan ni pagos → libre.
+ */
+export type DeudorUpdateDecision = "noop" | "allow" | "sync_plan";
+
+export function decideDeudorUpdate(params: {
+  fieldsChanging: boolean;
+  hasPagosImputados: boolean;
+  inPlan: boolean;
+  /** Honorarios del plan (incluido este) ya con el deudor propuesto. */
+  honorariosDelPlan: HonorarioDeudorRef[];
+}): DeudorUpdateDecision {
+  if (!params.fieldsChanging) return "noop";
+  if (params.hasPagosImputados) throw new Error("HONORARIO_DEUDOR_INMUTABLE");
+  if (params.inPlan) {
+    assertMismoDeudor(params.honorariosDelPlan);
+    return "sync_plan";
+  }
+  return "allow";
+}
+
+/** Atribuye montos de aplicaciones de un ingreso a cada deudor (parte por aplicación). */
+export function atribuirMontosPorDeudor(
+  apps: Array<{
+    deudor: DeudorResuelto | null;
+    montoCapital: number;
+    montoInteres: number;
+  }>,
+): Array<{ deudor: DeudorResuelto; monto: number }> {
+  const byKey = new Map<string, { deudor: DeudorResuelto; monto: number }>();
+  for (const app of apps) {
+    if (!app.deudor) continue;
+    const key = deudorKey(app.deudor);
+    const monto = app.montoCapital + app.montoInteres;
+    const prev = byKey.get(key);
+    if (prev) {
+      prev.monto += monto;
+    } else {
+      byKey.set(key, { deudor: app.deudor, monto });
+    }
+  }
+  return [...byKey.values()];
+}

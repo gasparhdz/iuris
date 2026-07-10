@@ -25,8 +25,17 @@ export class ValorJusController {
     const auth = getAuthContext(request, reply);
     if (!auth) return;
 
-    const valor = await ValorJusService.create(auth.estudioId, auth.userId, request.body);
-    return reply.status(201).send({ data: valor });
+    try {
+      const valor = await ValorJusService.create(auth.estudioId, auth.userId, request.body);
+      return reply.status(201).send({ data: valor });
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "VALOR_JUS_DUPLICATE_FECHA") {
+        return reply.status(409).send({
+          error: { code: "VALOR_JUS_DUPLICATE_FECHA", message: "Ya existe un valor JUS para esa fecha" },
+        });
+      }
+      throw error;
+    }
   }
 
   static async sync(request: FastifyRequest, reply: FastifyReply) {

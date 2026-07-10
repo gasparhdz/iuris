@@ -75,7 +75,10 @@ export const valoresJus = pgTable("valores_jus", {
   createdBy: integer("created_by").references(() => usuarios.id),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 }, (table) => [
-  uniqueIndex("valores_jus_estudio_fecha_unique").on(table.estudioId, table.fecha),
+  // Unicidad solo entre filas vivas: permite reutilizar la fecha tras soft-delete.
+  uniqueIndex("valores_jus_estudio_fecha_unique")
+    .on(table.estudioId, table.fecha)
+    .where(sql`${table.deletedAt} IS NULL`),
 ]);
 
 // ==========================================

@@ -325,6 +325,63 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
   };
 }
 
+/** Saldo de un honorario con la misma lógica que liquidación/CC (intereses + JUS AL_COBRO). */
+export function calcularSaldosHonorario(
+  honorario: CCHonorario,
+  valorJusActualInput: string | number | Decimal,
+  fechaCorte: Date = new Date(),
+): { saldoCapitalPesos: number; interesPesos: number; saldoPesos: number; saldoJus: number } {
+  const valorJusActual = Decimal.of(valorJusActualInput, 4);
+  const politica = honorario.plan?.politicaCodigo ?? honorario.politicaCodigo;
+  const tasaFraccion = honorario.plan
+    ? (honorario.plan.tasaInteresMensual !== null ? Decimal.of(honorario.plan.tasaInteresMensual, 6) : Decimal.zero(6))
+    : (honorario.tasaInteresMensualPct !== null
+        ? Decimal.of(honorario.tasaInteresMensualPct, 6).divByRate(CIEN, 6)
+        : Decimal.zero(6));
+  const regimen = normalizeRegimenMora(honorario.plan?.regimenMora ?? null);
+
+  const deudas = honorario.plan
+    ? honorario.plan.cuotas.map((cuota) => ({
+        vencimiento: cuota.vencimiento,
+        montoJus: cuota.montoJus,
+        montoPesos: cuota.montoPesos,
+        valorJusRef: cuota.valorJusRef ?? honorario.plan!.valorJusRef ?? honorario.valorJusRef,
+        aplicaciones: cuota.aplicaciones,
+      }))
+    : [{
+        vencimiento: honorario.fechaVencimiento ?? honorario.fechaRegulacion,
+        montoJus: honorario.jus,
+        montoPesos: honorario.montoPesos,
+        valorJusRef: honorario.valorJusRef,
+        aplicaciones: honorario.aplicaciones,
+      }];
+
+  let saldoCapitalPesos = ZERO2;
+  let interesPesos = ZERO2;
+  let saldoJus = ZERO4;
+
+  for (const deuda of deudas) {
+    const calc = calcularDeuda(deuda, {
+      politica,
+      tasaFraccion,
+      regimen,
+      monedaCodigo: honorario.monedaCodigo,
+      fechaCorte,
+      valorJusActual,
+    });
+    saldoCapitalPesos = saldoCapitalPesos.add(calc.saldoCapitalPesos);
+    interesPesos = interesPesos.add(calc.interesDevengadoPesos);
+    saldoJus = saldoJus.add(calc.saldoJus);
+  }
+
+  return {
+    saldoCapitalPesos: saldoCapitalPesos.toNumber(),
+    interesPesos: interesPesos.toNumber(),
+    saldoPesos: saldoCapitalPesos.add(interesPesos).toNumber(),
+    saldoJus: saldoJus.toNumber(),
+  };
+}
+
 function calcularDeuda(
   deuda: {
     vencimiento: Date;

@@ -352,7 +352,8 @@ export class PlanesService {
       honorariosDetalle.push({ ...honorario, politicaCodigo: politica?.codigo ?? null });
     }
 
-    // Todas las deudas de honorario/cuota del ingreso deben compartir el mismo deudor.
+    // Todas las deudas del ingreso (honorarios, cuotas y gastos) deben compartir el mismo deudor.
+    // Los gastos se tratan como deuda del cliente del gasto.
     const honorariosParaDeudor: Array<{
       clienteId: number | null;
       obligadoClienteId: number | null;
@@ -374,6 +375,13 @@ export class PlanesService {
         clienteId: honorarioPlan.clienteId,
         obligadoClienteId: honorarioPlan.obligadoClienteId ?? null,
         obligadoTerceroId: honorarioPlan.obligadoTerceroId ?? null,
+      });
+    }
+    for (const gasto of gastosDetalle) {
+      honorariosParaDeudor.push({
+        clienteId: gasto.clienteId,
+        obligadoClienteId: gasto.clienteId,
+        obligadoTerceroId: null,
       });
     }
     if (honorariosParaDeudor.length > 0) {

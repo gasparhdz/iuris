@@ -205,6 +205,13 @@ export default function ValoresJus() {
             >
               Actualizar JUS
             </Button>
+            <Button
+              variant="outlined"
+              onClick={handleOpenManual}
+              sx={{ borderRadius: "10px", fontWeight: 800 }}
+            >
+              Cargar manualmente
+            </Button>
           </Stack>
         )}
       </Stack>

@@ -36,6 +36,13 @@
       "when": 1783709642031,
       "tag": "0004_timestamptz",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783710000000,
+      "tag": "0005_valores_jus_partial_unique",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { Decimal, jus, pesos, tasa } from "../utils/decimal.js";
+import { startOfDayArgentina } from "../utils/timezone.js";
 
 export type RegimenMora = "SIMPLE" | "COMPUESTO";
 export type BaseDiasMora = 30 | 365;
@@ -127,8 +128,8 @@ function pagoANativo(pago: PagoMora, moneda: MonedaMora, scale: 2 | 4): Decimal 
 }
 
 function diffDias(desde: Date, hasta: Date): number {
-  const start = Date.UTC(desde.getFullYear(), desde.getMonth(), desde.getDate());
-  const end = Date.UTC(hasta.getFullYear(), hasta.getMonth(), hasta.getDate());
+  const start = startOfDayArgentina(desde).getTime();
+  const end = startOfDayArgentina(hasta).getTime();
   return Math.max(0, Math.floor((end - start) / 86400000));
 }
 

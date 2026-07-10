@@ -12,6 +12,8 @@ import { motion, AnimatePresence } from "framer-motion";
 const MotionDiv = motion.div;
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
+import { getExpediente, searchExpedientes } from "../api/expedientes.api";
+import { useDebounced } from "../hooks/useDebounced";
 import {
   Alert,
   Autocomplete,
@@ -186,11 +188,32 @@ const EMPTY_FORM = {
 };
 
 const REQUIRED_FIELDS = {
-  honorario: ["clienteId", "conceptoId", "obligadoKey", "monedaCodigo", "monto", "fechaRegulacion"],
-  gasto:     ["clienteId", "monedaCodigo", "monto", "fechaGasto"],
-  ingreso:   ["clienteId", "monedaCodigo", "monto", "fechaIngreso"],
-  convenio:  ["convenioHonorarioId", "convenioPeriodicidad", "convenioCuotas", "convenioMontoCuota", "convenioFechaInicio"],
+  honorario: ["_clienteOCaso", "conceptoId", "obligadoKey", "monedaCodigo", "monto", "fechaRegulacion"],
+  gasto:     ["_clienteOCaso", "monedaCodigo", "monto", "fechaGasto"],
+  ingreso:   ["_clienteOCaso", "monedaCodigo", "monto", "fechaIngreso"],
+  convenio:  ["_clienteOCaso", "convenioHonorarioId", "convenioPeriodicidad", "convenioCuotas", "convenioMontoCuota", "convenioFechaInicio"],
 };
+
+function expedienteOptionLabel(caso, clientesById) {
+  const base = casoLabel(caso);
+  if (!caso?.clienteId || !clientesById) return base;
+  const cliente = clientesById.get(Number(caso.clienteId));
+  return cliente ? `${base} — ${clienteLabel(cliente)}` : base;
+}
+
+/** clienteId solo si no hay caso (extrajudicial). Con caso el backend lo deriva (honorarios/ingresos).
+ *  Gastos exigen clienteId en API: pasar requireCliente para enviar el derivado del expediente. */
+function clienteCasoPayload(form, { requireCliente = false } = {}) {
+  const casoId = form.casoId ? Number(form.casoId) : null;
+  const clienteId = form.clienteId ? Number(form.clienteId) : null;
+  if (casoId) {
+    return {
+      casoId,
+      clienteId: requireCliente ? clienteId : null,
+    };
+  }
+  return { casoId: null, clienteId };
+}
 
 export default function FinanzasForm() {
   const theme = useTheme();
@@ -224,7 +247,7 @@ export default function FinanzasForm() {
   // Schemas Zod para validación por tipo de movimiento
   const honorarioSchema = useMemo(() => {
     return z.object({
-      clienteId: z.string().min(1, "Seleccioná un cliente"),
+      clienteId: z.string().optional(),
       casoId: z.string().optional(),
       conceptoId: z.string().min(1, "Seleccioná un concepto"),
       parteId: z.string().optional(),
@@ -244,6 +267,13 @@ export default function FinanzasForm() {
       diaVencimiento: z.union([z.number(), z.string(), z.null()]).optional(),
       convenioDescripcion: z.string().optional(),
     }).superRefine((data, ctx) => {
+      if (!data.casoId && !data.clienteId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["casoId"],
+          message: "Seleccioná un expediente o un cliente (extrajudicial)",
+        });
+      }
       const montoNum = Number(data.monto);
       const isJus = data.monedaCodigo === "JUS";
       if (Number.isNaN(montoNum) || montoNum <= 0) {
@@ -339,7 +369,7 @@ export default function FinanzasForm() {
 
   const gastoSchema = useMemo(() => {
     return z.object({
-      clienteId: z.string().min(1, "Seleccioná un cliente"),
+      clienteId: z.string().optional(),
       casoId: z.string().optional(),
       conceptoGastoId: z.string().optional(),
       estadoGastoId: z.string().min(1, "Seleccioná un estado"),
@@ -348,6 +378,13 @@ export default function FinanzasForm() {
       fechaGasto: z.string().min(1, "Indicá la fecha de gasto"),
       descripcion: z.string().optional(),
     }).superRefine((data, ctx) => {
+      if (!data.casoId && !data.clienteId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["casoId"],
+          message: "Seleccioná un expediente o un cliente (extrajudicial)",
+        });
+      }
       const montoNum = Number(data.monto);
       const isJus = data.monedaCodigo === "JUS";
       if (Number.isNaN(montoNum) || montoNum <= 0) {
@@ -372,7 +409,7 @@ export default function FinanzasForm() {
 
   const ingresoSchema = useMemo(() => {
     return z.object({
-      clienteId: z.string().min(1, "Seleccioná un cliente"),
+      clienteId: z.string().optional(),
       casoId: z.string().optional(),
       conceptoIngresoId: z.string().optional(),
       monedaCodigo: z.string(),
@@ -383,6 +420,13 @@ export default function FinanzasForm() {
       selectedGastoIds: z.array(z.number()).optional(),
       selectedHonorarioIds: z.array(z.number()).optional(),
     }).superRefine((data, ctx) => {
+      if (!data.casoId && !data.clienteId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["casoId"],
+          message: "Seleccioná un expediente o un cliente (extrajudicial)",
+        });
+      }
       const montoNum = Number(data.monto);
       const isJus = data.monedaCodigo === "JUS";
       if (Number.isNaN(montoNum) || montoNum <= 0) {
@@ -469,6 +513,7 @@ export default function FinanzasForm() {
     const fields = REQUIRED_FIELDS[tipoMovimiento] ?? [];
     if (!fields.length) return 100;
     const completed = fields.filter((f) => {
+      if (f === "_clienteOCaso") return Boolean(form.casoId || form.clienteId);
       const v = form[f];
       return v !== undefined && v !== "" && v !== null;
     }).length;
@@ -515,14 +560,27 @@ export default function FinanzasForm() {
     staleTime: 1000 * 60 * 30,
   });
 
+  const [expedienteInput, setExpedienteInput] = useState("");
+  const debouncedExpedienteSearch = useDebounced(expedienteInput, 300);
+
   const clientesQuery = useQuery({
     queryKey: ["clientes", "autocomplete"],
     queryFn: () => fetchAllPages("/clientes"),
   });
 
-  const expedientesQuery = useQuery({
-    queryKey: ["expedientes", "autocomplete"],
-    queryFn: () => fetchAllPages("/expedientes"),
+  const expedientesSearchQuery = useQuery({
+    queryKey: ["expedientes", "finanzas-form-search", debouncedExpedienteSearch],
+    queryFn: () => searchExpedientes({
+      search: debouncedExpedienteSearch.trim() || undefined,
+      limit: 20,
+    }),
+  });
+
+  const selectedExpedienteQuery = useQuery({
+    queryKey: ["expedientes", form.casoId],
+    enabled: Boolean(form.casoId),
+    queryFn: () => getExpediente(form.casoId),
+    staleTime: 1000 * 60,
   });
 
   const participantesElegiblesQuery = useQuery({
@@ -673,15 +731,28 @@ export default function FinanzasForm() {
   }, [planesIngreso, cuotasByPlanId]);
 
   const clientes = useMemo(() => clientesQuery.data ?? [], [clientesQuery.data]);
-  const expedientes = useMemo(() => expedientesQuery.data ?? [], [expedientesQuery.data]);
+  const clientesById = useMemo(() => new Map(clientes.map((c) => [Number(c.id), c])), [clientes]);
   const catalog = useMemo(() => catalogQuery.data ?? {}, [catalogQuery.data]);
   const valorJusActual = Number(valorJusQuery.data?.valor ?? 0);
   const valorJusRegulacion = Number(valorJusRegulacionQuery.data?.valor ?? valorJusActual);
   const valorJusGasto = Number(valorJusGastoQuery.data?.valor ?? valorJusActual);
   const valorJusIngreso = Number(valorJusIngresoQuery.data?.valor ?? valorJusActual);
 
+  const selectedCaso = selectedExpedienteQuery.data
+    ?? (expedientesSearchQuery.data ?? []).find((c) => Number(c.id) === Number(form.casoId))
+    ?? null;
+
+  const expedienteOptions = useMemo(() => {
+    const items = expedientesSearchQuery.data ?? [];
+    if (selectedCaso && !items.some((c) => Number(c.id) === Number(selectedCaso.id))) {
+      return [selectedCaso, ...items];
+    }
+    return items;
+  }, [expedientesSearchQuery.data, selectedCaso]);
+
   const selectedCliente = clientes.find((c) => Number(c.id) === Number(form.clienteId)) ?? null;
   const parteClienteParam = findParamByCodigo(catalog.PARTES, ["CLIENTE"]);
+  const isExtrajudicial = !form.casoId;
 
   const obligadosOptions = useMemo(() => {
     if (form.casoId) {
@@ -707,11 +778,34 @@ export default function FinanzasForm() {
       label: `${parteClienteParam?.nombre ?? "Cliente"} — ${nombreCompleto}`,
     }];
   }, [form.casoId, participantesElegiblesQuery.data, selectedCliente, parteClienteParam]);
-  const filteredExpedientes = useMemo(() => {
-    if (!form.clienteId) return [];
-    return expedientes.filter((e) => Number(e.clienteId) === Number(form.clienteId));
-  }, [expedientes, form.clienteId]);
-  const selectedCaso = expedientes.find((c) => Number(c.id) === Number(form.casoId)) ?? null;
+
+  const applyCasoSelection = useCallback((caso) => {
+    if (caso) {
+      setValue("casoId", String(caso.id), { shouldValidate: true });
+      setValue("clienteId", caso.clienteId ? String(caso.clienteId) : "", { shouldValidate: true });
+      setValue("obligadoKey", "", { shouldValidate: false });
+      setValue("parteId", "", { shouldValidate: false });
+      return;
+    }
+    setValue("casoId", "", { shouldValidate: true });
+    if (!lockClienteId) {
+      setValue("clienteId", "", { shouldValidate: true });
+    }
+    setValue("obligadoKey", "", { shouldValidate: false });
+    setValue("parteId", "", { shouldValidate: false });
+  }, [lockClienteId, setValue]);
+
+  const applyClienteExtrajudicial = useCallback((cliente) => {
+    setValue("casoId", "", { shouldValidate: true });
+    setValue("clienteId", cliente ? String(cliente.id) : "", { shouldValidate: true });
+    if (cliente) {
+      setValue("obligadoKey", `cliente:${cliente.id}`, { shouldValidate: false });
+      setValue("parteId", parteClienteParam?.id ? String(parteClienteParam.id) : "", { shouldValidate: false });
+    } else {
+      setValue("obligadoKey", "", { shouldValidate: false });
+      setValue("parteId", "", { shouldValidate: false });
+    }
+  }, [parteClienteParam?.id, setValue]);
 
   const isJus = form.monedaCodigo === "JUS";
   const isUsd = form.monedaCodigo === "USD";
@@ -876,13 +970,25 @@ export default function FinanzasForm() {
   }, [isEdit, tipoMovimiento, setForm]);
 
   useEffect(() => {
-    if (lockClienteId && clientes.length) {
-      setForm((f) => ({ ...f, clienteId: String(lockClienteId) }));
-    }
-    if (lockCasoId && expedientes.length) {
+    if (lockCasoId) {
       setForm((f) => ({ ...f, casoId: String(lockCasoId) }));
+    } else if (lockClienteId && clientes.length) {
+      setForm((f) => ({ ...f, clienteId: String(lockClienteId), casoId: "" }));
     }
-  }, [lockClienteId, lockCasoId, clientes.length, expedientes.length, setForm]);
+  }, [lockClienteId, lockCasoId, clientes.length, setForm]);
+
+  // Derivar cliente del expediente seleccionado (alta, edición o lock por URL).
+  useEffect(() => {
+    if (!form.casoId || !selectedCaso?.clienteId) return;
+    if (String(form.clienteId) === String(selectedCaso.clienteId)) return;
+    setForm((f) => ({ ...f, clienteId: String(selectedCaso.clienteId) }));
+  }, [form.casoId, form.clienteId, selectedCaso?.clienteId, setForm]);
+
+  useEffect(() => {
+    if (!selectedCaso || !form.casoId) return;
+    // Solo sembrar el input en precarga (edición/lock); no pisar búsqueda en curso.
+    setExpedienteInput((prev) => (prev ? prev : casoLabel(selectedCaso)));
+  }, [form.casoId, selectedCaso]);
 
   useEffect(() => {
     const defaultPolitica = findParamByCodigo(catalog.POLITICA_JUS, ["AL_COBRO"]);
@@ -1097,8 +1203,7 @@ export default function FinanzasForm() {
           throw new Error("Seleccioná el obligado al pago");
         }
         const payload = {
-          clienteId: form.clienteId ? Number(form.clienteId) : null,
-          casoId: form.casoId ? Number(form.casoId) : null,
+          ...clienteCasoPayload(form),
           conceptoId: Number(form.conceptoId),
           parteId,
           obligadoClienteId: obligado.tipo === "cliente" ? Number(obligado.id) : null,
@@ -1122,8 +1227,7 @@ export default function FinanzasForm() {
         if (form.crearPlanPago) {
           const planPayload = {
             honorarioId: Number(honorarioResult.id),
-            clienteId: form.clienteId ? Number(form.clienteId) : null,
-            casoId: form.casoId ? Number(form.casoId) : null,
+            ...clienteCasoPayload(form),
             descripcion: form.convenioDescripcion.trim() || null,
             fechaInicio: toIsoDateTimeLocal(form.convenioFechaInicio),
             periodicidadId: Number(form.convenioPeriodicidad),
@@ -1142,8 +1246,7 @@ export default function FinanzasForm() {
 
       if (tipoMovimiento === "gasto") {
         const payload = {
-          clienteId: Number(form.clienteId),
-          casoId: form.casoId ? Number(form.casoId) : null,
+          ...clienteCasoPayload(form, { requireCliente: true }),
           conceptoId: form.conceptoGastoId ? Number(form.conceptoGastoId) : null,
           descripcion: form.descripcion.trim() || null,
           fechaGasto: toIsoDateTimeLocal(form.fechaGasto),
@@ -1163,8 +1266,7 @@ export default function FinanzasForm() {
       if (tipoMovimiento === "convenio") {
         const payload = {
           honorarioId: Number(form.convenioHonorarioId),
-          clienteId: form.clienteId ? Number(form.clienteId) : null,
-          casoId: form.casoId ? Number(form.casoId) : null,
+          ...clienteCasoPayload(form),
           descripcion: form.convenioDescripcion.trim() || null,
           fechaInicio: toIsoDateTimeLocal(form.convenioFechaInicio),
           periodicidadId: Number(form.convenioPeriodicidad),
@@ -1207,8 +1309,7 @@ export default function FinanzasForm() {
         finalMonedaId = monedaArs?.id ?? null;
       }
       const payload = {
-        clienteId: form.clienteId ? Number(form.clienteId) : null,
-        casoId: form.casoId ? Number(form.casoId) : null,
+        ...clienteCasoPayload(form),
         descripcion: descripcion || null,
         monto: finalMonto,
         fechaIngreso: toIsoDateTimeLocal(form.fechaIngreso),
@@ -1243,7 +1344,19 @@ export default function FinanzasForm() {
       if (location.state?.from) navigate(location.state.from);
       else navigate("/finanzas");
     },
-    onError: (error) => enqueueSnackbar(getApiError(error, "No se pudo guardar el movimiento"), { variant: "error" }),
+    onError: (error) => {
+      const code = error?.response?.data?.error?.code;
+      const message = getApiError(error, "No se pudo guardar el movimiento");
+      if (code === "HONORARIO_DEUDOR_INMUTABLE" || code === "PLAN_DEUDORES_DISTINTOS" || code === "VALOR_JUS_NOT_FOUND") {
+        enqueueSnackbar(message, { variant: "error" });
+        return;
+      }
+      if (error?.response?.status === 409) {
+        enqueueSnackbar(message, { variant: "error" });
+        return;
+      }
+      enqueueSnackbar(message, { variant: "error" });
+    },
   });
 
   const titles = {
@@ -1288,7 +1401,9 @@ export default function FinanzasForm() {
   if (isEdit && entityQuery.isError) {
     return (
       <Box sx={{ maxWidth: 600, mx: "auto", textAlign: "center", py: 8 }}>
-        <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>No se pudo cargar el movimiento</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>
+          {getApiError(entityQuery.error, "No se pudo cargar el movimiento")}
+        </Typography>
         <Button startIcon={<ArrowBack />} onClick={navigateBack} sx={{ fontWeight: 800 }}>Volver</Button>
       </Box>
     );
@@ -1402,57 +1517,84 @@ export default function FinanzasForm() {
         <Grid container spacing={2.5}>
           {tipoMovimiento !== "gasto" && tipoMovimiento !== "ingreso" && (
             <>
-          <Grid size={{ xs: 12, md: 6 }}>
+          <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
             <Controller
-              name="clienteId"
+              name="casoId"
               control={control}
               render={({ field, fieldState: { error } }) => (
                 <Autocomplete
-                  options={clientes}
-                  value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                  disabled={Boolean(lockClienteId)}
-                  onChange={(_, val) => {
-                    const newId = val ? String(val.id) : "";
-                    field.onChange(newId);
-                    setValue("casoId", lockCasoId ? getValues("casoId") : "");
+                  options={expedienteOptions}
+                  value={expedienteOptions.find((c) => Number(c.id) === Number(field.value)) ?? selectedCaso ?? null}
+                  disabled={Boolean(lockCasoId)}
+                  loading={expedientesSearchQuery.isFetching || selectedExpedienteQuery.isFetching}
+                  inputValue={expedienteInput}
+                  onInputChange={(_, value, reason) => {
+                    if (reason === "reset") return;
+                    setExpedienteInput(value);
                   }}
-                  getOptionLabel={clienteLabel}
+                  onChange={(_, val) => {
+                    applyCasoSelection(val);
+                    setExpedienteInput(val ? casoLabel(val) : "");
+                  }}
+                  getOptionLabel={(opt) => expedienteOptionLabel(opt, clientesById)}
                   isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                  filterOptions={(opts) => opts}
+                  noOptionsText={debouncedExpedienteSearch.trim() ? "Sin resultados" : "Escribí para buscar por carátula, número o cliente"}
                   renderInput={(params) => (
                     <TextField
                       {...params}
                       size="small"
-                      label="Cliente"
+                      label="Expediente"
                       error={Boolean(error)}
-                      helperText={error?.message}
-                      required={tipoMovimiento === "honorario"}
-                      inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
+                      helperText={error?.message || (isExtrajudicial ? "Opcional — dejalo vacío para un movimiento extrajudicial" : undefined)}
+                      inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula, número o cliente" }}
                     />
                   )}
                 />
               )}
             />
           </Grid>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Controller
-              name="casoId"
-              control={control}
-              render={({ field }) => (
-                <Autocomplete
-                  options={filteredExpedientes}
-                  value={filteredExpedientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                  disabled={Boolean(lockCasoId) || !form.clienteId}
-                  onChange={(_, val) => field.onChange(val ? String(val.id) : "")}
-                  getOptionLabel={casoLabel}
-                  isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                  noOptionsText={form.clienteId ? "Sin expedientes" : "Seleccioná un cliente"}
-                  renderInput={(params) => (
-                    <TextField {...params} size="small" label="Expediente (opcional)" inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula o número" }} />
-                  )}
+          {form.casoId ? (
+            <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
+              <Box sx={{ width: "100%" }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
+                  Cliente del expediente
+                </Typography>
+                <Chip
+                  label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
+                  sx={{ fontWeight: 800, maxWidth: "100%" }}
                 />
-              )}
-            />
-          </Grid>
+              </Box>
+            </Grid>
+          ) : (
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Controller
+                name="clienteId"
+                control={control}
+                render={({ field, fieldState: { error } }) => (
+                  <Autocomplete
+                    options={clientes}
+                    value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
+                    disabled={Boolean(lockClienteId)}
+                    onChange={(_, val) => applyClienteExtrajudicial(val)}
+                    getOptionLabel={clienteLabel}
+                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        label="Cliente"
+                        error={Boolean(error)}
+                        helperText={error?.message || "Sin expediente (extrajudicial)"}
+                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio"}
+                        inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
+                      />
+                    )}
+                  />
+                )}
+              />
+            </Grid>
+          )}
             </>
           )}
 
@@ -1479,12 +1621,15 @@ export default function FinanzasForm() {
                 <Controller
                   name="obligadoKey"
                   control={control}
-                  render={({ field, fieldState: { error } }) => (
-                    <FormControl fullWidth size="small" error={Boolean(error)}>
+                  render={({ field, fieldState: { error } }) => {
+                    const obligadoLocked = isEdit && Boolean(entityQuery.data?.tienePagosImputados);
+                    return (
+                    <FormControl fullWidth size="small" error={Boolean(error)} disabled={obligadoLocked}>
                       <InputLabel>Obligado al pago</InputLabel>
                       <Select
                         label="Obligado al pago"
                         {...field}
+                        disabled={obligadoLocked}
                         onChange={(e) => {
                           const key = e.target.value;
                           const option = obligadosOptions.find((o) => o.key === key);
@@ -1497,9 +1642,14 @@ export default function FinanzasForm() {
                         ))}
                       </Select>
                       {error && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>{error.message}</Typography>}
-                      {!form.clienteId && (
+                      {obligadoLocked && (
                         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
-                          Seleccioná un cliente para listar obligados
+                          No se puede cambiar el deudor: el honorario ya tiene pagos imputados
+                        </Typography>
+                      )}
+                      {!form.casoId && !form.clienteId && !obligadoLocked && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                          Seleccioná un expediente o un cliente para listar obligados
                         </Typography>
                       )}
                       {form.casoId && participantesElegiblesQuery.isLoading && (
@@ -1508,7 +1658,8 @@ export default function FinanzasForm() {
                         </Typography>
                       )}
                     </FormControl>
-                  )}
+                    );
+                  }}
                 />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
@@ -2055,56 +2206,83 @@ export default function FinanzasForm() {
 
         {tipoMovimiento === "gasto" && (
           <Grid container spacing={2.5}>
-            <Grid size={{ xs: 12, md: 6 }}>
+            <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
               <Controller
-                name="clienteId"
+                name="casoId"
                 control={control}
                 render={({ field, fieldState: { error } }) => (
                   <Autocomplete
-                    options={clientes}
-                    value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                    disabled={Boolean(lockClienteId)}
-                    onChange={(_, val) => {
-                      const newId = val ? String(val.id) : "";
-                      field.onChange(newId);
-                      setValue("casoId", lockCasoId ? getValues("casoId") : "");
+                    options={expedienteOptions}
+                    value={expedienteOptions.find((c) => Number(c.id) === Number(field.value)) ?? selectedCaso ?? null}
+                    disabled={Boolean(lockCasoId)}
+                    loading={expedientesSearchQuery.isFetching || selectedExpedienteQuery.isFetching}
+                    inputValue={expedienteInput}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === "reset") return;
+                      setExpedienteInput(value);
                     }}
-                    getOptionLabel={clienteLabel}
+                    onChange={(_, val) => {
+                      applyCasoSelection(val);
+                      setExpedienteInput(val ? casoLabel(val) : "");
+                    }}
+                    getOptionLabel={(opt) => expedienteOptionLabel(opt, clientesById)}
                     isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                    filterOptions={(opts) => opts}
+                    noOptionsText={debouncedExpedienteSearch.trim() ? "Sin resultados" : "Escribí para buscar por carátula, número o cliente"}
                     renderInput={(params) => (
                       <TextField
                         {...params}
                         size="small"
-                        label="Cliente"
+                        label="Expediente"
                         error={Boolean(error)}
-                        helperText={error?.message}
-                        required
+                        helperText={error?.message || (isExtrajudicial ? "Opcional — dejalo vacío para un gasto extrajudicial" : undefined)}
+                        inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula, número o cliente" }}
                       />
                     )}
                   />
                 )}
               />
             </Grid>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <Controller
-                name="casoId"
-                control={control}
-                render={({ field }) => (
-                  <Autocomplete
-                    options={filteredExpedientes}
-                    value={filteredExpedientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                    disabled={Boolean(lockCasoId) || !form.clienteId}
-                    onChange={(_, val) => field.onChange(val ? String(val.id) : "")}
-                    getOptionLabel={casoLabel}
-                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                    noOptionsText={form.clienteId ? "Sin expedientes" : "Seleccioná un cliente"}
-                    renderInput={(params) => (
-                      <TextField {...params} size="small" label="Expediente (opcional)" inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula o número" }} />
-                    )}
+            {form.casoId ? (
+              <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
+                <Box sx={{ width: "100%" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
+                    Cliente del expediente
+                  </Typography>
+                  <Chip
+                    label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
+                    sx={{ fontWeight: 800, maxWidth: "100%" }}
                   />
-                )}
-              />
-            </Grid>
+                </Box>
+              </Grid>
+            ) : (
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Controller
+                  name="clienteId"
+                  control={control}
+                  render={({ field, fieldState: { error } }) => (
+                    <Autocomplete
+                      options={clientes}
+                      value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
+                      disabled={Boolean(lockClienteId)}
+                      onChange={(_, val) => applyClienteExtrajudicial(val)}
+                      getOptionLabel={clienteLabel}
+                      isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          label="Cliente"
+                          error={Boolean(error)}
+                          helperText={error?.message || "Sin expediente (extrajudicial)"}
+                          required
+                        />
+                      )}
+                    />
+                  )}
+                />
+              </Grid>
+            )}
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller
                 name="conceptoGastoId"
@@ -2244,56 +2422,83 @@ export default function FinanzasForm() {
 
         {tipoMovimiento === "ingreso" && (
           <Grid container spacing={2.5}>
-            <Grid size={{ xs: 12, md: 6 }}>
+            <Grid size={{ xs: 12, md: form.casoId ? 8 : 6 }}>
               <Controller
-                name="clienteId"
+                name="casoId"
                 control={control}
                 render={({ field, fieldState: { error } }) => (
                   <Autocomplete
-                    options={clientes}
-                    value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                    disabled={Boolean(lockClienteId)}
-                    onChange={(_, val) => {
-                      const newId = val ? String(val.id) : "";
-                      field.onChange(newId);
-                      setValue("casoId", lockCasoId ? getValues("casoId") : "");
+                    options={expedienteOptions}
+                    value={expedienteOptions.find((c) => Number(c.id) === Number(field.value)) ?? selectedCaso ?? null}
+                    disabled={Boolean(lockCasoId)}
+                    loading={expedientesSearchQuery.isFetching || selectedExpedienteQuery.isFetching}
+                    inputValue={expedienteInput}
+                    onInputChange={(_, value, reason) => {
+                      if (reason === "reset") return;
+                      setExpedienteInput(value);
                     }}
-                    getOptionLabel={clienteLabel}
+                    onChange={(_, val) => {
+                      applyCasoSelection(val);
+                      setExpedienteInput(val ? casoLabel(val) : "");
+                    }}
+                    getOptionLabel={(opt) => expedienteOptionLabel(opt, clientesById)}
                     isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                    filterOptions={(opts) => opts}
+                    noOptionsText={debouncedExpedienteSearch.trim() ? "Sin resultados" : "Escribí para buscar por carátula, número o cliente"}
                     renderInput={(params) => (
                       <TextField
                         {...params}
                         size="small"
-                        label="Cliente"
+                        label="Expediente"
                         error={Boolean(error)}
-                        helperText={error?.message}
-                        required
+                        helperText={error?.message || (isExtrajudicial ? "Opcional — dejalo vacío para un cobro extrajudicial" : undefined)}
+                        inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula, número o cliente" }}
                       />
                     )}
                   />
                 )}
               />
             </Grid>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <Controller
-                name="casoId"
-                control={control}
-                render={({ field }) => (
-                  <Autocomplete
-                    options={filteredExpedientes}
-                    value={filteredExpedientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
-                    disabled={Boolean(lockCasoId) || !form.clienteId}
-                    onChange={(_, val) => field.onChange(val ? String(val.id) : "")}
-                    getOptionLabel={casoLabel}
-                    isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
-                    noOptionsText={form.clienteId ? "Sin expedientes" : "Seleccioná un cliente"}
-                    renderInput={(params) => (
-                      <TextField {...params} size="small" label="Expediente (opcional)" inputProps={{ ...params.inputProps, "aria-label": "Buscar expediente por carátula o número" }} />
-                    )}
+            {form.casoId ? (
+              <Grid size={{ xs: 12, md: 4 }} sx={{ display: "flex", alignItems: "center" }}>
+                <Box sx={{ width: "100%" }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
+                    Cliente del expediente
+                  </Typography>
+                  <Chip
+                    label={clienteLabel(selectedCliente) || (selectedCaso?.clienteId ? `Cliente #${selectedCaso.clienteId}` : "Cargando…")}
+                    sx={{ fontWeight: 800, maxWidth: "100%" }}
                   />
-                )}
-              />
-            </Grid>
+                </Box>
+              </Grid>
+            ) : (
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Controller
+                  name="clienteId"
+                  control={control}
+                  render={({ field, fieldState: { error } }) => (
+                    <Autocomplete
+                      options={clientes}
+                      value={clientes.find((c) => Number(c.id) === Number(field.value)) ?? null}
+                      disabled={Boolean(lockClienteId)}
+                      onChange={(_, val) => applyClienteExtrajudicial(val)}
+                      getOptionLabel={clienteLabel}
+                      isOptionEqualToValue={(a, b) => Number(a?.id) === Number(b?.id)}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          size="small"
+                          label="Cliente"
+                          error={Boolean(error)}
+                          helperText={error?.message || "Sin expediente (extrajudicial)"}
+                          required
+                        />
+                      )}
+                    />
+                  )}
+                />
+              </Grid>
+            )}
             <Grid size={{ xs: 12 }}>
               <Controller
                 name="monedaCodigo"
@@ -2998,9 +3203,9 @@ export default function FinanzasForm() {
                   ) : null}
                 </Typography>
               )}
-              {!form.clienteId && !lockClienteId && (
+              {!form.clienteId && !form.casoId && !lockClienteId && !lockCasoId && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                  Seleccioná un cliente primero para ver sus honorarios pendientes.
+                  Seleccioná un expediente o un cliente para ver honorarios pendientes.
                 </Typography>
               )}
             </Grid>

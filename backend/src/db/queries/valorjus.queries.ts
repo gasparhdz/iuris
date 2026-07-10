@@ -68,8 +68,13 @@ export class ValorJusQueries {
   }
 
   static async insertValorJus(values: NewValorJus) {
-    const [row] = await db.insert(valoresJus).values({ ...values, estudioId: VALORES_JUS_ESTUDIO_GLOBAL_ID }).returning();
-    return row;
+    try {
+      const [row] = await db.insert(valoresJus).values({ ...values, estudioId: VALORES_JUS_ESTUDIO_GLOBAL_ID }).returning();
+      return row;
+    } catch (error: unknown) {
+      if (isUniqueViolation(error)) throw new Error("VALOR_JUS_DUPLICATE_FECHA");
+      throw error;
+    }
   }
 
   static async insertValoresJus(values: NewValorJus[]) {
@@ -115,4 +120,11 @@ export class ValorJusQueries {
 
     return row ?? null;
   }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error as { code: unknown }).code === "23505";
 }

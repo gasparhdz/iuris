@@ -245,6 +245,13 @@ export default function ClienteDetalle() {
   }, [planesQuery.data]);
 
   const getHonorarioSaldoPendiente = useCallback((item, computed) => {
+    const backendSaldo = item?.calc?.saldoPesos ?? computed?.saldoPesos;
+    if (backendSaldo != null && Number.isFinite(Number(backendSaldo))) {
+      return {
+        value: Math.max(0, Number(backendSaldo)),
+        currency: "ARS",
+      };
+    }
     const planSaldo = planesByHonorario.get(Number(item.id));
     if (planSaldo) {
       return {
@@ -252,8 +259,6 @@ export default function ClienteDetalle() {
         currency: "ARS",
       };
     }
-    // Honorario SIN plan: saldo = bruto actualizado menos lo ya cobrado directo (montoCobrado).
-    // Antes devolvia el bruto entero y el override forzaba el saldo final ignorando los cobros.
     const bruto = isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0;
     const cobrado = Number(item.montoCobrado ?? 0);
     return {

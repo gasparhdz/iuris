@@ -6,15 +6,24 @@ import { TercerosQueries } from "../db/queries/terceros.queries.js";
 import { serializeDates } from "../utils/serialize.js";
 import { ValorJusService } from "./valorjus.service.js";
 import { PlanesService } from "./planes.service.js";
+import { decideDeudorUpdate } from "./honorario-deudor.js";
+import {
+  calcularSaldosHonorario,
+  type CCAplicacion,
+  type CCHonorario,
+} from "./cuenta-corriente.js";
 import type { CreateHonorarioInput, HonorarioQueryInput, UpdateHonorarioInput } from "../schemas/honorarios.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 import { assertMonedaSoportada } from "./moneda.validator.js";
+
+type HonorarioRow = NonNullable<Awaited<ReturnType<typeof HonorariosQueries.findHonorarioById>>>;
 
 export class HonorariosService {
   static async findAll(estudioId: number, query: HonorarioQueryInput) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const offset = (page - 1) * limit;
+    const needsSaldoSort = query.orderBy === "saldo" || query.orderBy === "interes";
 
     const { data, count } = await HonorariosQueries.findHonorarios(
       estudioId,
@@ -25,15 +34,34 @@ export class HonorariosService {
         search: query.search,
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
-        orderBy: query.orderBy,
+        // Saldo/interés se ordenan en memoria con el motor de CC.
+        orderBy: needsSaldoSort ? "fecha" : query.orderBy,
         order: query.order,
       },
-      { limit, offset }
+      needsSaldoSort ? { limit: 10000, offset: 0 } : { limit, offset }
     );
+
+    let items = await this.enrichHonorarios(estudioId, data);
+
+    if (needsSaldoSort) {
+      const dir = query.order === "asc" ? 1 : -1;
+      items.sort((a, b) => {
+        if (!a || !b) return 0;
+        const va = query.orderBy === "interes"
+          ? Number(a.calc?.interesDevengadoPesos ?? 0)
+          : Number(a.calc?.saldoPesos ?? 0);
+        const vb = query.orderBy === "interes"
+          ? Number(b.calc?.interesDevengadoPesos ?? 0)
+          : Number(b.calc?.saldoPesos ?? 0);
+        if (va !== vb) return (va - vb) * dir;
+        return Number(a.id) - Number(b.id);
+      });
+      items = items.slice(offset, offset + limit);
+    }
 
     return {
       data: {
-        items: data.map(normalizeHonorario),
+        items,
         meta: { total: count, page, limit },
       },
     };
@@ -42,29 +70,43 @@ export class HonorariosService {
   static async findById(id: number, estudioId: number) {
     const honorario = await HonorariosQueries.findHonorarioById(id, estudioId);
     if (!honorario) throw new Error("HONORARIO_NOT_FOUND");
-    return normalizeHonorario(honorario);
+    const [enriched] = await this.enrichHonorarios(estudioId, [honorario]);
+    return enriched;
   }
 
   static async create(estudioId: number, userId: number, data: CreateHonorarioInput) {
     await assertMonedaSoportada(data.monedaId);
-    await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
+    const { clienteId, casoId } = await this.resolveClienteCaso(
+      estudioId,
+      data.clienteId ?? null,
+      data.casoId ?? null,
+    );
+    await this.ensureRelatedEntities(estudioId, clienteId ?? undefined, casoId ?? undefined);
     await this.ensureObligado(
       estudioId,
-      data.casoId ?? null,
-      data.clienteId ?? null,
+      casoId,
+      clienteId,
       data.obligadoClienteId ?? null,
       data.obligadoTerceroId ?? null,
       true,
     );
 
     const fechaRegulacion = new Date(data.fechaRegulacion);
-    const valorJusRef = await this.resolveValorJusRef(estudioId, fechaRegulacion, data.politicaJusId, data.valorJusRef, data.jus, data.montoPesos);
+    const valorJusRef = await this.resolveValorJusRef(
+      estudioId,
+      fechaRegulacion,
+      data.politicaJusId,
+      data.valorJusRef,
+      data.jus,
+      data.montoPesos,
+    );
+    this.assertValorJusDisponible(valorJusRef, data.valorJusRef, data.jus);
     const estadoId = data.estadoId ?? await this.getPendingEstadoId();
 
     const created = await HonorariosQueries.insertHonorario({
       estudioId,
-      clienteId: data.clienteId ?? null,
-      casoId: data.casoId ?? null,
+      clienteId,
+      casoId,
       conceptoId: data.conceptoId,
       parteId: data.parteId,
       obligadoClienteId: data.obligadoClienteId ?? null,
@@ -99,10 +141,9 @@ export class HonorariosService {
     if (!current) throw new Error("HONORARIO_NOT_FOUND");
 
     if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
-    await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
     const nextCasoId = data.casoId !== undefined ? data.casoId : current.casoId;
-    const nextClienteId = data.clienteId !== undefined ? data.clienteId : current.clienteId;
+    let nextClienteId = data.clienteId !== undefined ? data.clienteId : current.clienteId;
     const nextObligadoClienteId = data.obligadoClienteId !== undefined
       ? data.obligadoClienteId
       : (data.obligadoTerceroId !== undefined ? null : current.obligadoClienteId);
@@ -110,10 +151,49 @@ export class HonorariosService {
       ? data.obligadoTerceroId
       : (data.obligadoClienteId !== undefined ? null : current.obligadoTerceroId);
 
+    const deudorFieldsChanging =
+      (data.obligadoClienteId !== undefined && data.obligadoClienteId !== current.obligadoClienteId)
+      || (data.obligadoTerceroId !== undefined && data.obligadoTerceroId !== current.obligadoTerceroId)
+      || (data.clienteId !== undefined && data.clienteId !== current.clienteId)
+      || (data.casoId !== undefined && data.casoId !== current.casoId);
+
+    if (deudorFieldsChanging) {
+      const hasPagos = await HonorariosQueries.hasPagosImputados(id, estudioId);
+      const planActivo = await PlanesQueries.findPlanActivoByHonorarioId(id, estudioId);
+      const decision = decideDeudorUpdate({
+        fieldsChanging: true,
+        hasPagosImputados: hasPagos,
+        inPlan: Boolean(planActivo),
+        honorariosDelPlan: [{
+          clienteId: nextClienteId,
+          obligadoClienteId: nextObligadoClienteId,
+          obligadoTerceroId: nextObligadoTerceroId,
+        }],
+      });
+
+      if (decision === "sync_plan" && planActivo) {
+        const resolved = await this.resolveClienteCaso(estudioId, nextClienteId, nextCasoId);
+        nextClienteId = resolved.clienteId;
+        await PlanesQueries.updatePlanPagoByHonorarioId(id, estudioId, {
+          clienteId: resolved.clienteId,
+          casoId: resolved.casoId,
+        });
+      }
+    }
+
+    let resolvedCasoId = nextCasoId;
+    if (data.clienteId !== undefined || data.casoId !== undefined) {
+      const resolvedIds = await this.resolveClienteCaso(estudioId, nextClienteId, nextCasoId);
+      nextClienteId = resolvedIds.clienteId;
+      resolvedCasoId = resolvedIds.casoId;
+    }
+
+    await this.ensureRelatedEntities(estudioId, nextClienteId ?? undefined, resolvedCasoId ?? undefined);
+
     if (data.obligadoClienteId !== undefined || data.obligadoTerceroId !== undefined || data.casoId !== undefined || data.clienteId !== undefined) {
       await this.ensureObligado(
         estudioId,
-        nextCasoId,
+        resolvedCasoId,
         nextClienteId,
         nextObligadoClienteId,
         nextObligadoTerceroId,
@@ -135,13 +215,23 @@ export class HonorariosService {
       ? await this.resolveValorJusRef(estudioId, fechaRegulacion, politicaJusId, undefined, jusForSnapshot, pesosForSnapshot)
       : data.valorJusRef;
 
+    if (shouldResolveSnapshot || data.valorJusRef !== undefined) {
+      this.assertValorJusDisponible(
+        resolvedValorJusRef ?? null,
+        data.valorJusRef,
+        jusForSnapshot,
+      );
+    }
+
     const updateData: Parameters<typeof HonorariosQueries.updateHonorario>[2] = {
       updatedAt: new Date(),
       updatedBy: userId,
     };
 
-    if (data.clienteId !== undefined) updateData.clienteId = data.clienteId;
-    if (data.casoId !== undefined) updateData.casoId = data.casoId;
+    if (data.clienteId !== undefined || data.casoId !== undefined) {
+      updateData.clienteId = nextClienteId;
+      updateData.casoId = resolvedCasoId;
+    }
     if (data.conceptoId !== undefined) updateData.conceptoId = data.conceptoId;
     if (data.parteId !== undefined) updateData.parteId = data.parteId;
     if (data.obligadoClienteId !== undefined || data.obligadoTerceroId !== undefined) {
@@ -255,6 +345,89 @@ export class HonorariosService {
     await PlanesService.recomputeHonorarioEstado(id, estudioId);
   }
 
+  private static async enrichHonorarios(estudioId: number, rows: HonorarioRow[]) {
+    if (rows.length === 0) return [];
+
+    const fechaCorte = new Date();
+    const valorJusActual = await ValorJusService.getValorJusSnapshot(fechaCorte, estudioId);
+    const planes = await PlanesQueries.findPlanes(estudioId, {});
+    const planByHonorario = new Map(planes.map((p) => [p.honorarioId, p]));
+
+    const parametroCache = new Map<number, Awaited<ReturnType<typeof HonorariosQueries.findParametroById>>>();
+    const getParametroCodigo = async (id: number | null | undefined): Promise<string | null> => {
+      if (!id) return null;
+      if (!parametroCache.has(id)) parametroCache.set(id, await HonorariosQueries.findParametroById(id));
+      return parametroCache.get(id)?.codigo ?? null;
+    };
+
+    return Promise.all(rows.map(async (row) => {
+      const tienePagosImputados = await HonorariosQueries.hasPagosImputados(row.id, estudioId);
+      const plan = planByHonorario.get(row.id) ?? null;
+
+      let ccPlan: CCHonorario["plan"] = null;
+      if (plan) {
+        const [cuotas, aplicacionesPlan] = await Promise.all([
+          PlanesQueries.findCuotasByPlan(plan.id, estudioId),
+          PlanesQueries.findAplicacionesByPlanCuotas(plan.id),
+        ]);
+        const aplicacionesByCuota = new Map<number, CCAplicacion[]>();
+        for (const app of aplicacionesPlan) {
+          if (app.cuotaId === null) continue;
+          const list = aplicacionesByCuota.get(app.cuotaId) ?? [];
+          list.push({
+            fecha: app.fechaIngreso,
+            montoCapital: app.montoCapital,
+            montoInteres: app.montoInteres,
+            valorJusAlCobro: app.valorJusAlCobro,
+          });
+          aplicacionesByCuota.set(app.cuotaId, list);
+        }
+        ccPlan = {
+          tasaInteresMensual: plan.tasaInteresMensual,
+          regimenMora: plan.regimenMora,
+          politicaCodigo: await getParametroCodigo(plan.politicaJusId),
+          valorJusRef: plan.valorJusRef,
+          cuotas: cuotas.map((cuota) => ({
+            id: cuota.id,
+            numero: cuota.numero,
+            vencimiento: cuota.vencimiento,
+            montoJus: cuota.montoJus,
+            montoPesos: cuota.montoPesos,
+            valorJusRef: cuota.valorJusRef,
+            aplicaciones: aplicacionesByCuota.get(cuota.id) ?? [],
+          })),
+        };
+      }
+
+      const aplicacionesDirectas = ccPlan
+        ? []
+        : (await PlanesQueries.findAplicacionesByHonorarioActivas(row.id)).map((app) => ({
+            fecha: app.fechaIngreso,
+            montoCapital: app.montoCapital,
+            montoInteres: app.montoInteres,
+            valorJusAlCobro: app.valorJusAlCobro,
+          }));
+
+      const ccHonorario: CCHonorario = {
+        id: row.id,
+        descripcion: row.concepto?.nombre ?? "Honorario",
+        fechaRegulacion: row.fechaRegulacion,
+        fechaVencimiento: row.fechaVencimiento,
+        jus: row.jus,
+        montoPesos: row.montoPesos,
+        valorJusRef: row.valorJusRef,
+        politicaCodigo: await getParametroCodigo(row.politicaJusId),
+        monedaCodigo: row.moneda?.codigo ?? null,
+        tasaInteresMensualPct: row.tasaInteresMensual,
+        plan: ccPlan,
+        aplicaciones: aplicacionesDirectas,
+      };
+
+      const saldos = calcularSaldosHonorario(ccHonorario, valorJusActual ?? 0, fechaCorte);
+      return normalizeHonorario(row, { ...saldos, tienePagosImputados });
+    }));
+  }
+
   private static async resolveValorJusRef(
     estudioId: number,
     fechaRegulacion: Date,
@@ -272,6 +445,33 @@ export class HonorariosService {
       return await ValorJusService.getValorJusSnapshot(fechaRegulacion, estudioId);
     }
     return null;
+  }
+
+  /** Rechaza honorarios en JUS sin valor de referencia disponible. */
+  private static assertValorJusDisponible(
+    resolved: number | null,
+    valorJusRefExplicit: number | null | undefined,
+    jus: number | null | undefined,
+  ) {
+    if (!(jus != null && jus > 0)) return;
+    if (resolved != null) return;
+    if (valorJusRefExplicit != null) return;
+    throw new Error("VALOR_JUS_NOT_FOUND");
+  }
+
+  /** Si hay casoId, deriva clienteId del caso (o rechaza si difiere). */
+  private static async resolveClienteCaso(
+    estudioId: number,
+    clienteId: number | null,
+    casoId: number | null,
+  ): Promise<{ clienteId: number | null; casoId: number | null }> {
+    if (!casoId) return { clienteId, casoId };
+    const caso = await CasosQueries.findById(casoId, estudioId);
+    if (!caso) throw new Error("CASO_NOT_FOUND");
+    if (clienteId != null && clienteId !== caso.clienteId) {
+      throw new Error("CLIENTE_CASO_MISMATCH");
+    }
+    return { clienteId: caso.clienteId, casoId };
   }
 
   private static async ensureRelatedEntities(estudioId: number, clienteId?: number, casoId?: number) {
@@ -375,7 +575,16 @@ export class HonorariosService {
   }
 }
 
-function normalizeHonorario(honorario: Awaited<ReturnType<typeof HonorariosQueries.findHonorarioById>>) {
+function normalizeHonorario(
+  honorario: HonorarioRow | null,
+  extras?: {
+    saldoCapitalPesos?: number;
+    interesPesos?: number;
+    saldoPesos?: number;
+    saldoJus?: number;
+    tienePagosImputados?: boolean;
+  },
+) {
   if (!honorario) return honorario;
 
   const normalized = {
@@ -383,6 +592,7 @@ function normalizeHonorario(honorario: Awaited<ReturnType<typeof HonorariosQueri
     jus: honorario.jus !== null ? Number(honorario.jus) : null,
     montoCobrado: honorario.montoCobrado !== undefined && honorario.montoCobrado !== null ? Number(honorario.montoCobrado) : 0,
     tienePlan: Boolean(honorario.tienePlan),
+    tienePagosImputados: Boolean(extras?.tienePagosImputados),
     montoPesos: honorario.montoPesos !== null ? Number(honorario.montoPesos) : null,
     valorJusRef: honorario.valorJusRef !== null ? Number(honorario.valorJusRef) : null,
     tasaInteresMensual: honorario.tasaInteresMensual !== null ? Number(honorario.tasaInteresMensual) : null,
@@ -394,15 +604,23 @@ function normalizeHonorario(honorario: Awaited<ReturnType<typeof HonorariosQueri
     moneda: honorario.moneda?.id ? honorario.moneda : null,
   };
 
+  const baseCalc = HonorariosService.computeMontos({
+    jus: normalized.jus,
+    montoPesos: normalized.montoPesos,
+    valorJusRef: normalized.valorJusRef,
+    fechaVencimiento: normalized.fechaVencimiento,
+    tasaInteresMensual: normalized.tasaInteresMensual,
+    estadoCodigo: normalized.estado?.codigo ?? null,
+  });
+
   return serializeDates({
     ...normalized,
-    calc: HonorariosService.computeMontos({
-      jus: normalized.jus,
-      montoPesos: normalized.montoPesos,
-      valorJusRef: normalized.valorJusRef,
-      fechaVencimiento: normalized.fechaVencimiento,
-      tasaInteresMensual: normalized.tasaInteresMensual,
-      estadoCodigo: normalized.estado?.codigo ?? null,
-    }),
+    calc: {
+      ...baseCalc,
+      saldoCapitalPesos: extras?.saldoCapitalPesos ?? null,
+      interesDevengadoPesos: extras?.interesPesos ?? null,
+      saldoPesos: extras?.saldoPesos ?? null,
+      saldoJus: extras?.saldoJus ?? null,
+    },
   });
 }

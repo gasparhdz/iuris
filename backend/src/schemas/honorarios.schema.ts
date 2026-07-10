@@ -24,7 +24,7 @@ const honorarioBaseSchema = z.object({
   politicaJusId: positiveIntSchema.optional().nullable(),
   fechaRegulacion: dateStringSchema,
   fechaVencimiento: dateStringSchema.optional().nullable(),
-  tasaInteresMensual: z.coerce.number().positive().max(100).optional().nullable(),
+  tasaInteresMensual: z.coerce.number().min(0).max(100).optional().nullable(),
   estadoId: positiveIntSchema.optional().nullable(),
 }).strict();
 
@@ -127,7 +127,12 @@ export const honorarioItemSchema = z.object({
     diasMora: z.number(),
     interesAcumulado: z.number().nullable(),
     totalConInteres: z.number().nullable(),
+    saldoCapitalPesos: z.number().nullable().optional(),
+    interesDevengadoPesos: z.number().nullable().optional(),
+    saldoPesos: z.number().nullable().optional(),
+    saldoJus: z.number().nullable().optional(),
   }),
+  tienePagosImputados: z.boolean().optional(),
 });
 
 export const honorarioResponseSchema = z.object({

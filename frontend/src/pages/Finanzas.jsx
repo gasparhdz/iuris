@@ -540,6 +540,15 @@ export default function Finanzas() {
   }, [planesQuery.data]);
 
   const getHonorarioSaldoPendiente = useCallback((item, computed) => {
+    // Saldo del motor de CC expuesto por el backend (incluye intereses y JUS AL_COBRO).
+    const backendSaldo = item?.calc?.saldoPesos ?? computed?.saldoPesos;
+    if (backendSaldo != null && Number.isFinite(Number(backendSaldo))) {
+      return {
+        value: Math.max(0, Number(backendSaldo)),
+        currency: "ARS",
+      };
+    }
+
     const planSaldo = planesByHonorario.get(Number(item.id));
     if (planSaldo) {
       return {
@@ -548,7 +557,7 @@ export default function Finanzas() {
       };
     }
 
-    // Honorario SIN plan: saldo = bruto actualizado menos lo cobrado directo (montoCobrado).
+    // Fallback legacy si el backend aún no envió saldoCalculado.
     const bruto = isHonorarioPendiente(item) ? Math.max(0, Number(computed?.updatedVal ?? 0)) : 0;
     const cobrado = Number(item.montoCobrado ?? 0);
     return {

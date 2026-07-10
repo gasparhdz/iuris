@@ -110,5 +110,41 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
     return reply.status(400).send({ error: { code: "INVALID_INPUT", message: "Un tercero solo puede ser obligado si hay expediente" } });
   }
 
+  if (error.message === "HONORARIO_DEUDOR_INMUTABLE") {
+    return reply.status(409).send({
+      error: {
+        code: "HONORARIO_DEUDOR_INMUTABLE",
+        message: "No se puede cambiar el deudor/expediente: el honorario ya tiene pagos imputados",
+      },
+    });
+  }
+
+  if (error.message === "PLAN_DEUDORES_DISTINTOS") {
+    return reply.status(409).send({
+      error: {
+        code: "PLAN_DEUDORES_DISTINTOS",
+        message: "No se pueden mezclar honorarios de distintos deudores en el mismo cobro o plan",
+      },
+    });
+  }
+
+  if (error.message === "VALOR_JUS_NOT_FOUND") {
+    return reply.status(409).send({
+      error: {
+        code: "VALOR_JUS_NOT_FOUND",
+        message: "No hay valor JUS cargado — cargalo en Valores JUS antes de registrar honorarios en JUS",
+      },
+    });
+  }
+
+  if (error.message === "CLIENTE_CASO_MISMATCH") {
+    return reply.status(400).send({
+      error: {
+        code: "INVALID_INPUT",
+        message: "El cliente no coincide con el del expediente indicado",
+      },
+    });
+  }
+
   throw error;
 }
