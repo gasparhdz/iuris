@@ -198,6 +198,60 @@ export class PlanesQueries {
       .orderBy(planCuotas.numero);
   }
 
+  /** Batch de findCuotasByPlan para evitar N+1 en cuenta corriente. */
+  static async findCuotasByPlanIds(planIds: number[], estudioId: number, tx: DbExecutor = db) {
+    if (planIds.length === 0) return [];
+    return await tx
+      .select({
+        id: planCuotas.id,
+        planId: planCuotas.planId,
+        numero: planCuotas.numero,
+        vencimiento: planCuotas.vencimiento,
+        montoPesos: planCuotas.montoPesos,
+        montoJus: planCuotas.montoJus,
+        valorJusRef: planesPago.valorJusRef,
+        estadoId: planCuotas.estadoId,
+        estadoCodigo: sql<string | null>`(select ${parametros.codigo} from ${parametros} where ${parametros.id} = ${planCuotas.estadoId})`,
+        activo: planCuotas.activo,
+        createdBy: planCuotas.createdBy,
+        createdAt: planCuotas.createdAt,
+        updatedAt: planCuotas.updatedAt,
+        updatedBy: planCuotas.updatedBy,
+        deletedAt: planCuotas.deletedAt,
+        deletedBy: planCuotas.deletedBy,
+        politicaJusId: planesPago.politicaJusId,
+        monedaId: planesPago.monedaId,
+        monedaCodigo: sql<string | null>`(select ${parametros.codigo} from ${parametros} where ${parametros.id} = ${planesPago.monedaId})`,
+        politicaCodigo: sql<string | null>`(select ${parametros.codigo} from ${parametros} where ${parametros.id} = ${planesPago.politicaJusId})`,
+        montoCobrado: sql`coalesce(sum(${ingresoAplicaciones.montoCapital}), 0)`.mapWith(Number),
+      })
+      .from(planCuotas)
+      .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+      .leftJoin(ingresoAplicaciones, and(eq(ingresoAplicaciones.cuotaId, planCuotas.id), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)))
+      .where(and(inArray(planCuotas.planId, planIds), eq(planesPago.estudioId, estudioId), isNull(planesPago.deletedAt), isNull(planCuotas.deletedAt)))
+      .groupBy(
+        planCuotas.id,
+        planCuotas.planId,
+        planCuotas.numero,
+        planCuotas.vencimiento,
+        planCuotas.montoPesos,
+        planCuotas.montoJus,
+        planesPago.valorJusRef,
+        planCuotas.estadoId,
+        planCuotas.activo,
+        planCuotas.createdBy,
+        planCuotas.createdAt,
+        planCuotas.updatedAt,
+        planCuotas.updatedBy,
+        planCuotas.deletedAt,
+        planCuotas.deletedBy,
+        planesPago.politicaJusId,
+        planesPago.monedaId,
+        planesPago.regimenMora
+      )
+      .orderBy(planCuotas.planId, planCuotas.numero);
+  }
+
   static async findCuotaById(id: number, estudioId: number, tx: DbExecutor = db) {
     const [row] = await tx
       .select({
@@ -518,6 +572,25 @@ export class PlanesQueries {
       .orderBy(asc(ingresos.fechaIngreso), asc(ingresos.id));
   }
 
+  /** Batch de aplicaciones directas a honorarios (sin plan). */
+  static async findAplicacionesByHonorarioIds(honorarioIds: number[], tx: DbExecutor = db) {
+    if (honorarioIds.length === 0) return [];
+    return await tx
+      .select({
+        honorarioId: ingresoAplicaciones.honorarioId,
+        id: ingresoAplicaciones.id,
+        monto: ingresoAplicaciones.monto,
+        montoCapital: ingresoAplicaciones.montoCapital,
+        montoInteres: ingresoAplicaciones.montoInteres,
+        fechaIngreso: ingresos.fechaIngreso,
+        valorJusAlCobro: ingresoAplicaciones.valorJusAlCobro,
+      })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
+      .where(and(inArray(ingresoAplicaciones.honorarioId, honorarioIds), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt), isNull(ingresos.deletedAt)))
+      .orderBy(asc(ingresoAplicaciones.honorarioId), asc(ingresos.fechaIngreso), asc(ingresos.id));
+  }
+
   static async sumAplicacionesByHonorario(honorarioId: number, tx: DbExecutor = db) {
     const [row] = await tx
       .select({ total: sql`coalesce(sum(${ingresoAplicaciones.montoCapital}), 0)`.mapWith(Number) })
@@ -687,6 +760,28 @@ export class PlanesQueries {
       .innerJoin(planCuotas, eq(ingresoAplicaciones.cuotaId, planCuotas.id))
       .where(and(eq(planCuotas.planId, planId), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt), isNull(ingresos.deletedAt), isNull(planCuotas.deletedAt)))
       .orderBy(asc(ingresoAplicaciones.cuotaId), asc(ingresos.fechaIngreso), asc(ingresoAplicaciones.id));
+  }
+
+  /** Batch de aplicaciones por varios planes (cuenta corriente). */
+  static async findAplicacionesByPlanIds(planIds: number[], tx: DbExecutor = db) {
+    if (planIds.length === 0) return [];
+    return await tx
+      .select({
+        planId: planCuotas.planId,
+        cuotaId: ingresoAplicaciones.cuotaId,
+        id: ingresoAplicaciones.id,
+        ingresoId: ingresoAplicaciones.ingresoId,
+        monto: ingresoAplicaciones.monto,
+        montoCapital: ingresoAplicaciones.montoCapital,
+        montoInteres: ingresoAplicaciones.montoInteres,
+        fechaIngreso: ingresos.fechaIngreso,
+        valorJusAlCobro: ingresoAplicaciones.valorJusAlCobro,
+      })
+      .from(ingresoAplicaciones)
+      .innerJoin(ingresos, eq(ingresoAplicaciones.ingresoId, ingresos.id))
+      .innerJoin(planCuotas, eq(ingresoAplicaciones.cuotaId, planCuotas.id))
+      .where(and(inArray(planCuotas.planId, planIds), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt), isNull(ingresos.deletedAt), isNull(planCuotas.deletedAt)))
+      .orderBy(asc(planCuotas.planId), asc(ingresoAplicaciones.cuotaId), asc(ingresos.fechaIngreso), asc(ingresoAplicaciones.id));
   }
 
   static async findCuotasPendientesByPlan(planId: number, estudioId: number) {

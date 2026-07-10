@@ -25,6 +25,7 @@ import {
   type DeudorResuelto,
 } from "./honorario-deudor.js";
 import type { CuentaCorrienteResumenQueryInput } from "../schemas/clientes.schema.js";
+import { fetchAllRows } from "../utils/fetch-all-rows.js";
 
 type CCHonorarioConMeta = CCHonorario & {
   clienteId: number | null;
@@ -129,9 +130,9 @@ export class CuentaCorrienteService {
       }
     }
 
-    const { data: clientes } = await ClientesQueries.findAll(estudioId, 10000, 0, {});
+    const clientes = await fetchAllRows((p) => ClientesQueries.findAll(estudioId, p.limit, p.offset, {}));
     const clientesById = new Map(clientes.map((c) => [c.id, c]));
-    const { data: tercerosList } = await TercerosQueries.findAll(estudioId, 10000, 0);
+    const tercerosList = await fetchAllRows((p) => TercerosQueries.findAll(estudioId, p.limit, p.offset));
     const tercerosById = new Map(tercerosList.map((t) => [t.id, t]));
 
     const formatPersona = (p: {
@@ -403,10 +404,10 @@ export class CuentaCorrienteService {
 
   private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {
     const fechaCorte = new Date();
-    const [{ data: honorariosRows }, { data: gastos }, { data: ingresosRows }, valorJusActual, planes] = await Promise.all([
-      HonorariosQueries.findHonorarios(estudioId, filters, { limit: 10000, offset: 0 }),
-      GastosQueries.findGastos(estudioId, filters, { limit: 10000, offset: 0 }),
-      IngresosQueries.findIngresos(estudioId, filters, { limit: 10000, offset: 0 }),
+    const [honorariosRows, gastos, ingresosRows, valorJusActual, planes] = await Promise.all([
+      fetchAllRows((p) => HonorariosQueries.findHonorarios(estudioId, filters, p)),
+      fetchAllRows((p) => GastosQueries.findGastos(estudioId, filters, p)),
+      fetchAllRows((p) => IngresosQueries.findIngresos(estudioId, filters, p)),
       ValorJusService.getValorJusSnapshot(fechaCorte, estudioId),
       PlanesQueries.findPlanes(estudioId, filters),
     ]);
@@ -419,23 +420,46 @@ export class CuentaCorrienteService {
     };
 
     const planByHonorario = new Map(planes.map((plan) => [plan.honorarioId, plan]));
+    const planIds = planes.map((plan) => plan.id);
+    const honorarioIdsSinPlan = honorariosRows
+      .filter((h) => !planByHonorario.has(h.id))
+      .map((h) => h.id);
+
+    const [allCuotas, allAppsPlanes, allAppsDirectas] = await Promise.all([
+      PlanesQueries.findCuotasByPlanIds(planIds, estudioId),
+      PlanesQueries.findAplicacionesByPlanIds(planIds),
+      PlanesQueries.findAplicacionesByHonorarioIds(honorarioIdsSinPlan),
+    ]);
+
+    const cuotasByPlanId = new Map<number, typeof allCuotas>();
+    for (const cuota of allCuotas) {
+      const list = cuotasByPlanId.get(cuota.planId) ?? [];
+      list.push(cuota);
+      cuotasByPlanId.set(cuota.planId, list);
+    }
+
+    const appsByCuotaId = new Map<number, CCAplicacion[]>();
+    for (const app of allAppsPlanes) {
+      if (app.cuotaId === null) continue;
+      const list = appsByCuotaId.get(app.cuotaId) ?? [];
+      list.push(toCCAplicacion(app));
+      appsByCuotaId.set(app.cuotaId, list);
+    }
+
+    const appsByHonorarioId = new Map<number, CCAplicacion[]>();
+    for (const app of allAppsDirectas) {
+      if (app.honorarioId === null) continue;
+      const list = appsByHonorarioId.get(app.honorarioId) ?? [];
+      list.push(toCCAplicacion(app));
+      appsByHonorarioId.set(app.honorarioId, list);
+    }
 
     const ccHonorarios = await Promise.all(honorariosRows.map(async (honorario): Promise<CCHonorarioConMeta> => {
       const plan = planByHonorario.get(honorario.id) ?? null;
 
       let ccPlan: CCHonorario["plan"] = null;
       if (plan) {
-        const [cuotas, aplicacionesPlan] = await Promise.all([
-          PlanesQueries.findCuotasByPlan(plan.id, estudioId),
-          PlanesQueries.findAplicacionesByPlanCuotas(plan.id),
-        ]);
-        const aplicacionesByCuota = new Map<number, CCAplicacion[]>();
-        for (const app of aplicacionesPlan) {
-          if (app.cuotaId === null) continue;
-          const list = aplicacionesByCuota.get(app.cuotaId) ?? [];
-          list.push(toCCAplicacion(app));
-          aplicacionesByCuota.set(app.cuotaId, list);
-        }
+        const cuotas = cuotasByPlanId.get(plan.id) ?? [];
         ccPlan = {
           tasaInteresMensual: plan.tasaInteresMensual,
           regimenMora: plan.regimenMora,
@@ -448,14 +472,14 @@ export class CuentaCorrienteService {
             montoJus: cuota.montoJus,
             montoPesos: cuota.montoPesos,
             valorJusRef: cuota.valorJusRef,
-            aplicaciones: aplicacionesByCuota.get(cuota.id) ?? [],
+            aplicaciones: appsByCuotaId.get(cuota.id) ?? [],
           })),
         };
       }
 
       const aplicacionesDirectas = ccPlan
         ? []
-        : (await PlanesQueries.findAplicacionesByHonorarioActivas(honorario.id)).map(toCCAplicacion);
+        : (appsByHonorarioId.get(honorario.id) ?? []);
 
       return {
         id: honorario.id,
@@ -476,18 +500,21 @@ export class CuentaCorrienteService {
       };
     }));
 
+    const gastosMapped: CCGastoConMeta[] = await Promise.all(gastos.map(async (gasto) => ({
+      id: gasto.id,
+      clienteId: gasto.clienteId,
+      descripcion: gasto.descripcion ?? "Gasto",
+      fecha: gasto.fechaGasto,
+      monto: gasto.monto,
+      monedaCodigo: await getParametroCodigo(gasto.monedaId),
+      cotizacionArs: gasto.cotizacionArs,
+    })));
+
     return {
       fechaCorte,
       valorJusActual: String(valorJusActual ?? 0),
       honorarios: ccHonorarios,
-      gastos: gastos.map((gasto): CCGastoConMeta => ({
-        id: gasto.id,
-        clienteId: gasto.clienteId,
-        descripcion: gasto.descripcion ?? "Gasto",
-        fecha: gasto.fechaGasto,
-        monto: gasto.monto,
-        cotizacionArs: gasto.cotizacionArs,
-      })),
+      gastos: gastosMapped,
       ingresos: ingresosRows.map((ingreso): CCIngresoConMeta => ({
         id: ingreso.id,
         clienteId: ingreso.clienteId,

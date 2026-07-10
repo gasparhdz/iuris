@@ -1,5 +1,9 @@
 export { unwrapPaged } from "../api/pagination";
 
+/** Zona horaria de negocio (Argentina continental, sin DST). */
+export const APP_TIMEZONE = "America/Argentina/Cordoba";
+const ART_OFFSET_ISO = "T03:00:00.000Z";
+
 // Evita el "-$0,00": valores que redondean a cero (incluido -0) se normalizan a 0
 // para que Intl no les agregue el signo menos.
 function normalizeMoney(value) {
@@ -17,6 +21,21 @@ export function formatMoneyAr(value) {
   }).format(normalizeMoney(value));
 }
 
+/** YYYY-MM-DD del calendario en America/Argentina/Cordoba. */
+export function toArgentinaDateString(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: APP_TIMEZONE }).format(date);
+}
+
+/** Inicio del día calendario en Cordoba (00:00 ART = 03:00 UTC). */
+export function startOfDayArgentina(date = new Date()) {
+  return new Date(`${toArgentinaDateString(date)}${ART_OFFSET_ISO}`);
+}
+
+/** Fin del día calendario en Cordoba (23:59:59.999 ART). */
+export function endOfDayArgentina(date = new Date()) {
+  return new Date(startOfDayArgentina(date).getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
 export function formatDateShort(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -25,6 +44,7 @@ export function formatDateShort(value) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: APP_TIMEZONE,
   }).format(date);
 }
 
@@ -197,6 +217,9 @@ export function mapCuentaCorrienteApiRows(rows = []) {
     fecha: row.fecha,
     tipo: CC_TIPO_LABEL[row.tipo] ?? row.tipo,
     descripcion: row.descripcion,
+    moneda: row.moneda ?? "ARS",
+    cantidadJus: row.cantidadJus != null ? Number(row.cantidadJus) : null,
+    valorJusAplicado: row.valorJusAplicado != null ? Number(row.valorJusAplicado) : null,
     debe: Number(row.debe ?? 0),
     haber: Number(row.haber ?? 0),
     saldo: Number(row.saldo ?? 0),

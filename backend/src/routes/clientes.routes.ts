@@ -53,7 +53,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.findDetalle);
 
   server.get("/:id/cuenta-corriente", {
-    ...can("ver"),
+    preHandler: [fastify.authenticate, fastify.authorize("CLIENTES", "ver"), fastify.authorize("HONORARIOS", "ver")],
     schema: {
       tags: ["Clientes"],
       summary: "Cuenta corriente del cliente (libro mayor calculado en backend)",
@@ -64,7 +64,7 @@ export const clientesRoutes: FastifyPluginAsync = async (fastify) => {
   }, ClientesController.findCuentaCorriente);
 
   server.get("/cuentas-corrientes", {
-    ...can("ver"),
+    preHandler: [fastify.authenticate, fastify.authorize("CLIENTES", "ver"), fastify.authorize("HONORARIOS", "ver")],
     schema: {
       tags: ["Clientes"],
       summary: "Resumen de cuenta corriente por cliente (todo el estudio)",

@@ -62,6 +62,8 @@ export type CCGasto = {
   descripcion: string;
   fecha: Date;
   monto: string;
+  /** Código de moneda (ARS / JUS / USD…). El motor decide por este campo, no por presencia de cotización. */
+  monedaCodigo?: string | null;
   cotizacionArs?: string | null;
 };
 
@@ -257,10 +259,33 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
   }
 
   for (const gasto of input.gastos) {
+    const codigo = String(gasto.monedaCodigo ?? "ARS").toUpperCase();
+    const isJus = codigo === "JUS";
+    const isArs = codigo === "ARS" || codigo === "";
     const cotizacion = gasto.cotizacionArs != null ? Decimal.of(gasto.cotizacionArs, 4) : null;
-    const monto = cotizacion
-      ? pesos(gasto.monto).mulByRate(cotizacion, 2)
-      : pesos(gasto.monto);
+
+    let monto: Decimal;
+    let cantidadJus: number | null = null;
+    let valorJusAplicado: number | null = null;
+    let moneda: "ARS" | "JUS" = "ARS";
+
+    if (isJus) {
+      const rate = cotizacion ?? valorJusActual;
+      cantidadJus = Number(gasto.monto);
+      valorJusAplicado = rate.toNumber();
+      monto = jus(gasto.monto).mulByRate(rate, 2);
+      moneda = "JUS";
+    } else if (isArs) {
+      // ARS: ignorar cotización aunque venga cargada (defensa en profundidad).
+      monto = pesos(gasto.monto);
+    } else {
+      // USD u otras: convertir con cotizacionArs (validada en el alta del gasto).
+      monto = cotizacion
+        ? pesos(gasto.monto).mulByRate(cotizacion, 2)
+        : pesos(gasto.monto);
+      valorJusAplicado = cotizacion ? cotizacion.toNumber() : null;
+    }
+
     totalCapitalDebe = totalCapitalDebe.add(monto);
     totalGastosDebe = totalGastosDebe.add(monto);
     drafts.push({
@@ -268,9 +293,9 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
       refId: gasto.id,
       fecha: gasto.fecha,
       descripcion: gasto.descripcion,
-      moneda: "ARS",
-      cantidadJus: null,
-      valorJusAplicado: cotizacion ? cotizacion.toNumber() : null,
+      moneda,
+      cantidadJus,
+      valorJusAplicado,
       esEstimado: false,
       debe: monto.toNumber(),
       haber: 0,

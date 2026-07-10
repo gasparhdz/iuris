@@ -25,6 +25,8 @@ export interface Pagination {
 export class GastosQueries {
   static async findGastos(estudioId: number, filters: GastosFilters, pagination: Pagination) {
     const { orderBy = "fecha", order = "desc" } = filters;
+    const conceptoParam = alias(parametros, "gasto_concepto_sort");
+    const estadoParam = alias(parametros, "gasto_estado_sort");
     const conditions = [
       eq(gastos.estudioId, estudioId),
       eq(gastos.activo, true),
@@ -36,13 +38,19 @@ export class GastosQueries {
     if (filters.from) conditions.push(gte(gastos.fechaGasto, filters.from));
     if (filters.to) conditions.push(lte(gastos.fechaGasto, filters.to));
     if (filters.search?.trim()) {
-      conditions.push(ilike(gastos.descripcion, `%${filters.search.trim()}%`));
+      const q = `%${filters.search.trim()}%`;
+      conditions.push(or(
+        ilike(gastos.descripcion, q),
+        ilike(clientes.nombre, q),
+        ilike(clientes.apellido, q),
+        ilike(clientes.razonSocial, q),
+        ilike(casos.caratula, q),
+        ilike(conceptoParam.nombre, q),
+      )!);
     }
 
     const whereCondition = and(...conditions);
 
-    const conceptoParam = alias(parametros, "gasto_concepto_sort");
-    const estadoParam = alias(parametros, "gasto_estado_sort");
     const sortDir = order === "desc" ? desc : asc;
     const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
     const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
@@ -68,9 +76,7 @@ export class GastosQueries {
     const data = await db
       .select(getTableColumns(gastos))
       .from(gastos)
-      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(clientes, eq(gastos.clienteId, clientes.id))
-      // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(casos, eq(gastos.casoId, casos.id))
       .leftJoin(conceptoParam, eq(gastos.conceptoId, conceptoParam.id))
       .leftJoin(estadoParam, eq(gastos.estadoId, estadoParam.id))
@@ -82,6 +88,9 @@ export class GastosQueries {
     const [{ count }] = await db
       .select({ count: sql`count(*)`.mapWith(Number) })
       .from(gastos)
+      .leftJoin(clientes, eq(gastos.clienteId, clientes.id))
+      .leftJoin(casos, eq(gastos.casoId, casos.id))
+      .leftJoin(conceptoParam, eq(gastos.conceptoId, conceptoParam.id))
       .where(whereCondition);
 
     return { data, count };

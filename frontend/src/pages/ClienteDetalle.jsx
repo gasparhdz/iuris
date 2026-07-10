@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
-import { finanzasNuevoUrl, formatMoneyAr, isHonorarioPendiente, computeHonorarioAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
+import { finanzasNuevoUrl, formatMoneyAr, formatDateShort, isHonorarioPendiente, computeHonorarioAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import {
   Avatar,
@@ -97,7 +97,7 @@ function initials(text = "") {
 
 function formatDate(value) {
   if (!value) return "Sin fecha";
-  return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium" }).format(new Date(value));
+  return formatDateShort(value);
 }
 
 function formatMoney(value) {
@@ -134,6 +134,7 @@ export default function ClienteDetalle() {
   const ingresosPerm = usePermisos("INGRESOS");
   const { canEditar: canEditarCliente } = usePermisos("CLIENTES");
   const canCrearFinanzas = honorariosPerm.canCrear || gastosPerm.canCrear || ingresosPerm.canCrear;
+  const canVerCuentaCorriente = honorariosPerm.canView;
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab = tabParam && TAB_ITEMS.some((t) => t.value === tabParam) ? tabParam : "expedientes";
@@ -149,7 +150,13 @@ export default function ClienteDetalle() {
   const [contactosOpen, setContactosOpen] = useState(true);
   const [nota, setNota] = useState("");
   const [deleteEventoTarget, setDeleteEventoTarget] = useState(null);
-  const [finanzasSubTab, setFinanzasSubTab] = useState("cc");
+  const [finanzasSubTab, setFinanzasSubTab] = useState(canVerCuentaCorriente ? "cc" : "honorarios");
+
+  useEffect(() => {
+    if (!canVerCuentaCorriente && finanzasSubTab === "cc") {
+      setFinanzasSubTab("honorarios");
+    }
+  }, [canVerCuentaCorriente, finanzasSubTab]);
 
   const detalleQuery = useQuery({
     queryKey: ["clientes", id, "detalle"],
@@ -223,7 +230,7 @@ export default function ClienteDetalle() {
       const { data } = await api.get(`/clientes/${id}/cuenta-corriente`);
       return data?.data ?? data;
     },
-    enabled: Boolean(id),
+    enabled: Boolean(id) && canVerCuentaCorriente,
   });
   const ccTotales = cuentaCorrienteQuery.data?.totales ?? null;
 
@@ -559,6 +566,7 @@ export default function ClienteDetalle() {
               Registrar movimiento
             </Button>
           )}
+          {canVerCuentaCorriente && (
           <Box>
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -599,6 +607,7 @@ export default function ClienteDetalle() {
               </Grid>
             </Grid>
           </Box>
+          )}
 
           <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "16px", overflow: "hidden" }}>
             <Tabs
@@ -618,7 +627,7 @@ export default function ClienteDetalle() {
                 }
               }}
             >
-              <Tab value="cc" label="Cuenta Corriente" />
+              {canVerCuentaCorriente && <Tab value="cc" label="Cuenta Corriente" />}
               <Tab value="honorarios" label="Honorarios" />
               <Tab value="gastos" label="Gastos" />
               <Tab value="ingresos" label="Ingresos" />
@@ -626,7 +635,24 @@ export default function ClienteDetalle() {
             </Tabs>
             
             <Box sx={{ p: 2.5 }}>
-              {finanzasSubTab === "cc" && (
+              {finanzasSubTab === "cc" && canVerCuentaCorriente && (
+                cuentaCorrienteQuery.isError ? (
+                  <Stack spacing={1.5} alignItems="flex-start">
+                    <Typography variant="body2" color="error" sx={{ fontWeight: 800 }}>
+                      No se pudo cargar la cuenta corriente.
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => cuentaCorrienteQuery.refetch()}
+                      sx={{ fontWeight: 900, borderRadius: "10px" }}
+                    >
+                      Reintentar
+                    </Button>
+                  </Stack>
+                ) : cuentaCorrienteQuery.isLoading ? (
+                  <CircularProgress size={28} />
+                ) : (
                 <CuentaCorrienteLedger
                   subtitle={nombre}
                   rows={cuentaCorrienteRows}
@@ -634,6 +660,7 @@ export default function ClienteDetalle() {
                   formatMoney={formatMoney}
                   onPrint={() => window.print()}
                 />
+                )
               )}
               
               {finanzasSubTab === "honorarios" && (
@@ -993,19 +1020,29 @@ function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrin
         <Table size="small">
           <TableHead>
             <TableRow>
-              {["Fecha", "Tipo", "Descripcion", "Debe", "Haber", "Saldo Acumulado"].map((col) => (
+              {["Fecha", "Tipo", "Descripcion", "JUS", "Debe", "Haber", "Saldo Acumulado"].map((col) => (
                 <TableCell key={col} sx={{ fontWeight: 900 }}>{col}</TableCell>
               ))}
             </TableRow>
           </TableHead>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={6} sx={{ color: "text.secondary" }}>No hay movimientos registrados.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} sx={{ color: "text.secondary" }}>No hay movimientos registrados.</TableCell></TableRow>
             ) : rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDate(row.fecha)}</TableCell>
                 <TableCell><Chip size="small" label={row.tipo} sx={{ fontWeight: 900 }} /></TableCell>
-                <TableCell sx={{ fontWeight: 800 }}>{row.descripcion}</TableCell>
+                <TableCell sx={{ fontWeight: 800 }}>
+                  {row.descripcion}
+                  {row.cantidadJus != null && row.valorJusAplicado != null && (
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ fontWeight: 700 }}>
+                      {row.cantidadJus} JUS × {formatMoney(row.valorJusAplicado)}
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  {row.cantidadJus != null ? row.cantidadJus : "—"}
+                </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>
                   {row.debe > 0 ? <MoneyWithNote value={row.debe} note={row.note} formatMoney={formatMoney} /> : "-"}
                 </TableCell>
@@ -1019,6 +1056,7 @@ function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrin
               <TableRow sx={{ bgcolor: alpha(theme.palette.text.primary, 0.03), borderTop: "2px solid", borderColor: "divider" }}>
                 <TableCell />
                 <TableCell><Chip size="small" label="Saldo" sx={{ fontWeight: 900 }} /></TableCell>
+                <TableCell />
                 <TableCell />
                 <TableCell />
                 <TableCell />

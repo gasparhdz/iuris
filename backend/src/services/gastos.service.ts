@@ -1,10 +1,54 @@
 import { CasosQueries } from "../db/queries/casos.queries.js";
 import { ClientesQueries } from "../db/queries/clientes.queries.js";
 import { GastosQueries } from "../db/queries/gastos.queries.js";
+import { PlanesQueries } from "../db/queries/planes.queries.js";
+import { CatalogosQueries } from "../db/queries/catalogos.queries.js";
 import { serializeDates } from "../utils/serialize.js";
 import type { CreateGastoInput, GastoQueryInput, UpdateGastoInput } from "../schemas/gastos.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 import { assertMonedaSoportada } from "./moneda.validator.js";
+import { ValorJusService } from "./valorjus.service.js";
+
+/** Campos financieros: no editables si el gasto tiene reintegros aplicados. */
+export const GASTO_CAMPOS_FINANCIEROS = [
+  "clienteId",
+  "casoId",
+  "monto",
+  "monedaId",
+  "cotizacionArs",
+  "fechaGasto",
+  "estadoId",
+] as const;
+
+export function gastoCambioFinanciero(data: UpdateGastoInput): boolean {
+  return GASTO_CAMPOS_FINANCIEROS.some((campo) => data[campo] !== undefined);
+}
+
+/**
+ * Reglas moneda/cotización de gastos:
+ * - ARS: no debe llevar cotizacionArs
+ * - distinta de ARS: requiere cotizacionArs, salvo JUS con valor resoluble en la fecha
+ */
+export function assertGastoMonedaCotizacion(input: {
+  monedaCodigo: string | null;
+  cotizacionArs: number | null | undefined;
+  valorJusResoluble: boolean;
+}): void {
+  const codigo = String(input.monedaCodigo ?? "ARS").toUpperCase();
+  const isArs = codigo === "ARS" || codigo === "";
+  const tieneCotizacion = input.cotizacionArs !== null && input.cotizacionArs !== undefined;
+
+  if (isArs) {
+    if (tieneCotizacion) throw new Error("GASTO_COTIZACION_INVALIDA");
+    return;
+  }
+
+  if (tieneCotizacion) return;
+
+  if (codigo === "JUS" && input.valorJusResoluble) return;
+
+  throw new Error("GASTO_COTIZACION_REQUERIDA");
+}
 
 export class GastosService {
   static async findAll(estudioId: number, query: GastoQueryInput) {
@@ -36,12 +80,17 @@ export class GastosService {
 
   static async create(estudioId: number, userId: number, data: CreateGastoInput) {
     await assertMonedaSoportada(data.monedaId);
-    await this.ensureRelatedEntities(estudioId, data.clienteId, data.casoId ?? undefined);
+    const { clienteId, casoId } = await this.resolveClienteCaso(
+      estudioId,
+      data.clienteId,
+      data.casoId ?? null,
+    );
+    await this.assertMonedaCotizacion(estudioId, data.monedaId ?? null, data.cotizacionArs, data.fechaGasto);
 
     const gasto = await GastosQueries.insertGasto({
       estudioId,
-      clienteId: data.clienteId,
-      casoId: data.casoId ?? null,
+      clienteId,
+      casoId,
       conceptoId: data.conceptoId ?? null,
       descripcion: data.descripcion ?? null,
       fechaGasto: new Date(data.fechaGasto),
@@ -67,12 +116,29 @@ export class GastosService {
     const current = await GastosQueries.findGastoById(id, estudioId);
     if (!current) throw new Error("GASTO_NOT_FOUND");
 
+    if (gastoCambioFinanciero(data)) {
+      const aplicaciones = await PlanesQueries.findAplicacionesByGastoActivas(id);
+      if (aplicaciones.length > 0) throw new Error("GASTO_IMPUTADO_NO_EDITABLE");
+    }
+
     if (data.monedaId !== undefined) await assertMonedaSoportada(data.monedaId);
-    await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
+
+    const nextClienteId = data.clienteId !== undefined ? data.clienteId : current.clienteId;
+    const nextCasoId = data.casoId !== undefined ? data.casoId : current.casoId;
+    const resolved = await this.resolveClienteCaso(estudioId, nextClienteId, nextCasoId);
+
+    const nextMonedaId = data.monedaId !== undefined ? data.monedaId : current.monedaId;
+    const nextCotizacion = data.cotizacionArs !== undefined
+      ? data.cotizacionArs
+      : (current.cotizacionArs !== null ? Number(current.cotizacionArs) : null);
+    const nextFecha = data.fechaGasto ?? current.fechaGasto.toISOString();
+    await this.assertMonedaCotizacion(estudioId, nextMonedaId, nextCotizacion, nextFecha);
 
     const updateData: Parameters<typeof GastosQueries.updateGasto>[2] = { updatedAt: new Date(), updatedBy: userId };
-    if (data.clienteId !== undefined) updateData.clienteId = data.clienteId;
-    if (data.casoId !== undefined) updateData.casoId = data.casoId;
+    if (data.clienteId !== undefined || data.casoId !== undefined) {
+      updateData.clienteId = resolved.clienteId;
+      updateData.casoId = resolved.casoId;
+    }
     if (data.conceptoId !== undefined) updateData.conceptoId = data.conceptoId;
     if (data.descripcion !== undefined) updateData.descripcion = data.descripcion;
     if (data.fechaGasto !== undefined) updateData.fechaGasto = new Date(data.fechaGasto);
@@ -99,6 +165,12 @@ export class GastosService {
   }
 
   static async delete(id: number, estudioId: number, userId: number) {
+    const current = await GastosQueries.findGastoById(id, estudioId);
+    if (!current) throw new Error("GASTO_NOT_FOUND");
+
+    const aplicaciones = await PlanesQueries.findAplicacionesByGastoActivas(id);
+    if (aplicaciones.length > 0) throw new Error("GASTO_IMPUTADO_NO_ELIMINABLE");
+
     const deleted = await GastosQueries.deleteGasto(id, estudioId, userId);
     if (!deleted) throw new Error("GASTO_NOT_FOUND");
     await AuditoriaService.log({
@@ -111,16 +183,45 @@ export class GastosService {
     });
   }
 
-  private static async ensureRelatedEntities(estudioId: number, clienteId?: number, casoId?: number) {
-    if (clienteId) {
-      const cliente = await ClientesQueries.findById(clienteId, estudioId);
-      if (!cliente) throw new Error("CLIENTE_NOT_FOUND");
+  private static async resolveClienteCaso(
+    estudioId: number,
+    clienteId: number | null,
+    casoId: number | null,
+  ): Promise<{ clienteId: number; casoId: number | null }> {
+    if (clienteId == null) throw new Error("CLIENTE_NOT_FOUND");
+
+    const cliente = await ClientesQueries.findById(clienteId, estudioId);
+    if (!cliente) throw new Error("CLIENTE_NOT_FOUND");
+
+    if (!casoId) return { clienteId, casoId: null };
+
+    const caso = await CasosQueries.findById(casoId, estudioId);
+    if (!caso) throw new Error("CASO_NOT_FOUND");
+    if (clienteId !== caso.clienteId) throw new Error("CLIENTE_CASO_MISMATCH");
+    return { clienteId: caso.clienteId, casoId };
+  }
+
+  private static async assertMonedaCotizacion(
+    estudioId: number,
+    monedaId: number | null,
+    cotizacionArs: number | null | undefined,
+    fechaGasto: string | Date,
+  ) {
+    let monedaCodigo: string | null = "ARS";
+    if (monedaId != null) {
+      const moneda = await CatalogosQueries.findActiveParametroByIdAndCategoria(monedaId, "MONEDA");
+      if (!moneda) throw new Error("MONEDA_NO_SOPORTADA");
+      monedaCodigo = moneda.codigo;
     }
 
-    if (casoId) {
-      const caso = await CasosQueries.findById(casoId, estudioId);
-      if (!caso) throw new Error("CASO_NOT_FOUND");
+    let valorJusResoluble = false;
+    if (String(monedaCodigo).toUpperCase() === "JUS" && (cotizacionArs === null || cotizacionArs === undefined)) {
+      const fecha = typeof fechaGasto === "string" ? new Date(fechaGasto) : fechaGasto;
+      const snapshot = await ValorJusService.getValorJusSnapshot(fecha, estudioId);
+      valorJusResoluble = snapshot !== null;
     }
+
+    assertGastoMonedaCotizacion({ monedaCodigo, cotizacionArs, valorJusResoluble });
   }
 }
 

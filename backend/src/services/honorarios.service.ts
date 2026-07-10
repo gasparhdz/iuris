@@ -15,6 +15,7 @@ import {
 import type { CreateHonorarioInput, HonorarioQueryInput, UpdateHonorarioInput } from "../schemas/honorarios.schema.js";
 import { AuditoriaService, calcDiff } from "./auditoria.service.js";
 import { assertMonedaSoportada } from "./moneda.validator.js";
+import { fetchAllRows } from "../utils/fetch-all-rows.js";
 
 type HonorarioRow = NonNullable<Awaited<ReturnType<typeof HonorariosQueries.findHonorarioById>>>;
 
@@ -25,21 +26,29 @@ export class HonorariosService {
     const offset = (page - 1) * limit;
     const needsSaldoSort = query.orderBy === "saldo" || query.orderBy === "interes";
 
-    const { data, count } = await HonorariosQueries.findHonorarios(
-      estudioId,
-      {
-        clienteId: query.clienteId,
-        casoId: query.casoId,
-        estadoId: query.estadoId,
-        search: query.search,
-        from: query.from ? new Date(query.from) : undefined,
-        to: query.to ? new Date(query.to) : undefined,
-        // Saldo/interés se ordenan en memoria con el motor de CC.
-        orderBy: needsSaldoSort ? "fecha" : query.orderBy,
-        order: query.order,
-      },
-      needsSaldoSort ? { limit: 10000, offset: 0 } : { limit, offset }
-    );
+    const filters = {
+      clienteId: query.clienteId,
+      casoId: query.casoId,
+      estadoId: query.estadoId,
+      search: query.search,
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
+      // Saldo/interés se ordenan en memoria con el motor de CC.
+      orderBy: needsSaldoSort ? "fecha" as const : query.orderBy,
+      order: query.order,
+    };
+
+    let data: Awaited<ReturnType<typeof HonorariosQueries.findHonorarios>>["data"];
+    let count: number;
+
+    if (needsSaldoSort) {
+      data = await fetchAllRows((p) => HonorariosQueries.findHonorarios(estudioId, filters, p));
+      count = data.length;
+    } else {
+      const pageResult = await HonorariosQueries.findHonorarios(estudioId, filters, { limit, offset });
+      data = pageResult.data;
+      count = pageResult.count;
+    }
 
     let items = await this.enrichHonorarios(estudioId, data);
 

@@ -73,6 +73,9 @@ import {
   movementAmountPesos,
   getItemCurrencyGeneral,
   mapCuentaCorrienteApiRows,
+  startOfDayArgentina,
+  endOfDayArgentina,
+  toArgentinaDateString,
 } from "./finanzasUtils";
 import { clienteLabel as clienteLabelFromTareas } from "./tareasUtils";
 
@@ -97,27 +100,33 @@ const DATE_PRESETS = [
 
 function getPresetRange(key) {
   const now = new Date();
-  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-  const today = startOfDay(now);
+  const todayStart = startOfDayArgentina(now);
+  const todayEnd = endOfDayArgentina(now);
+  const todayYmd = toArgentinaDateString(now);
+  const [y, m, d] = todayYmd.split("-").map(Number);
 
   switch (key) {
     case "hoy":
-      return { from: today, to: endOfDay(now) };
+      return { from: todayStart, to: todayEnd };
     case "semana": {
-      const day = today.getDay();
-      const monday = new Date(today);
-      monday.setDate(today.getDate() - ((day + 6) % 7));
-      return { from: monday, to: endOfDay(now) };
+      // Lunes de la semana calendario ART
+      const jsDay = new Date(`${todayYmd}T12:00:00.000Z`).getUTCDay();
+      const daysFromMonday = (jsDay + 6) % 7;
+      const monday = new Date(todayStart);
+      monday.setUTCDate(monday.getUTCDate() - daysFromMonday);
+      return { from: monday, to: todayEnd };
     }
     case "mes":
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: endOfDay(now) };
+      return {
+        from: new Date(`${y}-${String(m).padStart(2, "0")}-01T03:00:00.000Z`),
+        to: todayEnd,
+      };
     case "trimestre": {
-      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
-      return { from: startOfDay(threeMonthsAgo), to: endOfDay(now) };
+      const threeMonthsAgo = new Date(Date.UTC(y, m - 1 - 3, d, 3, 0, 0, 0));
+      return { from: startOfDayArgentina(threeMonthsAgo), to: todayEnd };
     }
     case "anio":
-      return { from: new Date(now.getFullYear(), 0, 1), to: endOfDay(now) };
+      return { from: new Date(`${y}-01-01T03:00:00.000Z`), to: todayEnd };
     default:
       return { from: null, to: null };
   }
@@ -286,8 +295,8 @@ export default function Finanzas() {
   const dateRange = useMemo(() => {
     if (datePreset === "custom") {
       return {
-        from: customFrom ? new Date(`${customFrom}T00:00:00`) : null,
-        to: customTo ? new Date(`${customTo}T23:59:59.999`) : null,
+        from: customFrom ? startOfDayArgentina(new Date(`${customFrom}T12:00:00.000Z`)) : null,
+        to: customTo ? endOfDayArgentina(new Date(`${customTo}T12:00:00.000Z`)) : null,
       };
     }
     return getPresetRange(datePreset);
@@ -357,6 +366,7 @@ export default function Finanzas() {
       const { data } = await api.get("/honorarios", { params: honorariosListParams });
       return unwrapPaged(data);
     },
+    enabled: tabKey === "honorarios",
     staleTime: 60_000,
     placeholderData: (previous) => previous,
   });
@@ -374,6 +384,7 @@ export default function Finanzas() {
       const { data } = await api.get("/gastos", { params: gastosListParams });
       return unwrapPaged(data);
     },
+    enabled: tabKey === "gastos",
     staleTime: 60_000,
     placeholderData: (previous) => previous,
   });
@@ -391,6 +402,7 @@ export default function Finanzas() {
       const { data } = await api.get("/ingresos", { params: ingresosListParams });
       return unwrapPaged(data);
     },
+    enabled: tabKey === "ingresos",
     staleTime: 60_000,
     placeholderData: (previous) => previous,
   });
@@ -398,6 +410,7 @@ export default function Finanzas() {
   const planesQuery = useQuery({
     queryKey: ["planes", "global"],
     queryFn: () => api.get("/planes").then((r) => r.data?.data ?? []),
+    enabled: tabKey === "planes" || tabKey === "honorarios",
     staleTime: 60_000,
   });
 
@@ -426,6 +439,7 @@ export default function Finanzas() {
       const { data } = await api.get("/valorjus/actual");
       return data?.data ?? data;
     },
+    enabled: tabKey === "honorarios" || tabKey === "gastos" || tabKey === "cuentas_corrientes",
     staleTime: 60_000,
   });
 
@@ -442,18 +456,21 @@ export default function Finanzas() {
       );
       return Object.fromEntries(entries);
     },
+    enabled: tabKey === "honorarios" || tabKey === "gastos" || tabKey === "ingresos",
     staleTime: 300_000,
   });
 
   const clientesQuery = useQuery({
     queryKey: ["clientes", "lookup", "finanzas"],
     queryFn: () => fetchAllPages("/clientes"),
+    enabled: tabKey === "honorarios" || tabKey === "gastos" || tabKey === "ingresos",
     staleTime: 300_000,
   });
 
   const expedientesQuery = useQuery({
     queryKey: ["expedientes", "lookup", "finanzas"],
     queryFn: () => fetchAllPages("/expedientes"),
+    enabled: tabKey === "honorarios" || tabKey === "gastos" || tabKey === "ingresos",
     staleTime: 300_000,
   });
 
@@ -464,6 +481,7 @@ export default function Finanzas() {
       const raw = data?.data ?? data;
       return Array.isArray(raw) ? raw : [];
     },
+    enabled: tabKey === "gastos",
     staleTime: 300_000,
   });
 
@@ -574,14 +592,14 @@ export default function Finanzas() {
       (acc, honorario) => {
         const computed = honorario.computed;
         const planData = planesByHonorario.get(Number(honorario.id));
-        acc.total += Number(computed?.updatedVal ?? 0);
+        acc.total += Math.round(Number(computed?.updatedVal ?? 0) * 100);
         if (planData) {
-          acc.cobrado += planData.cobrado;
-          acc.pendiente += planData.saldo;
+          acc.cobrado += Math.round(Number(planData.cobrado) * 100);
+          acc.pendiente += Math.round(Number(planData.saldo) * 100);
         } else {
-          acc.cobrado += Number(honorario.montoCobrado ?? 0);
+          acc.cobrado += Math.round(Number(honorario.montoCobrado ?? 0) * 100);
           const saldo = getHonorarioSaldoPendiente(honorario, computed);
-          acc.pendiente += Number(saldo.value ?? 0);
+          acc.pendiente += Math.round(Number(saldo.value ?? 0) * 100);
         }
         return acc;
       },
@@ -590,12 +608,12 @@ export default function Finanzas() {
 
     const gastosKpiCalc = gastosKpi.reduce(
       (acc, gasto) => {
-        const amount = movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas);
+        const amountCents = Math.round(movementAmountPesos(gasto, "gasto", valorJusActual, catalogMonedas) * 100);
         const estado = estadosGastoById.get(Number(gasto.estadoId));
         const isPagado = String(estado?.codigo ?? "").toUpperCase() === "PAGADO";
-        acc.total += amount;
-        if (isPagado) acc.pagado += amount;
-        else acc.pendiente += amount;
+        acc.total += amountCents;
+        if (isPagado) acc.pagado += amountCents;
+        else acc.pendiente += amountCents;
         return acc;
       },
       { total: 0, pagado: 0, pendiente: 0 },
@@ -603,15 +621,31 @@ export default function Finanzas() {
 
     const cuentasKpi = (ccKpiQuery.data ?? []).reduce(
       (acc, { totales }) => {
-        acc.cargos += Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0);
-        acc.cobrado += Number(totales?.ingresosPesos ?? 0);
-        acc.pendiente += Number(totales?.saldoPesos ?? 0);
+        acc.cargos += Math.round((Number(totales?.honorariosPesos ?? 0) + Number(totales?.gastosPesos ?? 0)) * 100);
+        acc.cobrado += Math.round(Number(totales?.ingresosPesos ?? 0) * 100);
+        acc.pendiente += Math.round(Number(totales?.saldoPesos ?? 0) * 100);
         return acc;
       },
       { cargos: 0, cobrado: 0, pendiente: 0 },
     );
 
-    return { honorarios: honorariosKpiCalc, gastos: gastosKpiCalc, cuentas: cuentasKpi };
+    return {
+      honorarios: {
+        total: honorariosKpiCalc.total / 100,
+        cobrado: honorariosKpiCalc.cobrado / 100,
+        pendiente: honorariosKpiCalc.pendiente / 100,
+      },
+      gastos: {
+        total: gastosKpiCalc.total / 100,
+        pagado: gastosKpiCalc.pagado / 100,
+        pendiente: gastosKpiCalc.pendiente / 100,
+      },
+      cuentas: {
+        cargos: cuentasKpi.cargos / 100,
+        cobrado: cuentasKpi.cobrado / 100,
+        pendiente: cuentasKpi.pendiente / 100,
+      },
+    };
   }, [
     processedHonorariosKpi,
     gastosKpi,
@@ -846,6 +880,8 @@ export default function Finanzas() {
           sx={{ flex: "1 1 240px", minWidth: 200 }}
         />
         <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1, ml: { md: "auto" } }}>
+          {tabKey !== "cuentas_corrientes" && (
+            <>
           <CalendarMonth sx={{ color: "text.secondary", fontSize: 20, mr: 0.5 }} />
         <Typography
           variant="caption"
@@ -894,6 +930,8 @@ export default function Finanzas() {
             />
           </>
         )}
+            </>
+          )}
         </Box>
       </Paper>
 
@@ -1241,16 +1279,33 @@ export default function Finanzas() {
                                   color="success"
                                   sx={{ p: { xs: 1.25, md: 0.75 } }}
                                   disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
-                                  onClick={() => navigate(
-                                    finanzasNuevoUrl({
-                                      tipo: "ingreso",
-                                      gastoId: item.id,
-                                      clienteId: item.clienteId,
-                                      casoId: item.casoId || "",
-                                      monto: item.monto,
-                                    }),
-                                    { state: { from: currentPath } },
-                                  )}
+                                  onClick={() => {
+                                    const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
+                                    const currency = getItemCurrencyGeneral(item, catalogMonedas);
+                                    const valorJus = Number(valorJusQuery.data?.valor ?? 0);
+                                    const cotizacion = Number(item.cotizacionArs ?? (currency === "JUS" ? valorJus : 0));
+                                    const cantidad = Number(item.monto ?? 0);
+                                    const montoArs = (currency !== "ARS" && cotizacion > 0)
+                                      ? Number((cantidad * cotizacion).toFixed(2))
+                                      : cantidad;
+                                    navigate(
+                                      finanzasNuevoUrl({
+                                        tipo: "ingreso",
+                                        gastoId: item.id,
+                                        clienteId: item.clienteId,
+                                        casoId: item.casoId || "",
+                                        monto: montoArs,
+                                      }),
+                                      {
+                                        state: {
+                                          from: currentPath,
+                                          reintegroConversion: (currency !== "ARS" && cotizacion > 0)
+                                            ? { cantidad, moneda: currency, cotizacion, montoArs }
+                                            : null,
+                                        },
+                                      },
+                                    );
+                                  }}
                                   aria-label={`Reintegrar gasto de ${clienteNombre}`}
                                 >
                                   <ReceiptLong fontSize="small" />
@@ -1320,7 +1375,33 @@ export default function Finanzas() {
                               <IconButton size="small" color="success" aria-label="Reintegrar gasto"
                                 disabled={["PAGADO", "ANULADO"].includes(estadoCodigo)}
                                 sx={{ p: { xs: 1.25, md: 0.75 } }}
-                                onClick={() => navigate(finanzasNuevoUrl({ tipo: "ingreso", gastoId: item.id, clienteId: item.clienteId, casoId: item.casoId || "", monto: item.monto }), { state: { from: currentPath } })}
+                                onClick={() => {
+                                  const catalogMonedas = catalogQuery.data?.MONEDA ?? [];
+                                  const currency = getItemCurrencyGeneral(item, catalogMonedas);
+                                  const valorJus = Number(valorJusQuery.data?.valor ?? 0);
+                                  const cotizacion = Number(item.cotizacionArs ?? (currency === "JUS" ? valorJus : 0));
+                                  const cantidad = Number(item.monto ?? 0);
+                                  const montoArs = (currency !== "ARS" && cotizacion > 0)
+                                    ? Number((cantidad * cotizacion).toFixed(2))
+                                    : cantidad;
+                                  navigate(
+                                    finanzasNuevoUrl({
+                                      tipo: "ingreso",
+                                      gastoId: item.id,
+                                      clienteId: item.clienteId,
+                                      casoId: item.casoId || "",
+                                      monto: montoArs,
+                                    }),
+                                    {
+                                      state: {
+                                        from: currentPath,
+                                        reintegroConversion: (currency !== "ARS" && cotizacion > 0)
+                                          ? { cantidad, moneda: currency, cotizacion, montoArs }
+                                          : null,
+                                      },
+                                    },
+                                  );
+                                }}
                               >
                                 <ReceiptLong fontSize="small" />
                               </IconButton>

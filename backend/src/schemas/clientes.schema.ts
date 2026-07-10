@@ -340,6 +340,7 @@ const cuentaCorrienteRowSchema = z.object({
   descripcion: z.string(),
   moneda: z.enum(["ARS", "JUS"]),
   cantidadJus: z.number().nullable(),
+  valorJusAplicado: z.number().nullable(),
   esEstimado: z.boolean(),
   debe: z.number(),
   haber: z.number(),

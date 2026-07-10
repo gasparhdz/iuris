@@ -67,6 +67,7 @@ import {
   estadoUiFromHonorario,
   findParamByCodigo,
   formatMoneyAr,
+  getItemCurrencyGeneral,
   honorarioEstadoChip,
   honorarioMontoBase,
   invalidateFinanzasQueries,
@@ -973,6 +974,7 @@ export default function FinanzasForm() {
   const isConvenioHonorarioJus = Number(selectedConvenioHonorario?.jus) > 0;
   const convenioInheritedPoliticaJusId = selectedConvenioHonorario?.politicaJusId;
   const politicaJusOptions = catalog.POLITICA_JUS ?? [];
+  const reintegroConversion = location.state?.reintegroConversion ?? null;
   const idPeriodicidadMensual = (catalog.PERIODICIDAD ?? []).find((p) => String(p.codigo).toUpperCase() === "MENSUAL")?.id;
   useEffect(() => {
     if (!isEdit) {
@@ -1049,15 +1051,28 @@ export default function FinanzasForm() {
     const conceptoReintegro = findParamByCodigo(catalog.CONCEPTO_INGRESO, ["REINTEGRO_DE_GASTO"]);
     const conceptoGasto = conceptoGastoById.get(Number(gasto.conceptoId));
     const descripcionGasto = gasto.descripcion || conceptoGasto?.nombre || `#${gasto.id}`;
+
+    const currency = getItemCurrencyGeneral(gasto, catalog.MONEDA ?? []);
+    const valorJus = Number(jusRef.current.ingreso || jusRef.current.gasto || 0);
+    const conversionState = location.state?.reintegroConversion;
+    const cotizacion = Number(
+      conversionState?.cotizacion
+      ?? gasto.cotizacionArs
+      ?? (currency === "JUS" ? valorJus : 0),
+    );
+    const cantidad = Number(conversionState?.cantidad ?? gasto.monto ?? 0);
+    const montoArs = conversionState?.montoArs
+      ?? ((currency !== "ARS" && cotizacion > 0) ? Number((cantidad * cotizacion).toFixed(2)) : cantidad);
+
     setForm((f) => ({
       ...f,
       selectedGastoIds: f.selectedGastoIds.includes(Number(gasto.id)) ? f.selectedGastoIds : [Number(gasto.id)],
       gastoVinculoId: String(gasto.id),
-      monto: queryMonto ?? f.monto,
+      monto: queryMonto || String(montoArs) || f.monto,
       conceptoIngresoId: conceptoReintegro?.id ? String(conceptoReintegro.id) : f.conceptoIngresoId,
       descripcion: f.descripcion || `Reintegro de gasto: ${descripcionGasto}`,
     }));
-  }, [catalog.CONCEPTO_INGRESO, conceptoGastoById, gastosPendientesIngreso, isEdit, queryGastoId, queryMonto, tipoMovimiento, setForm]);
+  }, [catalog.CONCEPTO_INGRESO, catalog.MONEDA, conceptoGastoById, gastosPendientesIngreso, isEdit, location.state?.reintegroConversion, queryGastoId, queryMonto, tipoMovimiento, setForm]);
 
   useEffect(() => {
     if (tipoMovimiento === "honorario" && isJus && isAlCobro) {
@@ -2432,6 +2447,15 @@ export default function FinanzasForm() {
 
         {tipoMovimiento === "ingreso" && (
           <Grid container spacing={2.5}>
+            {reintegroConversion && (
+              <Grid size={{ xs: 12 }}>
+                <Alert severity="info" sx={{ borderRadius: "12px", "& .MuiAlert-message": { fontWeight: 700 } }}>
+                  {reintegroConversion.moneda === "JUS"
+                    ? `${reintegroConversion.cantidad} JUS × ${formatMoneyAr(reintegroConversion.cotizacion)} = ${formatMoneyAr(reintegroConversion.montoArs)}`
+                    : `${reintegroConversion.cantidad} ${reintegroConversion.moneda} × ${formatMoneyAr(reintegroConversion.cotizacion)} = ${formatMoneyAr(reintegroConversion.montoArs)}`}
+                </Alert>
+              </Grid>
+            )}
             <Grid size={{ xs: 12, md: form.casoId ? 12 : 6 }}>
               <Controller
                 name="casoId"

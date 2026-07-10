@@ -60,6 +60,51 @@ function getAuthContext(request: FastifyRequest, reply: FastifyReply): { estudio
 function handleKnownError(error: unknown, reply: FastifyReply) {
   if (!(error instanceof Error)) throw error;
 
+  if (error.message === "GASTO_IMPUTADO_NO_ELIMINABLE") {
+    return reply.status(409).send({
+      error: {
+        code: "GASTO_IMPUTADO_NO_ELIMINABLE",
+        message: "No se puede eliminar: el gasto tiene reintegros aplicados — anulá el cobro primero",
+      },
+    });
+  }
+
+  if (error.message === "GASTO_IMPUTADO_NO_EDITABLE") {
+    return reply.status(409).send({
+      error: {
+        code: "GASTO_IMPUTADO_NO_EDITABLE",
+        message: "No se puede editar: el gasto tiene reintegros aplicados — anulá el cobro primero",
+      },
+    });
+  }
+
+  if (error.message === "CLIENTE_CASO_MISMATCH") {
+    return reply.status(400).send({
+      error: {
+        code: "INVALID_INPUT",
+        message: "El cliente no coincide con el del expediente indicado",
+      },
+    });
+  }
+
+  if (error.message === "GASTO_COTIZACION_REQUERIDA") {
+    return reply.status(400).send({
+      error: {
+        code: "GASTO_COTIZACION_REQUERIDA",
+        message: "Indicá la cotización ARS (o asegurate de tener valor JUS cargado para gastos en JUS)",
+      },
+    });
+  }
+
+  if (error.message === "GASTO_COTIZACION_INVALIDA") {
+    return reply.status(400).send({
+      error: {
+        code: "GASTO_COTIZACION_INVALIDA",
+        message: "Un gasto en ARS no debe llevar cotización",
+      },
+    });
+  }
+
   const errors: Record<string, string> = {
     GASTO_NOT_FOUND: "Gasto no encontrado",
     CLIENTE_NOT_FOUND: "Cliente no encontrado",
