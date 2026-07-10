@@ -11,7 +11,12 @@ import { AgendarMovimientoService } from "../services/agendar-movimiento.service
 import { env } from "../env.js";
 import { PreferenciasCobranzaQueries } from "../db/queries/preferencias-cobranza.queries.js";
 
-const NOVEDADES_LIMIT = 50;
+const NOVEDADES_DEFAULT_LIMIT = 50;
+
+const novedadesQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).default(NOVEDADES_DEFAULT_LIMIT),
+  offset: z.coerce.number().int().min(0).default(0),
+}).strict();
 
 const novedadesResponseSchema = z.object({
   data: z.object({
@@ -31,8 +36,8 @@ const novedadesResponseSchema = z.object({
 });
 
 const marcarLeidoBodySchema = z.object({
-  // Si se omite, marca como leídas TODAS las novedades SISFE no vistas del usuario.
-  movimientoIds: z.array(z.number().int().positive()).optional(),
+  // Solo marca los IDs materializados en la UI (no "todas las no vistas" al momento del request).
+  movimientoIds: z.array(z.number().int().positive()).min(1),
 });
 
 const agendarMovimientoBodySchema = z.discriminatedUnion("tipo", [
@@ -205,11 +210,13 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       tags: ["Notificaciones"],
       summary: "Listar novedades de expedientes (movimientos SISFE no leidos)",
       security: [{ bearerAuth: [] }],
+      querystring: novedadesQuerySchema,
       response: documentedResponses(200, novedadesResponseSchema),
     },
   }, async (request) => {
     const estudioId = request.authUser.estudioId;
     const usuarioId = request.authUser.id;
+    const { limit, offset } = request.query as z.infer<typeof novedadesQuerySchema>;
 
     // Matrícula SISFE del usuario: si la tenemos, descartamos las novedades que el propio
     // usuario presentó (la observación del movimiento incluye "Presentante: ... - <matrícula>").
@@ -256,7 +263,8 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
       )
       .where(noVistoCondition)
       .orderBy(asc(movimientosJudiciales.fecha))
-      .limit(NOVEDADES_LIMIT);
+      .limit(limit)
+      .offset(offset);
 
     const [{ total }] = await db
       .select({ total: sql<number>`cast(count(*) as int)` })
@@ -313,7 +321,7 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ data: result });
   });
 
-  // Marca novedades como leídas (idempotente). Sin body => marca todas.
+  // Marca novedades como leídas (idempotente). Solo los IDs enviados.
   server.post("/novedades/marcar-leido", {
     preHandler: [fastify.authenticate, fastify.authorize("CASOS", "ver")],
     schema: {
@@ -328,16 +336,6 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
     const usuarioId = request.authUser.id;
     const { movimientoIds } = request.body as z.infer<typeof marcarLeidoBodySchema>;
 
-    // Resolver qué movimientos marcar: los pedidos (validados por estudio) o todos los no vistos.
-    const filtros = [
-      eq(movimientosJudiciales.estudioId, estudioId),
-      eq(movimientosJudiciales.origenSisfe, true),
-      isNull(movimientosVistos.id),
-    ];
-    if (movimientoIds && movimientoIds.length > 0) {
-      filtros.push(inArray(movimientosJudiciales.id, movimientoIds));
-    }
-
     const objetivo = await db
       .select({ id: movimientosJudiciales.id })
       .from(movimientosJudiciales)
@@ -348,7 +346,12 @@ export const notificacionesRoutes: FastifyPluginAsync = async (fastify) => {
           eq(movimientosVistos.usuarioId, usuarioId),
         ),
       )
-      .where(and(...filtros));
+      .where(and(
+        eq(movimientosJudiciales.estudioId, estudioId),
+        eq(movimientosJudiciales.origenSisfe, true),
+        isNull(movimientosVistos.id),
+        inArray(movimientosJudiciales.id, movimientoIds),
+      ));
 
     if (objetivo.length === 0) {
       return { data: { marcados: 0 } };

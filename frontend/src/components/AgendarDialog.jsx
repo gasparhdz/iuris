@@ -96,7 +96,9 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
       const already = data?.data?.alreadyExisted;
       enqueueSnackbar(
         esEvento
-          ? "Evento creado y vinculado al expediente"
+          ? already
+            ? "Ya existía un evento para este movimiento"
+            : "Evento creado y vinculado al expediente"
           : already
             ? "Ya existía una tarea para este movimiento"
             : "Tarea creada y vinculada al expediente",
@@ -117,6 +119,7 @@ export default function AgendarDialog({ open, modo, novedad, onClose, onCreated 
   });
 
   const handleGuardar = () => {
+    if (createMutation.isPending) return;
     setError("");
     const tituloLimpio = titulo.trim();
     if (tituloLimpio.length < 3) {

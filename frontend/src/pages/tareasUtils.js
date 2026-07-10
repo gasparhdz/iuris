@@ -1,4 +1,10 @@
 import { alpha } from "@mui/material/styles";
+import {
+  APP_TIMEZONE,
+  argentinaDateStringOffset,
+  sameCalendarDayArgentina,
+  toArgentinaDateString,
+} from "../utils/timezone";
 
 export const EMPTY_TAREA_FORM = {
   titulo: "",
@@ -65,7 +71,7 @@ export function formatToLocalDatetime(isoString) {
 }
 
 export function sameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return sameCalendarDayArgentina(a, b);
 }
 
 /** Vencida si el instante de fechaLimite (ISO UTC de la API) ya pasó. */
@@ -76,26 +82,30 @@ export function isOverdue(task) {
 
 export function isToday(task) {
   if (task?.completada || !task?.fechaLimite) return false;
-  return sameDay(new Date(task.fechaLimite), new Date());
+  return sameCalendarDayArgentina(new Date(task.fechaLimite), new Date());
 }
 
 export function formatFriendlyDate(isoString, withTime = true) {
   if (!isoString) return "Sin fecha";
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return "Fecha inválida";
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-  const time = new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit" }).format(date);
-  if (withTime && sameDay(date, today)) return `Hoy, ${time}`;
-  if (sameDay(date, yesterday)) return "Ayer";
-  if (sameDay(date, tomorrow)) return withTime ? `Mañana, ${time}` : "Mañana";
+  const ymd = toArgentinaDateString(date);
+  const todayYmd = argentinaDateStringOffset(0);
+  const yesterdayYmd = argentinaDateStringOffset(-1);
+  const tomorrowYmd = argentinaDateStringOffset(1);
+  const time = new Intl.DateTimeFormat("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: APP_TIMEZONE,
+  }).format(date);
+  if (withTime && ymd === todayYmd) return `Hoy, ${time}`;
+  if (ymd === yesterdayYmd) return "Ayer";
+  if (ymd === tomorrowYmd) return withTime ? `Mañana, ${time}` : "Mañana";
   return new Intl.DateTimeFormat("es-AR", {
     weekday: "short",
     day: "numeric",
     month: "short",
+    timeZone: APP_TIMEZONE,
     ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
   }).format(date);
 }

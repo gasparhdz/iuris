@@ -4,35 +4,19 @@ import { useSnackbar } from "notistack";
 import api from "../../api/axios";
 import { fetchAllPages } from "../../api/pagination";
 import { getApiError, isOverdue, unwrapEntity } from "../tareasUtils";
+import { startOfDayArgentina } from "../../utils/timezone";
 import { eventDate, normalizeCode } from "./dashboardUtils";
+
+const EVENTOS_LOOKBACK_DAYS = 60;
+
+function dashboardEventosFromIso() {
+  const start = startOfDayArgentina();
+  return new Date(start.getTime() - EVENTOS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
 
 export function useDashboardData() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-
-  const tareasQuery = useQuery({
-    queryKey: ["dashboard", "tareas"],
-    queryFn: () => fetchAllPages("/tareas", { completada: "false" }),
-    staleTime: 60_000,
-  });
-
-  const eventosQuery = useQuery({
-    queryKey: ["dashboard", "eventos"],
-    queryFn: () => fetchAllPages("/eventos"),
-    staleTime: 60_000,
-  });
-
-  const clientesQuery = useQuery({
-    queryKey: ["clientes", "lookup"],
-    queryFn: () => fetchAllPages("/clientes"),
-    staleTime: 1000 * 60 * 5,
-  });
-
-  const expedientesQuery = useQuery({
-    queryKey: ["expedientes", "lookup"],
-    queryFn: () => fetchAllPages("/expedientes"),
-    staleTime: 1000 * 60 * 5,
-  });
 
   const catalogQuery = useQuery({
     queryKey: ["dashboard", "catalogos"],
@@ -50,6 +34,51 @@ export function useDashboardData() {
     staleTime: 300_000,
   });
 
+  const catalogEstadosEvento = useMemo(() => catalogQuery.data?.ESTADO_EVENTO ?? [], [catalogQuery.data?.ESTADO_EVENTO]);
+  const catalogTiposEvento = useMemo(() => catalogQuery.data?.TIPO_EVENTO ?? [], [catalogQuery.data?.TIPO_EVENTO]);
+
+  const estadoEventoIdByCodigo = useMemo(() => {
+    const map = new Map();
+    catalogEstadosEvento.forEach((estado) => {
+      map.set(normalizeCode(estado.codigo), Number(estado.id));
+    });
+    return map;
+  }, [catalogEstadosEvento]);
+
+  const realizadoEstadoId = estadoEventoIdByCodigo.get("REALIZADO") ?? null;
+  const pendienteEstadoId = estadoEventoIdByCodigo.get("PENDIENTE") ?? null;
+  const catalogEstadosReady = catalogQuery.isSuccess && catalogEstadosEvento.length > 0;
+
+  const tareasQuery = useQuery({
+    queryKey: ["dashboard", "tareas"],
+    queryFn: () => fetchAllPages("/tareas", { completada: "false" }),
+    staleTime: 60_000,
+    refetchOnWindowFocus: "always",
+  });
+
+  const eventosQuery = useQuery({
+    queryKey: ["dashboard", "eventos", pendienteEstadoId],
+    queryFn: () => {
+      const params = { from: dashboardEventosFromIso() };
+      if (pendienteEstadoId != null) params.estadoId = pendienteEstadoId;
+      return fetchAllPages("/eventos", params);
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: "always",
+  });
+
+  const clientesQuery = useQuery({
+    queryKey: ["clientes", "lookup"],
+    queryFn: () => fetchAllPages("/clientes"),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const expedientesQuery = useQuery({
+    queryKey: ["expedientes", "lookup"],
+    queryFn: () => fetchAllPages("/expedientes"),
+    staleTime: 1000 * 60 * 5,
+  });
+
   function invalidateDashboard() {
     queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     queryClient.invalidateQueries({ queryKey: ["tareas"] });
@@ -58,8 +87,6 @@ export function useDashboardData() {
 
   const tareas = useMemo(() => tareasQuery.data ?? [], [tareasQuery.data]);
   const eventos = useMemo(() => eventosQuery.data ?? [], [eventosQuery.data]);
-  const catalogEstadosEvento = useMemo(() => catalogQuery.data?.ESTADO_EVENTO ?? [], [catalogQuery.data?.ESTADO_EVENTO]);
-  const catalogTiposEvento = useMemo(() => catalogQuery.data?.TIPO_EVENTO ?? [], [catalogQuery.data?.TIPO_EVENTO]);
 
   const tiposEventoById = useMemo(
     () => new Map(catalogTiposEvento.map((t) => [Number(t.id), t])),
@@ -73,17 +100,6 @@ export function useDashboardData() {
     () => new Map((expedientesQuery.data ?? []).map((c) => [Number(c.id), c])),
     [expedientesQuery.data],
   );
-
-  const estadoEventoIdByCodigo = useMemo(() => {
-    const map = new Map();
-    catalogEstadosEvento.forEach((estado) => {
-      map.set(normalizeCode(estado.codigo), Number(estado.id));
-    });
-    return map;
-  }, [catalogEstadosEvento]);
-
-  const realizadoEstadoId = estadoEventoIdByCodigo.get("REALIZADO") ?? null;
-  const pendienteEstadoId = estadoEventoIdByCodigo.get("PENDIENTE") ?? null;
 
   const toggleTaskMutation = useMutation({
     mutationFn: async (task) => {
@@ -163,11 +179,13 @@ export function useDashboardData() {
         const time = new Date(eventDate(event)).getTime();
         if (Number.isNaN(time)) return false;
         if (time >= now) return true;
-        const isRealizado = realizadoEstadoId != null && Number(event.estadoId) === realizadoEstadoId;
+        // Sin catálogo ESTADO_EVENTO no clasificar pasados como atrasados (evitar falsos vencidos).
+        if (!catalogEstadosReady || realizadoEstadoId == null) return false;
+        const isRealizado = Number(event.estadoId) === realizadoEstadoId;
         return !isRealizado;
       })
       .sort((a, b) => new Date(eventDate(a)).getTime() - new Date(eventDate(b)).getTime());
-  }, [eventos, realizadoEstadoId]);
+  }, [eventos, catalogEstadosReady, realizadoEstadoId]);
 
   const futureEvents = useMemo(() => {
     const now = Date.now();
@@ -175,9 +193,10 @@ export function useDashboardData() {
   }, [upcomingEvents]);
 
   const pastPendingEvents = useMemo(() => {
+    if (!catalogEstadosReady || realizadoEstadoId == null) return [];
     const now = Date.now();
     return upcomingEvents.filter((event) => new Date(eventDate(event)).getTime() < now);
-  }, [upcomingEvents]);
+  }, [upcomingEvents, catalogEstadosReady, realizadoEstadoId]);
 
   const taskBusy = toggleTaskMutation.isPending || toggleSubtaskMutation.isPending;
 

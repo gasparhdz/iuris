@@ -110,7 +110,7 @@ export default function NovedadesExpedientesCard() {
   const frescura = frescuraSync(lastSyncAt);
 
   const marcarTodo = useMutation({
-    mutationFn: () => marcarNovedadesLeidas(),
+    mutationFn: () => marcarNovedadesLeidas(novedades.map((n) => n.id)),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] }),
   });
 

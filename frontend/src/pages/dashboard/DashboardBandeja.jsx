@@ -15,6 +15,7 @@ import {
   MenuItem,
   Paper,
   Stack,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
@@ -38,6 +39,7 @@ import TareaDetalleDialog from "../../components/TareaDetalleDialog";
 import EventoDetalleDialog from "../../components/EventoDetalleDialog";
 import SisfeSyncButton from "../../components/SisfeSyncButton";
 import { useAuth } from "../../auth/useAuth";
+import { usePermisos } from "../../auth/usePermissions";
 import { clienteLabel, formatFriendlyDate } from "../tareasUtils";
 import { bandejaFilterCounts, buildBandejaGroups } from "./bandejaGrouping";
 import { BANDEJA_TONES, bandejaGreeting, displayDate, eventDate, tipoMovimientoInfo } from "./dashboardUtils";
@@ -61,10 +63,10 @@ const BANDEJA_PREVIEW_LIMIT = 5;
 const BANDEJA_COLLAPSED_GROUPS_KEY = "bandeja_collapsed_groups";
 
 const QUICK_CREATE = [
-  { label: "Nuevo cliente", path: "/clientes/nuevo", icon: PersonAdd },
-  { label: "Nuevo evento", path: "/eventos/nuevo", icon: CalendarMonth },
-  { label: "Nueva tarea", path: "/tareas/nuevo", icon: AssignmentTurnedIn },
-  { label: "Cargar finanza", path: "/finanzas/nuevo", icon: Payments },
+  { label: "Nuevo cliente", path: "/clientes/nuevo", icon: PersonAdd, modulo: "CLIENTES" },
+  { label: "Nuevo evento", path: "/eventos/nuevo", icon: CalendarMonth, modulo: "EVENTOS" },
+  { label: "Nueva tarea", path: "/tareas/nuevo", icon: AssignmentTurnedIn, modulo: "TAREAS" },
+  { label: "Cargar finanza", path: "/finanzas/nuevo", icon: Payments, modulo: "FINANZAS" },
 ];
 
 function TypeBadge({ kind, overdue, label, icon, color: colorOverride }) {
@@ -124,7 +126,7 @@ function GroupHeader({ group, onMarkAll, collapsed, onToggle }) {
         {group.label}
       </Typography>
       <Typography sx={{ fontWeight: 600, fontSize: "0.75rem", color: "text.disabled" }}>
-        {group.items.length}
+        {group.countLabel ?? group.items.length}
       </Typography>
       <Box sx={{ flex: 1, minWidth: 48, height: 1, bgcolor: lineColor }} />
       {group.showMarkAll && !collapsed && (
@@ -170,7 +172,7 @@ function metaLine({ fecha, nroExpte, caratula, extra = [] }) {
 }
 
 function BandejaActionButton({ title, onClick, disabled, children, color }) {
-  return (
+  const button = (
     <IconButton
       size="small"
       disabled={disabled}
@@ -181,9 +183,11 @@ function BandejaActionButton({ title, onClick, disabled, children, color }) {
       {children ?? <Check sx={{ fontSize: 15, color: color ?? BANDEJA_TONES.success }} />}
     </IconButton>
   );
+  if (!title) return button;
+  return <Tooltip title={title}>{button}</Tooltip>;
 }
 
-function BandejaTaskRow({ task, caso, overdue, onComplete, onOpen, busy }) {
+function BandejaTaskRow({ task, caso, overdue, onComplete, onOpen, busy, canComplete }) {
   const meta = metaLine({
     fecha: formatFriendlyDate(task.fechaLimite),
     nroExpte: caso?.nroExpte,
@@ -249,13 +253,15 @@ function BandejaTaskRow({ task, caso, overdue, onComplete, onOpen, busy }) {
             </Typography>
           </Stack>
         )}
-        <Box onClick={(e) => e.stopPropagation()}>
-          <BandejaActionButton
-            title="Completar"
-            disabled={busy}
-            onClick={() => onComplete(task)}
-          />
-        </Box>
+        {canComplete && (
+          <Box onClick={(e) => e.stopPropagation()}>
+            <BandejaActionButton
+              title="Completar"
+              disabled={busy}
+              onClick={() => onComplete(task)}
+            />
+          </Box>
+        )}
       </Stack>
       {overdue && overdueLabel && (
         <Stack
@@ -274,7 +280,7 @@ function BandejaTaskRow({ task, caso, overdue, onComplete, onOpen, busy }) {
   );
 }
 
-function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar, busy }) {
+function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar, busy, canAgendar }) {
   const titulo = novedad.novedad || novedad.tipo || "Movimiento";
   const tipoInfo = tipoMovimientoInfo(novedad.tipo);
   const meta = metaLine({
@@ -285,15 +291,17 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
 
   const actions = (
     <Stack direction="row" spacing={0.75} alignItems="center" flexShrink={0}>
-      <IconButton
-        size="small"
-        disabled={busy}
-        onClick={(e) => { e.stopPropagation(); onAgendar(e, novedad); }}
-        sx={{ border: "1px solid", borderColor: "divider", borderRadius: "8px" }}
-        title="Agendar tarea o evento"
-      >
-        <CalendarMonth sx={{ fontSize: 15 }} />
-      </IconButton>
+      {canAgendar && (
+        <IconButton
+          size="small"
+          disabled={busy}
+          onClick={(e) => { e.stopPropagation(); onAgendar(e, novedad); }}
+          sx={{ border: "1px solid", borderColor: "divider", borderRadius: "8px" }}
+          title="Agendar tarea o evento"
+        >
+          <CalendarMonth sx={{ fontSize: 15 }} />
+        </IconButton>
+      )}
       <IconButton
         size="small"
         disabled={busy}
@@ -359,7 +367,7 @@ function BandejaNovedadRow({ novedad, onVerExpediente, onMarcarLeido, onAgendar,
   );
 }
 
-function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, onToggle, busy, onOpen, overdue }) {
+function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, onToggle, busy, onOpen, overdue, canComplete }) {
   const fecha = eventDate(event);
   const eventoPaso = fecha && new Date(fecha).getTime() < Date.now();
   const checked = realizadoEstadoId != null && Number(event.estadoId) === realizadoEstadoId;
@@ -371,7 +379,7 @@ function BandejaEventRow({ event, tipoEvento, cliente, caso, realizadoEstadoId, 
     extra: [!caso && cliente ? clienteLabel(cliente) : null, event.ubicacion],
   });
 
-  const checkbox = eventoPaso && realizadoEstadoId != null ? (
+  const checkbox = canComplete && eventoPaso && realizadoEstadoId != null ? (
     <BandejaActionButton
       title={checked ? "Marcar pendiente" : "Marcar realizado"}
       disabled={busy}
@@ -526,11 +534,12 @@ function EmptyGroup({ groupId }) {
   );
 }
 
-function GroupShowMore({ hiddenCount, expanded, onToggle }) {
+function GroupShowMore({ hiddenCount, expanded, onToggle, loading, label }) {
   return (
     <Button
       fullWidth
       onClick={onToggle}
+      disabled={loading}
       sx={{
         py: 0.85,
         borderRadius: 0,
@@ -543,12 +552,14 @@ function GroupShowMore({ hiddenCount, expanded, onToggle }) {
         "&:hover": { bgcolor: "action.hover" },
       }}
     >
-      {expanded ? "Ver menos" : `Ver más (${hiddenCount})`}
+      {loading
+        ? "Cargando…"
+        : (label ?? (expanded ? "Ver menos" : `Ver más (${hiddenCount})`))}
     </Button>
   );
 }
 
-function SisfeBanner({ lastSyncAt, frescura }) {
+function SisfeBanner({ lastSyncAt, frescura, canSync }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
 
@@ -606,6 +617,27 @@ function SisfeBanner({ lastSyncAt, frescura }) {
     ? `Última sincronización con SISFE ${formatDistanceToNow(new Date(lastSyncAt), { locale: es, addSuffix: true })}.`
     : "Todavía no sincronizaste con SISFE.";
 
+  const syncButtonSx = {
+    height: 32,
+    px: 1.75,
+    borderRadius: "8px",
+    fontWeight: 600,
+    fontSize: "0.78rem",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+    ...(isDark
+      ? {
+          bgcolor: "warning.main",
+          color: "warning.contrastText",
+          "&:hover": { bgcolor: "warning.dark" },
+        }
+      : {
+          bgcolor: "#B5820A",
+          color: "#fff",
+          "&:hover": { bgcolor: "#9A6E08" },
+        }),
+  };
+
   return (
     <Stack
       direction={{ xs: "column", sm: "row" }}
@@ -649,33 +681,24 @@ function SisfeBanner({ lastSyncAt, frescura }) {
         </Box>{" "}
         Sincronizá para traer los movimientos SISFE más recientes.
       </Typography>
-      <SisfeSyncButton
-        variant="contained"
-        size="small"
-        lastSyncAt={lastSyncAt}
-        sx={{
-          height: 32,
-          px: 1.75,
-          borderRadius: "8px",
-          fontWeight: 600,
-          fontSize: "0.78rem",
-          whiteSpace: "nowrap",
-          flexShrink: 0,
-          ...(isDark
-            ? {
-                bgcolor: "warning.main",
-                color: "warning.contrastText",
-                "&:hover": { bgcolor: "warning.dark" },
-              }
-            : {
-                bgcolor: "#B5820A",
-                color: "#fff",
-                "&:hover": { bgcolor: "#9A6E08" },
-              }),
-        }}
-      >
-        Sincronizar ahora
-      </SisfeSyncButton>
+      {canSync ? (
+        <SisfeSyncButton
+          variant="contained"
+          size="small"
+          lastSyncAt={lastSyncAt}
+          sx={syncButtonSx}
+        >
+          Sincronizar ahora
+        </SisfeSyncButton>
+      ) : (
+        <Tooltip title="Sin permiso para sincronizar (CASOS/editar)">
+          <span>
+            <Button variant="contained" size="small" disabled sx={syncButtonSx}>
+              Sincronizar ahora
+            </Button>
+          </span>
+        </Tooltip>
+      )}
     </Stack>
   );
 }
@@ -683,6 +706,23 @@ function SisfeBanner({ lastSyncAt, frescura }) {
 export default function DashboardBandeja() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const tareasPerm = usePermisos("TAREAS");
+  const eventosPerm = usePermisos("EVENTOS");
+  const clientesPerm = usePermisos("CLIENTES");
+  const casosPerm = usePermisos("CASOS");
+  const honorariosPerm = usePermisos("HONORARIOS");
+  const gastosPerm = usePermisos("GASTOS");
+  const ingresosPerm = usePermisos("INGRESOS");
+  const canCrearFinanza = honorariosPerm.canCrear || gastosPerm.canCrear || ingresosPerm.canCrear;
+  const canCrearByModulo = {
+    CLIENTES: clientesPerm.canCrear,
+    EVENTOS: eventosPerm.canCrear,
+    TAREAS: tareasPerm.canCrear,
+    FINANZAS: canCrearFinanza,
+  };
+  const quickCreateItems = QUICK_CREATE.filter((item) => canCrearByModulo[item.modulo]);
+  const canCreateAnything = casosPerm.canCrear || quickCreateItems.length > 0;
+
   const [filter, setFilter] = useState("todo");
   const [createAnchor, setCreateAnchor] = useState(null);
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -721,11 +761,15 @@ export default function DashboardBandeja() {
     eventBusy,
     tareasQuery,
     eventosQuery,
+    catalogQuery,
   } = useDashboardData();
 
   const {
     novedades,
     totalNovedades,
+    hasMoreNovedades,
+    loadMoreNovedades,
+    loadingMoreNovedades,
     lastSyncAt,
     frescura,
     marcarTodo,
@@ -748,17 +792,18 @@ export default function DashboardBandeja() {
         overdueTasks,
         upcomingTasks,
         novedades,
+        totalNovedades,
         pastPendingEvents,
         futureEvents,
         filter,
       }),
-    [overdueTasks, upcomingTasks, novedades, pastPendingEvents, futureEvents, filter],
+    [overdueTasks, upcomingTasks, novedades, totalNovedades, pastPendingEvents, futureEvents, filter],
   );
 
   const overdueCount = overdueTasks.length + pastPendingEvents.length;
 
   const criticalQueryFailed =
-    tareasQuery.isError || eventosQuery.isError || novedadesQuery.isError;
+    tareasQuery.isError || eventosQuery.isError || novedadesQuery.isError || catalogQuery.isError;
 
   const allClear =
     !criticalQueryFailed &&
@@ -813,6 +858,7 @@ export default function DashboardBandeja() {
           onComplete={(t) => toggleTaskMutation.mutate(t)}
           onOpen={(t) => setTareaDialogId(t.id)}
           busy={taskBusy}
+          canComplete={tareasPerm.canEditar}
         />
       );
     }
@@ -825,6 +871,7 @@ export default function DashboardBandeja() {
           onMarcarLeido={(n) => marcarUno.mutate(n.id)}
           onAgendar={abrirMenuAgendar}
           busy={marcarUno.isPending}
+          canAgendar={tareasPerm.canCrear || eventosPerm.canCrear}
         />
       );
     }
@@ -840,6 +887,7 @@ export default function DashboardBandeja() {
         busy={eventBusy}
         onOpen={(e) => setEventoDialogId(e.id)}
         overdue={item.subkind === "atrasado"}
+        canComplete={eventosPerm.canEditar}
       />
     );
   };
@@ -850,9 +898,38 @@ export default function DashboardBandeja() {
     }
 
     const expanded = Boolean(expandedItemGroups[group.id]);
-    const hasMore = group.items.length > BANDEJA_PREVIEW_LIMIT;
+    const isNovedades = group.id === "novedades";
+    const hasLocalMore = group.items.length > BANDEJA_PREVIEW_LIMIT;
     const visibleItems = expanded ? group.items : group.items.slice(0, BANDEJA_PREVIEW_LIMIT);
-    const hiddenCount = group.items.length - BANDEJA_PREVIEW_LIMIT;
+    const remainingServer = isNovedades ? Math.max(totalNovedades - group.items.length, 0) : 0;
+    const canLoadServer = isNovedades && hasMoreNovedades && remainingServer > 0;
+
+    // Ver más: expandir preview local, o cargar página siguiente del server.
+    const needsShowMore = (!expanded && hasLocalMore) || canLoadServer || (expanded && hasLocalMore && !canLoadServer);
+    const hiddenCount = !expanded && hasLocalMore
+      ? group.items.length - BANDEJA_PREVIEW_LIMIT + remainingServer
+      : remainingServer;
+
+    const handleShowMore = () => {
+      if (!expanded && hasLocalMore) {
+        toggleGroupItemsExpand(group.id);
+        return;
+      }
+      if (canLoadServer) {
+        loadMoreNovedades();
+        return;
+      }
+      toggleGroupItemsExpand(group.id);
+    };
+
+    let moreLabel;
+    if (expanded && canLoadServer) {
+      moreLabel = loadingMoreNovedades ? "Cargando…" : `Ver más (${remainingServer})`;
+    } else if (expanded && hasLocalMore && !canLoadServer) {
+      moreLabel = "Ver menos";
+    } else if (!expanded && (hasLocalMore || canLoadServer)) {
+      moreLabel = `Ver más (${hiddenCount || remainingServer || group.items.length})`;
+    }
 
     return (
       <Paper
@@ -865,11 +942,13 @@ export default function DashboardBandeja() {
         }}
       >
         {visibleItems.map(renderBandejaItem)}
-        {hasMore && (
+        {needsShowMore && (
           <GroupShowMore
             hiddenCount={hiddenCount}
-            expanded={expanded}
-            onToggle={() => toggleGroupItemsExpand(group.id)}
+            expanded={expanded && !canLoadServer}
+            onToggle={handleShowMore}
+            loading={canLoadServer && loadingMoreNovedades}
+            label={moreLabel}
           />
         )}
       </Paper>
@@ -932,14 +1011,24 @@ export default function DashboardBandeja() {
                 {frescura.texto}
               </Typography>
             </Stack>
-            <SisfeSyncButton size="small" lastSyncAt={lastSyncAt} sx={{ height: 32, minWidth: 0, px: 1.5 }}>
-              Sincronizar
-            </SisfeSyncButton>
+            {casosPerm.canEditar ? (
+              <SisfeSyncButton size="small" lastSyncAt={lastSyncAt} sx={{ height: 32, minWidth: 0, px: 1.5 }}>
+                Sincronizar
+              </SisfeSyncButton>
+            ) : (
+              <Tooltip title="Sin permiso para sincronizar (CASOS/editar)">
+                <span>
+                  <Button size="small" disabled sx={{ height: 32, minWidth: 0, px: 1.5 }}>
+                    Sincronizar
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
           </Stack>
         </Stack>
       </Box>
 
-      <SisfeBanner lastSyncAt={lastSyncAt} frescura={frescura} />
+      <SisfeBanner lastSyncAt={lastSyncAt} frescura={frescura} canSync={casosPerm.canEditar} />
 
       <Stack
         direction={{ xs: "column", md: "row" }}
@@ -996,6 +1085,7 @@ export default function DashboardBandeja() {
           })}
         </Box>
 
+        {canCreateAnything && (
         <Box
           sx={{
             display: "inline-flex",
@@ -1007,42 +1097,47 @@ export default function DashboardBandeja() {
             boxShadow: (t) => t.shadows[2],
           }}
         >
-          <Button
-            variant="contained"
-            startIcon={<Add sx={{ fontSize: 15 }} />}
-            onClick={() => navigate("/expedientes/nuevo")}
-            sx={{
-              flex: { xs: 1, md: "none" },
-              height: 36,
-              px: 1.9,
-              borderRadius: 0,
-              fontWeight: 600,
-              fontSize: "0.8125rem",
-              whiteSpace: "nowrap",
-              boxShadow: "none",
-              "&:hover": { boxShadow: "none", bgcolor: "primary.dark" },
-            }}
-          >
-            Nuevo expediente
-          </Button>
-          <IconButton
-            onClick={(e) => setCreateAnchor(e.currentTarget)}
-            sx={{
-              width: 36,
-              height: 36,
-              borderRadius: 0,
-              bgcolor: "primary.main",
-              color: "primary.contrastText",
-              borderLeft: "1px solid rgba(255,255,255,.25)",
-              flexShrink: 0,
-              boxShadow: "none",
-              "&:hover": { bgcolor: "primary.dark", boxShadow: "none" },
-            }}
-            title="Crear cliente, evento, tarea o finanza"
-          >
-            <ExpandMore sx={{ fontSize: 15 }} />
-          </IconButton>
+          {casosPerm.canCrear && (
+            <Button
+              variant="contained"
+              startIcon={<Add sx={{ fontSize: 15 }} />}
+              onClick={() => navigate("/expedientes/nuevo")}
+              sx={{
+                flex: { xs: 1, md: "none" },
+                height: 36,
+                px: 1.9,
+                borderRadius: 0,
+                fontWeight: 600,
+                fontSize: "0.8125rem",
+                whiteSpace: "nowrap",
+                boxShadow: "none",
+                "&:hover": { boxShadow: "none", bgcolor: "primary.dark" },
+              }}
+            >
+              Nuevo expediente
+            </Button>
+          )}
+          {quickCreateItems.length > 0 && (
+            <IconButton
+              onClick={(e) => setCreateAnchor(e.currentTarget)}
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: 0,
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                borderLeft: casosPerm.canCrear ? "1px solid rgba(255,255,255,.25)" : "none",
+                flexShrink: 0,
+                boxShadow: "none",
+                "&:hover": { bgcolor: "primary.dark", boxShadow: "none" },
+              }}
+              title="Crear cliente, evento, tarea o finanza"
+            >
+              {casosPerm.canCrear ? <ExpandMore sx={{ fontSize: 15 }} /> : <Add sx={{ fontSize: 15 }} />}
+            </IconButton>
+          )}
         </Box>
+        )}
       </Stack>
 
       {criticalQueryFailed ? (
@@ -1069,6 +1164,7 @@ export default function DashboardBandeja() {
               tareasQuery.refetch();
               eventosQuery.refetch();
               novedadesQuery.refetch();
+              catalogQuery.refetch();
             }}
             sx={{ fontWeight: 800 }}
           >
@@ -1102,7 +1198,7 @@ export default function DashboardBandeja() {
           <Box key={group.id}>
             <GroupHeader
               group={group}
-              onMarkAll={() => marcarTodo.mutate()}
+              onMarkAll={() => marcarTodo.mutate(novedades.map((n) => n.id))}
               collapsed={Boolean(collapsedGroups[group.id])}
               onToggle={() => toggleGroup(group.id)}
             />
@@ -1118,7 +1214,7 @@ export default function DashboardBandeja() {
       )}
 
       <Menu anchorEl={createAnchor} open={Boolean(createAnchor)} onClose={() => setCreateAnchor(null)}>
-        {QUICK_CREATE.map((item) => {
+        {quickCreateItems.map((item) => {
           const ItemIcon = item.icon;
           return (
             <MenuItem
@@ -1136,14 +1232,18 @@ export default function DashboardBandeja() {
       </Menu>
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}>
-        <MenuItem onClick={() => elegirModo("tarea")}>
-          <ListItemIcon><AssignmentTurnedIn fontSize="small" /></ListItemIcon>
-          <ListItemText>Crear tarea</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => elegirModo("evento")}>
-          <ListItemIcon><EventIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Crear evento</ListItemText>
-        </MenuItem>
+        {tareasPerm.canCrear && (
+          <MenuItem onClick={() => elegirModo("tarea")}>
+            <ListItemIcon><AssignmentTurnedIn fontSize="small" /></ListItemIcon>
+            <ListItemText>Crear tarea</ListItemText>
+          </MenuItem>
+        )}
+        {eventosPerm.canCrear && (
+          <MenuItem onClick={() => elegirModo("evento")}>
+            <ListItemIcon><EventIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Crear evento</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
 
       <AgendarDialog

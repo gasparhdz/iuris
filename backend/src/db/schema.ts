@@ -524,6 +524,8 @@ export const eventos = pgTable("eventos", {
   recordatorio: timestamp("recordatorio", { withTimezone: true }),
   recordatorioEnviado: boolean("recordatorio_enviado").default(false).notNull(),
   ubicacion: varchar("ubicacion", { length: 255 }),
+  // Vinculación a movimiento SISFE (idempotencia al agendar desde novedad).
+  movimientoId: integer("movimiento_id").references(() => movimientosJudiciales.id, { onDelete: "set null" }),
   activo: boolean("activo").default(true).notNull(),
   createdBy: integer("created_by").references(() => usuarios.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -551,6 +553,13 @@ export const eventos = pgTable("eventos", {
   index("eventos_estudio_cliente_idx")
     .on(table.estudioId, table.clienteId)
     .where(sql`${table.deletedAt} IS NULL`),
+  index("eventos_movimiento_idx")
+    .on(table.movimientoId)
+    .where(sql`${table.deletedAt} IS NULL`),
+  // Un solo evento vivo por movimiento (idempotencia al agendar desde SISFE).
+  uniqueIndex("eventos_movimiento_vivo_unique")
+    .on(table.movimientoId)
+    .where(sql`${table.deletedAt} IS NULL AND ${table.movimientoId} IS NOT NULL`),
 ]);
 
 export const tareas = pgTable("tareas", {

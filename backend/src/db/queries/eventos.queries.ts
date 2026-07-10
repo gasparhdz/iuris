@@ -112,6 +112,19 @@ export class EventosQueries {
     return evento ?? null;
   }
 
+  static async findByMovimientoId(movimientoId: number, estudioId: number) {
+    const [evento] = await db
+      .select()
+      .from(eventos)
+      .where(and(
+        eq(eventos.movimientoId, movimientoId),
+        eq(eventos.estudioId, estudioId),
+        isNull(eventos.deletedAt),
+      ))
+      .limit(1);
+    return evento ?? null;
+  }
+
   static async insert(tx: DbExecutor, values: NewEvento) {
     const [row] = await tx.insert(eventos).values(values).returning();
     return row;

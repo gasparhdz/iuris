@@ -50,6 +50,13 @@
       "when": 1783711000000,
       "tag": "0006_preferencias_cobranza_estudio",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783712000000,
+      "tag": "0007_eventos_movimiento_unique",
+      "breakpoints": true
     }
   ]
 }

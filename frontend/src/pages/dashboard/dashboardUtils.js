@@ -1,8 +1,9 @@
-import dayjs from "dayjs";
-import "dayjs/locale/es";
 import { Description, Gavel, InsertDriveFile, MarkEmailRead, Shield } from "@mui/icons-material";
-
-dayjs.locale("es");
+import {
+  argentinaDateStringOffset,
+  getArgentinaDateParts,
+  APP_TIMEZONE,
+} from "../../utils/timezone";
 
 export const CARD_TONES = {
   blue: "#5B7CFA",
@@ -56,8 +57,6 @@ export const panelSx = {
   borderRadius: "16px",
 };
 
-export const DASHBOARD_VIEW_KEY = "iuris_dashboard_view";
-
 export function normalizeCode(value) {
   return String(value ?? "")
     .normalize("NFD")
@@ -72,18 +71,19 @@ export function readUserName(user) {
   return clean ? clean.split(/\s+/)[0] : "";
 }
 
-/** Franja horaria local para el saludo. */
+/** Franja horaria en America/Argentina/Cordoba para el saludo. */
 function greetingSlot() {
-  const hour = dayjs().hour();
+  const { hour } = getArgentinaDateParts();
   if (hour >= 5 && hour < 12) return "morning";
   if (hour >= 12 && hour < 20) return "afternoon";
   return "evening";
 }
 
-/** Índice estable por día — rota el tono sin cambiar en cada render. */
+/** Índice estable por día calendario en Cordoba — rota el tono sin cambiar en cada render. */
 function dailyVariantIndex(count) {
   if (count <= 0) return 0;
-  return (dayjs().date() + dayjs().month() * 31) % count;
+  const { day, month } = getArgentinaDateParts();
+  return (day + month * 31) % count;
 }
 
 const BANDEJA_GREETING_TEXT = {
@@ -104,7 +104,7 @@ const BANDEJA_GREETING_TEXT = {
   ],
 };
 
-/** Saludo según hora local (Argentina, navegador del usuario). */
+/** Saludo según hora en America/Argentina/Cordoba. */
 export function timeGreeting() {
   const slot = greetingSlot();
   if (slot === "morning") return "Buenos días";
@@ -125,7 +125,13 @@ export function bandejaGreeting(user) {
 }
 
 export function displayDate() {
-  const value = dayjs().format("dddd, D [de] MMMM [de] YYYY");
+  const value = new Intl.DateTimeFormat("es-AR", {
+    timeZone: APP_TIMEZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
@@ -142,19 +148,5 @@ export function priorityLabel(task) {
   return task?.prioridad?.nombre || task?.prioridadNombre || "Sin prioridad";
 }
 
-export function readDashboardView() {
-  try {
-    const saved = localStorage.getItem(DASHBOARD_VIEW_KEY);
-    return saved === "classic" ? "classic" : "bandeja";
-  } catch {
-    return "bandeja";
-  }
-}
-
-export function saveDashboardView(view) {
-  try {
-    localStorage.setItem(DASHBOARD_VIEW_KEY, view);
-  } catch {
-    /* noop */
-  }
-}
+/** Re-export para callers que necesiten offsets de calendario Cordoba. */
+export { argentinaDateStringOffset };

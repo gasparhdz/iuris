@@ -13,6 +13,7 @@ function overdueItemDate(item) {
  * @param {import('../tareasUtils').Task[]} params.overdueTasks
  * @param {import('../tareasUtils').Task[]} params.upcomingTasks
  * @param {object[]} params.novedades
+ * @param {number} [params.totalNovedades]
  * @param {object[]} params.pastPendingEvents
  * @param {object[]} params.futureEvents
  * @param {BandejaFilter} params.filter
@@ -21,6 +22,7 @@ export function buildBandejaGroups({
   overdueTasks,
   upcomingTasks,
   novedades,
+  totalNovedades,
   pastPendingEvents,
   futureEvents,
   filter,
@@ -47,12 +49,14 @@ export function buildBandejaGroups({
   }
 
   if (showNovedades && novedades.length > 0) {
+    const total = Number(totalNovedades) || novedades.length;
     groups.push({
       id: "novedades",
       label: "Movimientos SISFE sin leer",
       tone: "#1A66C9",
       dot: "#1A66C9",
       showMarkAll: true,
+      countLabel: novedades.length < total ? `${novedades.length} de ${total}` : String(novedades.length),
       items: novedades.map((n) => ({ kind: "novedad", data: n })),
     });
   }
@@ -67,7 +71,7 @@ export function buildBandejaGroups({
     });
   }
 
-  if (showEventos) {
+  if (showEventos && (futureEvents.length > 0 || filter === "eventos")) {
     groups.push({
       id: "eventos",
       label: "Próximos eventos",

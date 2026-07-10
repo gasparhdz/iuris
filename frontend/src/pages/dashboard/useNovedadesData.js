@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs from "dayjs";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale/es";
@@ -7,6 +7,8 @@ import {
   marcarNovedadesLeidas,
 } from "../../api/notificaciones.api";
 import { getSisfeStatus } from "../../api/sisfe.api";
+
+const NOVEDADES_PAGE_SIZE = 50;
 
 function frescuraSync(lastSyncAt, sisfeError) {
   if (sisfeError) {
@@ -31,10 +33,16 @@ function frescuraSync(lastSyncAt, sisfeError) {
 export function useNovedadesData() {
   const queryClient = useQueryClient();
 
-  const novedadesQuery = useQuery({
+  const novedadesQuery = useInfiniteQuery({
     queryKey: ["novedades-expedientes"],
-    queryFn: getNovedades,
-    refetchOnWindowFocus: true,
+    queryFn: ({ pageParam = 0 }) => getNovedades({ limit: NOVEDADES_PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((sum, page) => sum + (page?.data?.novedades?.length ?? 0), 0);
+      const total = lastPage?.data?.total ?? 0;
+      return loaded < total ? loaded : undefined;
+    },
+    refetchOnWindowFocus: "always",
   });
 
   const sisfeQuery = useQuery({
@@ -43,13 +51,15 @@ export function useNovedadesData() {
     staleTime: 15_000,
   });
 
-  const novedades = novedadesQuery.data?.data?.novedades ?? [];
-  const totalNovedades = novedadesQuery.data?.data?.total ?? 0;
+  const novedades = novedadesQuery.data?.pages.flatMap((page) => page?.data?.novedades ?? []) ?? [];
+  const totalNovedades = novedadesQuery.data?.pages[0]?.data?.total
+    ?? novedadesQuery.data?.pages.at(-1)?.data?.total
+    ?? 0;
   const lastSyncAt = sisfeQuery.isError ? null : (sisfeQuery.data?.lastSyncAt ?? null);
   const frescura = frescuraSync(lastSyncAt, sisfeQuery.isError ? sisfeQuery.error : null);
 
   const marcarTodo = useMutation({
-    mutationFn: () => marcarNovedadesLeidas(),
+    mutationFn: (ids) => marcarNovedadesLeidas(ids),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["novedades-expedientes"] }),
   });
 
@@ -64,6 +74,9 @@ export function useNovedadesData() {
     sisfeError: sisfeQuery.isError ? sisfeQuery.error : null,
     novedades,
     totalNovedades,
+    hasMoreNovedades: Boolean(novedadesQuery.hasNextPage),
+    loadMoreNovedades: () => novedadesQuery.fetchNextPage(),
+    loadingMoreNovedades: novedadesQuery.isFetchingNextPage,
     lastSyncAt,
     frescura,
     marcarTodo,

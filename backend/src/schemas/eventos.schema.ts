@@ -74,6 +74,7 @@ export const eventoItemSchema = z.object({
   recordatorio: z.string().nullable(),
   recordatorioEnviado: z.boolean(),
   ubicacion: z.string().nullable(),
+  movimientoId: z.number().nullable(),
   activo: z.boolean(),
   createdBy: z.number().nullable(),
   createdAt: z.string(),

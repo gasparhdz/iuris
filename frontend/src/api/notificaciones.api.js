@@ -9,14 +9,16 @@ export async function getNotificacionesPendientes(token) {
   return data;
 }
 
-export async function getNovedades() {
-  const { data } = await api.get("/notificaciones/novedades");
+export async function getNovedades({ limit = 50, offset = 0 } = {}) {
+  const { data } = await api.get("/notificaciones/novedades", { params: { limit, offset } });
   return data;
 }
 
 export async function marcarNovedadesLeidas(movimientoIds) {
-  const body = movimientoIds && movimientoIds.length > 0 ? { movimientoIds } : {};
-  const { data } = await api.post("/notificaciones/novedades/marcar-leido", body);
+  if (!Array.isArray(movimientoIds) || movimientoIds.length === 0) {
+    throw new Error("movimientoIds es requerido");
+  }
+  const { data } = await api.post("/notificaciones/novedades/marcar-leido", { movimientoIds });
   return data;
 }
 

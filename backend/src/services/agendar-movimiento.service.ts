@@ -80,6 +80,13 @@ export class AgendarMovimientoService {
         return { tipo: "tarea" as const, item: serializeDates(tarea), alreadyExisted: false };
       }
 
+      // Idempotencia: si ya hay evento vivo para este movimiento, devolverlo.
+      const eventoExistente = await EventosQueries.findByMovimientoId(input.movimientoId, estudioId);
+      if (eventoExistente) {
+        await marcarVisto(tx, estudioId, userId, input.movimientoId);
+        return { tipo: "evento" as const, item: serializeDates(eventoExistente), alreadyExisted: true };
+      }
+
       const evento = await EventosQueries.insert(tx, {
         descripcion: input.descripcion,
         fechaInicio: new Date(input.fechaInicio),
@@ -87,6 +94,7 @@ export class AgendarMovimientoService {
         estadoId: input.estadoId ?? null,
         recordatorio: input.recordatorio ? new Date(input.recordatorio) : null,
         casoId: movimiento.casoId,
+        movimientoId: input.movimientoId,
         estudioId,
         createdBy: userId,
       });
