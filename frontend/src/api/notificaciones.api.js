@@ -40,21 +40,28 @@ export async function updatePreferenciasCobranza(preferencias) {
 
 /**
  * Abre el canal SSE de notificaciones. Devuelve el EventSource para cerrarlo.
- * El token viaja por query param porque EventSource no admite headers.
+ * Pide un ticket efímero autenticado (no el access JWT) para la querystring.
  *
  * @param {((data: unknown) => void) | { onNovedades?: (data: unknown) => void; onSisfeSync?: (data: unknown) => void }} handlers
+ * @returns {Promise<EventSource | null>}
  */
-export function abrirCanalNotificaciones(handlers) {
+export async function abrirCanalNotificaciones(handlers) {
   const normalized = typeof handlers === "function"
     ? { onNovedades: handlers }
     : (handlers ?? {});
 
-  // EventSource no admite headers, así que el token viaja por query param. Se toma de memoria
-  // (getAccessToken) porque ya no se persiste en localStorage.
-  const token = getAccessToken();
-  if (!token) return null;
+  if (!getAccessToken()) return null;
 
-  const url = `${api.defaults.baseURL}/notificaciones/sse/stream?token=${encodeURIComponent(token)}`;
+  let ticket;
+  try {
+    const { data } = await api.post("/notificaciones/sse/ticket");
+    ticket = data?.data?.ticket;
+  } catch {
+    return null;
+  }
+  if (!ticket) return null;
+
+  const url = `${api.defaults.baseURL}/notificaciones/sse/stream?token=${encodeURIComponent(ticket)}`;
   const source = new EventSource(url);
 
   const parse = (event) => {

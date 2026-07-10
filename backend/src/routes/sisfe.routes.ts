@@ -16,9 +16,59 @@ import { SecurityAuditService } from "../services/security-audit.service.js";
 import { env } from "../env.js";
 
 const SISFE_BASE_URL = "https://sisfe.justiciasantafe.gov.ar";
+const SISFE_ORIGIN = new URL(SISFE_BASE_URL).origin;
 const APP_SISFE_PREFIX = "/api/sisfe";
 const PROXY_COOKIE_NAME = "sisfe_proxy_auth";
 const PROXY_COOKIE_MAX_AGE_SEC = 15 * 60; // token efímero de corta vida (15 min)
+
+/** Path tras /proxy inseguro (SSRF): protocol-relative, absoluto o backslash. */
+export function isUnsafeProxyPath(pathAndQuery: string): boolean {
+  const pathOnly = pathAndQuery.split("?")[0] ?? "";
+  return pathOnly.includes("//") || pathOnly.includes("://") || pathOnly.includes("\\");
+}
+
+/** Solo se permite fetch al origen oficial de SISFE. */
+export function isAllowedSisfeTarget(targetUrl: URL): boolean {
+  return targetUrl.origin === SISFE_ORIGIN;
+}
+
+/**
+ * Resuelve el destino del proxy o null si es SSRF / path inválido.
+ * Exportado para tests unitarios.
+ */
+export function resolveSafeProxyTarget(proxiedPath: string): URL | null {
+  if (isUnsafeProxyPath(proxiedPath)) return null;
+  try {
+    const targetUrl = new URL(proxiedPath, SISFE_BASE_URL);
+    if (!isAllowedSisfeTarget(targetUrl)) return null;
+    return targetUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reescribe Location solo si apunta a SISFE (relativo o absoluto del mismo origin).
+ * Devuelve null si el Location sería un open-redirect / SSRF vía redirect.
+ */
+export function rewriteLocationSafe(location: string): string | null {
+  const trimmed = location.trim();
+  if (!trimmed || trimmed.includes("\\") || trimmed.startsWith("//")) return null;
+
+  if (trimmed.includes("://")) {
+    try {
+      const absolute = new URL(trimmed);
+      if (absolute.origin !== SISFE_ORIGIN) return null;
+      return `${APP_SISFE_PREFIX}/proxy${absolute.pathname}${absolute.search}`;
+    } catch {
+      return null;
+    }
+  }
+
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (isUnsafeProxyPath(path)) return null;
+  return `${APP_SISFE_PREFIX}/proxy${path}`;
+}
 
 type ProxyQuery = {
   /** @deprecated No usar JWT de la app en querystring. */
@@ -214,6 +264,9 @@ export const sisfeRoutes: FastifyPluginAsync = async (fastify) => {
     const authenticated = await authenticateProxyRequest(fastify, request, reply);
     if (!authenticated) return reply;
 
+    await fastify.authorize("CASOS", "ver")(request, reply);
+    if (reply.sent) return reply;
+
     return proxySisfe(request, reply);
   });
 };
@@ -253,7 +306,14 @@ async function authenticateProxyRequest(fastify: FastifyInstance, request: Fasti
 
 async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, reply: FastifyReply) {
   const proxiedPath = getProxiedPath(request);
-  const targetUrl = new URL(proxiedPath, SISFE_BASE_URL);
+  const targetUrl = resolveSafeProxyTarget(proxiedPath);
+  if (!targetUrl) {
+    request.log.warn({ proxiedPath }, "SSRF bloqueado en proxy SISFE");
+    return reply.status(400).send({
+      error: { code: "INVALID_PROXY_TARGET", message: "Destino de proxy no permitido" },
+    });
+  }
+
   // Limpiar restos legacy de querystring; el JWT de la app no debe reenviarse a SISFE.
   targetUrl.searchParams.delete("sisfeToken");
   targetUrl.searchParams.delete("token");
@@ -271,7 +331,7 @@ async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, 
     redirect: "manual",
   });
 
-  await persistCookieIfPresent(response, request);
+  await persistCookieIfPresent(response, request, targetUrl);
 
   const location = response.headers.get("location");
   if (location?.includes("/buscar-expediente")) {
@@ -279,9 +339,16 @@ async function proxySisfe(request: FastifyRequest<{ Querystring: ProxyQuery }>, 
   }
 
   if (location) {
+    const rewritten = rewriteLocationSafe(location);
+    if (!rewritten) {
+      request.log.warn({ location }, "Location de proxy SISFE rechazado");
+      return reply.status(400).send({
+        error: { code: "INVALID_PROXY_REDIRECT", message: "Redirect de proxy no permitido" },
+      });
+    }
     return reply
       .status(response.status)
-      .header("location", rewriteLocation(location))
+      .header("location", rewritten)
       .send();
   }
 
@@ -327,7 +394,10 @@ function buildProxyHeaders(request: FastifyRequest) {
   return headers;
 }
 
-async function persistCookieIfPresent(response: Response, request: FastifyRequest) {
+async function persistCookieIfPresent(response: Response, request: FastifyRequest, targetUrl: URL) {
+  // Nunca persistir Set-Cookie de un host que no sea SISFE (defensa ante SSRF).
+  if (!isAllowedSisfeTarget(targetUrl)) return;
+
   const setCookie = response.headers.get("set-cookie");
   if (!setCookie || !request.authUser) return;
 
@@ -341,13 +411,6 @@ async function persistCookieIfPresent(response: Response, request: FastifyReques
   if (!cookieName || !cookieValue) return;
 
   await mergeSessionCookie(request.authUser.id, request.authUser.estudioId, cookieName, cookieValue);
-}
-
-function rewriteLocation(location: string) {
-  const path = location.startsWith(SISFE_BASE_URL)
-    ? location.slice(SISFE_BASE_URL.length)
-    : location;
-  return `${APP_SISFE_PREFIX}/proxy${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 function rewriteHtml(html: string) {

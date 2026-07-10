@@ -12,6 +12,7 @@ import {
   updateProfileSchema,
   userProfileResponseSchema,
 } from "../schemas/auth.schema.js";
+import { env } from "../env.js";
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
@@ -58,10 +59,20 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     AuthController.login
   );
 
+  // Self-serve deshabilitado en producción (spam / abuso de recursos).
+  // Cuando el registro self-serve sea objetivo comercial, reactivar con captcha,
+  // aprobación admin o invite-only — no dejar la ruta abierta en internet pública.
   server.post(
     "/register-tenant",
     {
       ...rateLimitConfig,
+      preHandler: async (_request, reply) => {
+        if (env.NODE_ENV === "production") {
+          return reply.status(403).send({
+            error: { code: "REGISTRATION_DISABLED", message: "Registro no disponible" },
+          });
+        }
+      },
       schema: {
         tags: ["Auth"],
         summary: "Registrar un nuevo Estudio y Usuario Admin",

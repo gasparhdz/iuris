@@ -24,12 +24,24 @@ export function useSisfeLiveUpdates(enabled = true) {
   useEffect(() => {
     if (!enabled) return undefined;
 
-    const source = abrirCanalNotificaciones({
+    let source = null;
+    let cancelled = false;
+
+    abrirCanalNotificaciones({
       onNovedades: () => invalidateSisfeQueries(queryClient),
       onSisfeSync: (payload) => invalidateSisfeQueries(queryClient, { casoId: payload?.casoId }),
+    }).then((opened) => {
+      if (cancelled) {
+        opened?.close();
+        return;
+      }
+      source = opened;
     });
 
-    return () => source?.close();
+    return () => {
+      cancelled = true;
+      source?.close();
+    };
   }, [enabled, queryClient]);
 
   // Mientras corre el sync, refrescar listados y detalle sin esperar al cierre del navegador.

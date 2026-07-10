@@ -34,6 +34,24 @@ function normalizeRoleCode(value?: string) {
     .toUpperCase();
 }
 
+/** Roles de plataforma: solo asignables desde el panel admin SaaS. */
+const PLATFORM_ROLES = new Set(["SUPERADMIN", "ADMIN"]);
+
+/** Roles de tenant permitidos desde el módulo EQUIPO. */
+const TENANT_ROLES = new Set(["DIRECTOR", "ABOGADO", "ASISTENTE", "ASESOR_FINANCIERO"]);
+
+/**
+ * Valida que el rol sea asignable desde EQUIPO (allowlist + denylist de plataforma).
+ * Exportado para tests.
+ */
+export function assertAssignableEquipoRole(rolCodigo?: string): string {
+  const normalized = normalizeRoleCode(rolCodigo);
+  if (PLATFORM_ROLES.has(normalized) || !TENANT_ROLES.has(normalized)) {
+    throw new Error("PLATFORM_ROLE_FORBIDDEN");
+  }
+  return normalized;
+}
+
 function roleName(codigo: string) {
   const nombreMap: Record<string, string> = {
     DIRECTOR: "Director",
@@ -82,7 +100,8 @@ async function findOrCreateRole(codigo: string) {
 }
 
 async function replaceUserRole(usuarioId: number, rolCodigo: string) {
-  const role = await findOrCreateRole(rolCodigo);
+  const normalized = assertAssignableEquipoRole(rolCodigo);
+  const role = await findOrCreateRole(normalized);
   await db.delete(usuarioRoles).where(eq(usuarioRoles.usuarioId, usuarioId));
   await db.insert(usuarioRoles).values({ usuarioId, rolId: role.id });
   await bumpUserTokenVersion(usuarioId);
@@ -173,6 +192,18 @@ export async function crearEquipoUsuario(
     return reply.status(409).send({ error: { code: "EMAIL_IN_USE", message: "El email ya esta registrado" } });
   }
 
+  let roleCodigo: string;
+  try {
+    roleCodigo = assertAssignableEquipoRole(body.rol || "ABOGADO");
+  } catch {
+    return reply.status(403).send({
+      error: {
+        code: "PLATFORM_ROLE_FORBIDDEN",
+        message: "No se pueden asignar roles de plataforma ni roles no permitidos desde Equipo",
+      },
+    });
+  }
+
   const passwordHash = await bcrypt.hash(body.password, 12);
   const [created] = await db
     .insert(usuarios)
@@ -188,12 +219,12 @@ export async function crearEquipoUsuario(
     })
     .returning();
 
-  await replaceUserRole(created.id, body.rol || "ABOGADO");
+  await replaceUserRole(created.id, roleCodigo);
   await SecurityAuditService.log({
     evento: "USER_CREATE",
     request,
     targetEstudioId: estudioId,
-    metadata: { targetUsuarioId: created.id, rol: normalizeRoleCode(body.rol || "ABOGADO") },
+    metadata: { targetUsuarioId: created.id, rol: roleCodigo },
   });
   return reply.status(201).send({ data: await serializeUsuario(created) });
 }
@@ -230,6 +261,18 @@ export async function actualizarEquipoUsuario(
     updateData.email = email;
   }
   const nextRole = body.rol ? normalizeRoleCode(body.rol) : null;
+  if (nextRole) {
+    try {
+      assertAssignableEquipoRole(nextRole);
+    } catch {
+      return reply.status(403).send({
+        error: {
+          code: "PLATFORM_ROLE_FORBIDDEN",
+          message: "No se pueden asignar roles de plataforma ni roles no permitidos desde Equipo",
+        },
+      });
+    }
+  }
   if (nextRole && nextRole !== "DIRECTOR") {
     const currentRoles = await getUserRoles(usuarioId);
     if (currentRoles.includes("DIRECTOR") && (await activeDirectorsCount(estudioId)) <= 1) {

@@ -1,38 +1,50 @@
 import type { FastifyPluginAsync } from "fastify";
 import { AuthQueries } from "../db/queries/auth.queries.js";
 import { registrarConexion } from "../sse/sse.registry.js";
-import type { JwtPayload } from "../plugins/auth.plugin.js";
+import { consumeSseTicket, issueSseTicket } from "../services/sse-ticket.service.js";
 
 /**
  * Canal de notificaciones en tiempo real vía Server-Sent Events.
  *
- * EventSource (navegador) no permite enviar headers personalizados, por lo que
- * el access token viaja como query param `?token=...` y se valida manualmente
- * con la misma lógica que el plugin de auth (jwtVerify + tokenVersion + estudio).
+ * EventSource no permite headers personalizados. En lugar del access JWT en
+ * querystring, el cliente pide un ticket efímero (POST /ticket) y lo usa una
+ * sola vez en GET /stream?token=<ticket>.
  */
 export const sseRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.post("/ticket", {
+    preHandler: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const issued = await issueSseTicket({
+        usuarioId: request.authUser.id,
+        estudioId: request.authUser.estudioId,
+        tokenVersion: request.authUser.tokenVersion,
+      });
+      return reply.send({ data: issued });
+    } catch {
+      return reply.status(503).send({
+        error: { code: "SSE_TICKET_UNAVAILABLE", message: "No se pudo emitir ticket SSE" },
+      });
+    }
+  });
+
   fastify.get("/stream", async (request, reply) => {
     const token = (request.query as { token?: string } | undefined)?.token;
     if (!token) {
       return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Falta token" } });
     }
 
-    let payload: JwtPayload;
-    try {
-      payload = fastify.jwt.verify<JwtPayload>(token);
-    } catch {
-      return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalido o expirado" } });
+    // Solo tickets SSE efímeros: un access JWT normal no está en el store → 401.
+    const ticketPayload = await consumeSseTicket(token);
+    if (!ticketPayload) {
+      return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Ticket SSE invalido o expirado" } });
     }
 
-    if (!payload.id || !payload.estudioId) {
-      return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Sesion invalida" } });
-    }
-
-    const authData = await AuthQueries.findUserAuthData(payload.id);
+    const authData = await AuthQueries.findUserAuthData(ticketPayload.usuarioId);
     if (
-      !authData?.activo ||
-      authData.tokenVersion !== payload.tokenVersion ||
-      authData.estudioId !== payload.estudioId
+      !authData?.activo
+      || authData.tokenVersion !== ticketPayload.tokenVersion
+      || authData.estudioId !== ticketPayload.estudioId
     ) {
       return reply.status(401).send({ error: { code: "UNAUTHORIZED", message: "Sesion invalida" } });
     }
@@ -50,7 +62,6 @@ export const sseRoutes: FastifyPluginAsync = async (fastify) => {
 
     registrarConexion(authData.id, reply);
 
-    // Heartbeat para evitar que proxies cierren la conexión por inactividad.
     const heartbeat = setInterval(() => {
       try {
         reply.raw.write(": ping\n\n");
@@ -61,7 +72,6 @@ export const sseRoutes: FastifyPluginAsync = async (fastify) => {
 
     reply.raw.on("close", () => clearInterval(heartbeat));
 
-    // Mantenemos la conexión abierta: no resolvemos con un body.
     return reply;
   });
 };
