@@ -103,7 +103,13 @@ function handleKnownError(error: unknown, reply: FastifyReply) {
     PERIODICIDAD_NOT_FOUND: "Periodicidad no encontrada",
     VALOR_JUS_NOT_FOUND: "No hay valor JUS disponible",
     PARAMETRO_PENDIENTE_NOT_FOUND: "No se encontró el estado pendiente",
+    PLAN_DEUDORES_DISTINTOS: "No se pueden mezclar honorarios de distintos deudores en el mismo cobro o plan",
+    HONORARIO_SIN_DEUDOR: "El honorario no tiene un deudor válido",
   };
+
+  if (error.message === "PLAN_DEUDORES_DISTINTOS" || error.message === "HONORARIO_SIN_DEUDOR") {
+    return reply.status(400).send({ error: { code: "INVALID_INPUT", message: errors[error.message] } });
+  }
 
   const message = errors[error.message];
   if (message) return reply.status(404).send({ error: { code: "NOT_FOUND", message } });

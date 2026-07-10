@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, categorias, clientes, honorarios, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago } from "../schema.js";
+import { casos, categorias, clientes, honorarios, ingresos, ingresoAplicaciones, parametros, planCuotas, planesPago, terceros } from "../schema.js";
 
 type NewPlanPago = typeof planesPago.$inferInsert;
 type NewPlanCuota = typeof planCuotas.$inferInsert;
@@ -16,6 +17,32 @@ export class PlanesQueries {
     ];
     if (filters.clienteId) conditions.push(eq(planesPago.clienteId, filters.clienteId));
     if (filters.casoId) conditions.push(eq(planesPago.casoId, filters.casoId));
+
+    const obligadoCliente = alias(clientes, "plan_obligado_cliente");
+    const deudorNombreExpr = sql<string | null>`CASE
+      WHEN ${honorarios.obligadoTerceroId} IS NOT NULL THEN
+        COALESCE(
+          ${terceros.razonSocial},
+          NULLIF(CONCAT_WS(', ', ${terceros.apellido}, ${terceros.nombre}), ''),
+          ${terceros.nombre}
+        )
+      WHEN ${honorarios.obligadoClienteId} IS NOT NULL THEN
+        COALESCE(
+          ${obligadoCliente.razonSocial},
+          NULLIF(CONCAT_WS(', ', ${obligadoCliente.apellido}, ${obligadoCliente.nombre}), ''),
+          ${obligadoCliente.nombre}
+        )
+      ELSE
+        COALESCE(
+          ${clientes.razonSocial},
+          NULLIF(CONCAT_WS(', ', ${clientes.apellido}, ${clientes.nombre}), ''),
+          ${clientes.nombre}
+        )
+    END`;
+    const tipoDeudorExpr = sql<"cliente" | "tercero">`CASE
+      WHEN ${honorarios.obligadoTerceroId} IS NOT NULL THEN 'tercero'
+      ELSE 'cliente'
+    END`;
 
     return await db
       .select({
@@ -43,6 +70,10 @@ export class PlanesQueries {
         updatedBy: planesPago.updatedBy,
         deletedAt: planesPago.deletedAt,
         deletedBy: planesPago.deletedBy,
+        obligadoClienteId: honorarios.obligadoClienteId,
+        obligadoTerceroId: honorarios.obligadoTerceroId,
+        tipoDeudor: tipoDeudorExpr,
+        deudorNombre: deudorNombreExpr,
         cliente: {
           id: clientes.id,
           nombre: clientes.nombre,
@@ -64,6 +95,18 @@ export class PlanesQueries {
       .leftJoin(clientes, eq(planesPago.clienteId, clientes.id))
       .leftJoin(casos, eq(planesPago.casoId, casos.id))
       .leftJoin(parametros, eq(planesPago.periodicidadId, parametros.id))
+      .leftJoin(honorarios, and(
+        eq(planesPago.honorarioId, honorarios.id),
+        eq(honorarios.estudioId, planesPago.estudioId),
+      ))
+      .leftJoin(terceros, and(
+        eq(honorarios.obligadoTerceroId, terceros.id),
+        eq(terceros.estudioId, planesPago.estudioId),
+      ))
+      .leftJoin(obligadoCliente, and(
+        eq(honorarios.obligadoClienteId, obligadoCliente.id),
+        eq(obligadoCliente.estudioId, planesPago.estudioId),
+      ))
       .where(and(...conditions))
       .orderBy(planesPago.fechaInicio);
   }
@@ -462,7 +505,7 @@ export class PlanesQueries {
     return row ?? null;
   }
 
-  /** Honorarios del cliente que cobran de forma directa (sin plan activo) y siguen con saldo pendiente. */
+  /** Honorarios sin plan activo con saldo pendiente, filtrados por deudor-cliente. */
   static async findHonorariosSinPlanCobrables(estudioId: number, clienteId: number, casoId?: number) {
     const cobradoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "COBRADO");
     const anuladoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "ANULADO");
@@ -478,7 +521,9 @@ export class PlanesQueries {
       .from(honorarios)
       .where(and(
         eq(honorarios.estudioId, estudioId),
-        eq(honorarios.clienteId, clienteId),
+        // Deudor = este cliente (tercero obligado queda fuera del FIFO del cliente).
+        isNull(honorarios.obligadoTerceroId),
+        sql`coalesce(${honorarios.obligadoClienteId}, ${honorarios.clienteId}) = ${clienteId}`,
         casoId ? eq(honorarios.casoId, casoId) : undefined,
         eq(honorarios.activo, true),
         isNull(honorarios.deletedAt),
@@ -492,6 +537,38 @@ export class PlanesQueries {
       ));
 
     return rows;
+  }
+
+  /**
+   * Honorarios sin plan cuyo deudor es un tercero concreto (para FIFO acotado al deudor).
+   */
+  static async findHonorariosSinPlanCobrablesPorTercero(estudioId: number, terceroId: number, casoId?: number) {
+    const cobradoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "COBRADO");
+    const anuladoParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "ANULADO");
+    const incobrableParam = await this.findParametroByCodigo("ESTADO_HONORARIO", "INCOBRABLE");
+    const excluidos = [cobradoParam?.id, anuladoParam?.id, incobrableParam?.id]
+      .filter((id): id is number => id != null);
+
+    return await db
+      .select({
+        id: honorarios.id,
+        vencimiento: sql<Date>`coalesce(${honorarios.fechaVencimiento}, ${honorarios.fechaRegulacion})`,
+      })
+      .from(honorarios)
+      .where(and(
+        eq(honorarios.estudioId, estudioId),
+        eq(honorarios.obligadoTerceroId, terceroId),
+        casoId ? eq(honorarios.casoId, casoId) : undefined,
+        eq(honorarios.activo, true),
+        isNull(honorarios.deletedAt),
+        excluidos.length > 0 ? sql`(${honorarios.estadoId} is null or ${honorarios.estadoId} not in (${sql.join(excluidos, sql`, `)}))` : undefined,
+        sql`not exists (
+          select 1 from ${planesPago}
+          where ${planesPago.honorarioId} = ${honorarios.id}
+            and ${planesPago.activo} = true
+            and ${planesPago.deletedAt} is null
+        )`,
+      ));
   }
 
   static async findAplicacionesByGastoActivas(gastoId: number, tx: DbExecutor = db) {

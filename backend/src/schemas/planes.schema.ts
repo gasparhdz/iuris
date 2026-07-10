@@ -107,6 +107,10 @@ export const planPagoItemSchema = z.object({
     codigo: z.string(),
     nombre: z.string(),
   }).nullable().optional(),
+  obligadoClienteId: z.number().nullable().optional(),
+  obligadoTerceroId: z.number().nullable().optional(),
+  tipoDeudor: z.enum(["cliente", "tercero"]).optional(),
+  deudorNombre: z.string().nullable().optional(),
 });
 
 export const planCuotaItemSchema = z.object({

@@ -33,10 +33,12 @@ import {
   cuotaMontoDisplay,
   cuotaTotalAPagar,
   denseTableSx,
+  deudorNombreFromItem,
   findParamByCodigo,
   formatDateShort,
   formatMoneyAr,
   invalidateFinanzasQueries,
+  isDeudorTercero,
   planMontoCuota,
   ellipsisSx,
   linkSx,
@@ -263,6 +265,7 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
             <TableRow sx={{ bgcolor: alpha(theme.palette.info.main, 0.08) }}>
               <TableCell sx={{ width: 42 }} />
               <TableCell sx={{ fontWeight: 900 }}>Cliente</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Deudor</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Expediente</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Monto cuota</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Periodicidad</TableCell>
@@ -289,6 +292,18 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                         </Tooltip>
                       ) : "—"}
                     </TableCell>
+                    <TableCell sx={{ maxWidth: 200 }}>
+                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                        <Tooltip title={deudorNombreFromItem(plan, plan.cliente)}>
+                          <Typography variant="body2" sx={{ ...ellipsisSx, fontWeight: 800 }}>
+                            {deudorNombreFromItem(plan, plan.cliente)}
+                          </Typography>
+                        </Tooltip>
+                        {isDeudorTercero(plan) && (
+                          <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800, flexShrink: 0 }} />
+                        )}
+                      </Stack>
+                    </TableCell>
                     <TableCell sx={{ maxWidth: 240 }}>
                       {plan.caso ? (
                         <Tooltip title={casoLabel(plan.caso)}>
@@ -308,7 +323,7 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={6} sx={{ p: 0, borderBottom: expanded ? "1px solid" : 0, borderColor: "divider" }}>
+                    <TableCell colSpan={7} sx={{ p: 0, borderBottom: expanded ? "1px solid" : 0, borderColor: "divider" }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <PlanCuotasPanel plan={plan} invalidateKeys={invalidateKeys} />
                       </Collapse>
@@ -333,6 +348,14 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                     <Typography variant="body2" sx={{ fontWeight: 900, display: "block" }} noWrap>
                       {plan.cliente ? clienteLabel(plan.cliente) : "Sin cliente"}
                     </Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 800 }}>
+                        Deudor: {deudorNombreFromItem(plan, plan.cliente)}
+                      </Typography>
+                      {isDeudorTercero(plan) && (
+                        <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
+                      )}
+                    </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
                       {plan.caso ? casoLabel(plan.caso) : "Sin expediente"}
                     </Typography>

@@ -11,8 +11,9 @@ import { calcularMora, moraAplica, normalizeRegimenMora } from "./mora.js";
 import { imputarIngreso, ordenarPrelacion, type DeudaImputable } from "./imputacion.js";
 import { assertMonedaSoportada } from "./moneda.validator.js";
 import type { CreateIngresoInput, CreatePlanPagoInput, PlanPagoQuery } from "../schemas/planes.schema.js";
-import { planCuotas, planesPago, gastos } from "../db/schema.js";
+import { planCuotas, planesPago, gastos, honorarios } from "../db/schema.js";
 import { and, eq, ne, isNull, sql } from "drizzle-orm";
+import { assertMismoDeudor } from "./honorario-deudor.js";
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type PlanCuotaDetalle = NonNullable<Awaited<ReturnType<typeof PlanesQueries.findCuotaById>>>;
@@ -45,6 +46,10 @@ export class PlanesService {
         cliente: plan.cliente?.id ? plan.cliente : null,
         caso: plan.caso?.id ? plan.caso : null,
         periodicidad: plan.periodicidad?.id ? plan.periodicidad : null,
+        obligadoClienteId: plan.obligadoClienteId ?? null,
+        obligadoTerceroId: plan.obligadoTerceroId ?? null,
+        tipoDeudor: plan.tipoDeudor ?? "cliente",
+        deudorNombre: plan.deudorNombre ?? null,
         totalCobradoArs,
         totalSaldoArs,
         totalHonorarioArs: totalCobradoArs + totalSaldoArs,
@@ -55,6 +60,13 @@ export class PlanesService {
   static async createPlan(estudioId: number, userId: number, data: CreatePlanPagoInput) {
     const honorario = await HonorariosQueries.findHonorarioById(data.honorarioId, estudioId);
     if (!honorario) throw new Error("HONORARIO_NOT_FOUND");
+
+    // Un plan hereda el deudor del honorario (cliente u obligado tercero).
+    assertMismoDeudor([{
+      clienteId: honorario.clienteId,
+      obligadoClienteId: honorario.obligadoClienteId ?? null,
+      obligadoTerceroId: honorario.obligadoTerceroId ?? null,
+    }]);
 
     await this.ensureRelatedEntities(estudioId, data.clienteId ?? undefined, data.casoId ?? undefined);
 
@@ -141,8 +153,20 @@ export class PlanesService {
 
       const cuotas = await PlanesQueries.insertPlanCuotas(tx, cuotasToInsert);
 
+      const deudor = assertMismoDeudor([{
+        clienteId: honorario.clienteId,
+        obligadoClienteId: honorario.obligadoClienteId ?? null,
+        obligadoTerceroId: honorario.obligadoTerceroId ?? null,
+      }]);
+
       return {
-        plan: normalizePlan(plan),
+        plan: normalizePlan({
+          ...plan,
+          obligadoClienteId: honorario.obligadoClienteId ?? null,
+          obligadoTerceroId: honorario.obligadoTerceroId ?? null,
+          tipoDeudor: deudor.tipo,
+          deudorNombre: honorario.obligadoNombre ?? null,
+        }),
         cuotas: cuotas.map((cuota) => normalizeCuota({ ...cuota, montoCobrado: 0 }, {
           tasaInteresMensual,
           regimenMora: data.regimenMora ?? "SIMPLE",
@@ -233,14 +257,19 @@ export class PlanesService {
         })
         .from(planCuotas)
         .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+        .innerJoin(honorarios, eq(planesPago.honorarioId, honorarios.id))
         .where(
           and(
-            eq(planesPago.clienteId, data.clienteId),
+            eq(planesPago.estudioId, estudioId),
+            // FIFO del cliente: solo cuotas cuyo deudor es ese cliente (no cruza a terceros).
+            isNull(honorarios.obligadoTerceroId),
+            sql`coalesce(${honorarios.obligadoClienteId}, ${honorarios.clienteId}) = ${data.clienteId}`,
             data.casoId ? eq(planesPago.casoId, data.casoId) : undefined,
             eq(planCuotas.activo, true),
             eq(planesPago.activo, true),
             isNull(planCuotas.deletedAt),
             isNull(planesPago.deletedAt),
+            isNull(honorarios.deletedAt),
             pagadaId ? ne(planCuotas.estadoId, pagadaId) : undefined,
             condonadaId ? ne(planCuotas.estadoId, condonadaId) : undefined
           )
@@ -321,6 +350,34 @@ export class PlanesService {
 
       const politica = honorario.politicaJusId ? await PlanesQueries.findParametroById(honorario.politicaJusId) : null;
       honorariosDetalle.push({ ...honorario, politicaCodigo: politica?.codigo ?? null });
+    }
+
+    // Todas las deudas de honorario/cuota del ingreso deben compartir el mismo deudor.
+    const honorariosParaDeudor: Array<{
+      clienteId: number | null;
+      obligadoClienteId: number | null;
+      obligadoTerceroId: number | null;
+    }> = [
+      ...honorariosDetalle.map((h) => ({
+        clienteId: h.clienteId,
+        obligadoClienteId: h.obligadoClienteId ?? null,
+        obligadoTerceroId: h.obligadoTerceroId ?? null,
+      })),
+    ];
+    const planIdsUnicos = [...new Set(cuotasDetalle.map((c) => c.planId))];
+    for (const planId of planIdsUnicos) {
+      const plan = await PlanesQueries.findPlanById(planId, estudioId);
+      if (!plan) throw new Error("PLAN_NOT_FOUND");
+      const honorarioPlan = await HonorariosQueries.findHonorarioById(plan.honorarioId, estudioId);
+      if (!honorarioPlan) throw new Error("HONORARIO_NOT_FOUND");
+      honorariosParaDeudor.push({
+        clienteId: honorarioPlan.clienteId,
+        obligadoClienteId: honorarioPlan.obligadoClienteId ?? null,
+        obligadoTerceroId: honorarioPlan.obligadoTerceroId ?? null,
+      });
+    }
+    if (honorariosParaDeudor.length > 0) {
+      assertMismoDeudor(honorariosParaDeudor);
     }
 
     const fechaIngreso = new Date(data.fechaIngreso);
