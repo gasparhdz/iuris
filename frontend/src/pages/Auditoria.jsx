@@ -46,6 +46,7 @@ import {
 } from "@mui/icons-material";
 import api from "../api/axios";
 import { getAuditoriaLogs } from "../api/auditoria.api";
+import { useListState } from "../hooks/useListState";
 
 const entidadOptions = [
   { value: "", label: "Todos" },
@@ -357,11 +358,23 @@ function AuditoriaRow({ item, catalog }) {
 
 export default function Auditoria() {
   const theme = useTheme();
-  const [filters, setFilters] = useState({ entidad: "", usuarioId: "", desde: "", hasta: "" });
-  const [appliedFilters, setAppliedFilters] = useState({ entidad: "", usuarioId: "", desde: "", hasta: "" });
-  const [page, setPage] = useState(1);
-  const [orderBy, setOrderBy] = useState("createdAt");
-  const [order, setOrder] = useState("desc");
+  const [list, setList] = useListState(
+    {
+      entidad: "",
+      usuarioId: "",
+      desde: "",
+      hasta: "",
+      page: 1,
+      orderBy: "createdAt",
+      order: "desc",
+    },
+    { debounceKeys: [] },
+  );
+  const { entidad, usuarioId, desde, hasta, page, orderBy, order } = list;
+  const setPage = (page) => setList({ page });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const [filters, setFilters] = useState({ entidad, usuarioId, desde, hasta });
   const [logs, setLogs] = useState([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 50 });
   const [loading, setLoading] = useState(true);
@@ -401,10 +414,10 @@ export default function Auditoria() {
         const params = {
           page,
           limit: 50,
-          entidad: appliedFilters.entidad || undefined,
-          usuarioId: appliedFilters.usuarioId || undefined,
-          desde: appliedFilters.desde || undefined,
-          hasta: appliedFilters.hasta || undefined,
+          entidad: entidad || undefined,
+          usuarioId: usuarioId || undefined,
+          desde: desde || undefined,
+          hasta: hasta || undefined,
         };
         const data = await getAuditoriaLogs(params);
         if (active) {
@@ -426,7 +439,7 @@ export default function Auditoria() {
     return () => {
       active = false;
     };
-  }, [appliedFilters, page]);
+  }, [entidad, usuarioId, desde, hasta, page]);
 
   const catalog = catalogQuery.data ?? {};
   const usuarios = usuariosQuery.data ?? [];
@@ -469,15 +482,13 @@ export default function Auditoria() {
   };
 
   const applyFilters = () => {
-    setPage(1);
-    setAppliedFilters(filters);
+    setList({ ...filters, page: 1 });
   };
 
   const clearFilters = () => {
     const empty = { entidad: "", usuarioId: "", desde: "", hasta: "" };
     setFilters(empty);
-    setAppliedFilters(empty);
-    setPage(1);
+    setList({ ...empty, page: 1 });
   };
 
   return (

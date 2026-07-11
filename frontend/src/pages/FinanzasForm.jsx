@@ -241,6 +241,7 @@ export default function FinanzasForm() {
   const initialMonedaCodigo = initialTipo === "gasto" || initialTipo === "ingreso" ? "ARS" : "JUS";
 
   const [tipoMovimiento, setTipoMovimiento] = useState(initialTipo);
+  const [editHydratedKey, setEditHydratedKey] = useState(null);
 
   // Ref para valores JUS — evita dependencia circular con queries que necesitan `form`
   const jusRef = useRef({ regulacion: 0, gasto: 0, ingreso: 0 });
@@ -497,7 +498,7 @@ export default function FinanzasForm() {
     });
   }, []);
 
-  const { control, handleSubmit, formState: { errors }, setValue, getValues, watch } = useForm({
+  const { control, handleSubmit, formState: { errors }, setValue, getValues, watch, reset } = useForm({
     resolver: (values, context, options) => {
       const currentSchema = tipoMovimiento === "honorario" ? honorarioSchema
                            : tipoMovimiento === "gasto" ? gastoSchema
@@ -658,12 +659,12 @@ export default function FinanzasForm() {
   jusRef.current.ingreso = valorJusIngresoQuery.data?.valor ?? 0;
 
   const entityQuery = useQuery({
-    queryKey: ["finanzas-form", tipoParam, editId, location.state?.item?.id],
+    queryKey: ["finanzas-form", tipoParam, editId],
     enabled: isEdit,
+    // Sin placeholder de location.state: al navegar desde el listado el item en state
+    // montaba el form antes de tiempo y el Select de obligado quedaba vacío;
+    // al refrescar (sin state) sí esperaba la API y funcionaba.
     queryFn: async () => {
-      if (location.state?.item && Number(location.state.item.id) === Number(editId)) {
-        return location.state.item;
-      }
       const tipo = normalizeTipoMovimiento(tipoParam);
       if (tipo === "honorario") {
         const { data } = await api.get(`/honorarios/${editId}`);
@@ -790,8 +791,9 @@ export default function FinanzasForm() {
   const isExtrajudicial = !form.casoId;
 
   const obligadosOptions = useMemo(() => {
+    let options;
     if (form.casoId) {
-      return (participantesElegiblesQuery.data ?? []).map((p) => ({
+      options = (participantesElegiblesQuery.data ?? []).map((p) => ({
         key: `${p.tipo}:${p.id}`,
         tipo: p.tipo,
         id: p.id,
@@ -800,19 +802,58 @@ export default function FinanzasForm() {
         nombreCompleto: p.nombreCompleto,
         label: `${p.rol} — ${p.nombreCompleto}`,
       }));
+    } else if (selectedCliente) {
+      const nombreCompleto = clienteLabel(selectedCliente);
+      options = [{
+        key: `cliente:${selectedCliente.id}`,
+        tipo: "cliente",
+        id: selectedCliente.id,
+        parteId: parteClienteParam?.id ?? null,
+        rol: parteClienteParam?.nombre ?? "Cliente",
+        nombreCompleto,
+        label: `${parteClienteParam?.nombre ?? "Cliente"} — ${nombreCompleto}`,
+      }];
+    } else {
+      options = [];
     }
-    if (!selectedCliente) return [];
-    const nombreCompleto = clienteLabel(selectedCliente);
-    return [{
-      key: `cliente:${selectedCliente.id}`,
-      tipo: "cliente",
-      id: selectedCliente.id,
-      parteId: parteClienteParam?.id ?? null,
-      rol: parteClienteParam?.nombre ?? "Cliente",
-      nombreCompleto,
-      label: `${parteClienteParam?.nombre ?? "Cliente"} — ${nombreCompleto}`,
-    }];
-  }, [form.casoId, participantesElegiblesQuery.data, selectedCliente, parteClienteParam]);
+
+    // En edición asegurar que el valor hidratado exista como opción del Select
+    // (p. ej. mientras cargan participantes o si el deudor ya no está en elegibles).
+    if (isEdit && form.obligadoKey && !options.some((o) => o.key === form.obligadoKey)) {
+      const [tipo, idRaw] = String(form.obligadoKey).split(":");
+      const id = Number(idRaw);
+      if ((tipo === "cliente" || tipo === "tercero") && Number.isFinite(id)) {
+        const nombre = entityQuery.data?.obligadoNombre
+          || (tipo === "cliente" && selectedCliente && Number(selectedCliente.id) === id
+            ? clienteLabel(selectedCliente)
+            : `#${id}`);
+        const rol = tipo === "tercero" ? "Participante" : (parteClienteParam?.nombre ?? "Cliente");
+        options = [
+          ...options,
+          {
+            key: form.obligadoKey,
+            tipo,
+            id,
+            parteId: form.parteId ? Number(form.parteId) : null,
+            rol,
+            nombreCompleto: nombre,
+            label: `${rol} — ${nombre}`,
+          },
+        ];
+      }
+    }
+
+    return options;
+  }, [
+    isEdit,
+    form.casoId,
+    form.obligadoKey,
+    form.parteId,
+    participantesElegiblesQuery.data,
+    selectedCliente,
+    parteClienteParam,
+    entityQuery.data?.obligadoNombre,
+  ]);
 
   const applyCasoSelection = useCallback((caso) => {
     if (caso) {
@@ -1137,16 +1178,20 @@ export default function FinanzasForm() {
   }, [tipoMovimiento, isJus, isAlCobro, setForm]);
 
   useEffect(() => {
-    if (!isEdit || !entityQuery.data) return;
+    if (!isEdit || !entityQuery.isSuccess || !entityQuery.data) return;
     const item = entityQuery.data;
+    const hydrateKey = `${normalizeTipoMovimiento(tipoParam)}:${item.id}`;
+    if (editHydratedKey === hydrateKey) return;
+
     const tipo = normalizeTipoMovimiento(tipoParam);
     setTipoMovimiento(tipo);
 
     const base = {
+      ...EMPTY_FORM,
       clienteId: item.clienteId ? String(item.clienteId) : "",
       casoId: item.casoId ? String(item.casoId) : "",
-      monto: "",
       monedaCodigo: "ARS",
+      monto: "",
     };
 
     if (tipo === "honorario") {
@@ -1162,16 +1207,11 @@ export default function FinanzasForm() {
           code = "USD";
         }
       }
-      setForm({
-        ...EMPTY_FORM,
+      reset({
         ...base,
         conceptoId: String(item.conceptoId ?? ""),
-        parteId: String(item.parteId ?? ""),
-        obligadoKey: item.obligadoClienteId
-          ? `cliente:${item.obligadoClienteId}`
-          : item.obligadoTerceroId
-            ? `tercero:${item.obligadoTerceroId}`
-            : "",
+        parteId: item.parteId != null ? String(item.parteId) : "",
+        obligadoKey: deudorKeyFromItem(item) ?? "",
         monedaCodigo: code,
         monto: jus > 0 ? String(jus) : String(item.montoPesos ?? ""),
         fechaRegulacion: dateInputFromIso(item.fechaRegulacion) || todayInputValue(),
@@ -1192,8 +1232,7 @@ export default function FinanzasForm() {
           code = "USD";
         }
       }
-      setForm({
-        ...EMPTY_FORM,
+      reset({
         ...base,
         conceptoGastoId: item.conceptoId ? String(item.conceptoId) : "",
         descripcion: item.descripcion ?? "",
@@ -1212,8 +1251,7 @@ export default function FinanzasForm() {
           code = "USD";
         }
       }
-      setForm({
-        ...EMPTY_FORM,
+      reset({
         ...base,
         descripcion: item.descripcion ?? "",
         conceptoIngresoId: item.tipoId ? String(item.tipoId) : "",
@@ -1222,9 +1260,47 @@ export default function FinanzasForm() {
         monedaCodigo: code,
         honorarioVinculoId: item.cuotaId ? String(item.cuotaId) : "",
         gastoVinculoId: "",
+        obligadoKey: deudorKeyFromItem(item) ?? "",
+        parteId: item.parteId ? String(item.parteId) : "",
       });
     }
-  }, [isEdit, entityQuery.data, tipoParam, catalog.ESTADO_GASTO, catalog.ESTADO_HONORARIO, catalog.MONEDA, setForm]);
+    setEditHydratedKey(hydrateKey);
+  }, [
+    isEdit,
+    editHydratedKey,
+    entityQuery.isSuccess,
+    entityQuery.data,
+    tipoParam,
+    catalog.ESTADO_GASTO,
+    catalog.ESTADO_HONORARIO,
+    catalog.MONEDA,
+    reset,
+  ]);
+
+  // Restaurar obligado si quedó vacío tras montar el Select (carrera con otros efectos).
+  useEffect(() => {
+    if (!isEdit || !entityQuery.isSuccess) return;
+    if (tipoMovimiento !== "honorario" && tipoMovimiento !== "ingreso") return;
+    const item = entityQuery.data;
+    if (!item) return;
+    const key = deudorKeyFromItem(item);
+    if (!key) return;
+    const current = String(getValues("obligadoKey") || "");
+    if (current) return;
+    setValue("obligadoKey", key, { shouldValidate: false, shouldDirty: false });
+    if (item.parteId != null && !getValues("parteId")) {
+      setValue("parteId", String(item.parteId), { shouldValidate: false, shouldDirty: false });
+    }
+  }, [
+    isEdit,
+    tipoMovimiento,
+    entityQuery.isSuccess,
+    entityQuery.data,
+    participantesElegiblesQuery.isSuccess,
+    obligadosOptions,
+    getValues,
+    setValue,
+  ]);
 
   useEffect(() => {
     if (isEdit || !queryHonorarioId || tipoMovimiento !== "ingreso") return;
@@ -1493,11 +1569,27 @@ export default function FinanzasForm() {
     convenio: "Crear convenio / plan de pago",
   };
 
-  const loading = catalogQuery.isLoading || (isEdit && entityQuery.isLoading);
+  const expectedEditKey = isEdit ? `${normalizeTipoMovimiento(tipoParam)}:${editId}` : null;
+  const loading = catalogQuery.isLoading
+    || (isEdit && !entityQuery.isSuccess)
+    || (isEdit && editHydratedKey !== expectedEditKey);
 
   useEffect(() => {
+    // En edición nunca auto-limpiar: el valor viene de la entidad y puede
+    // no coincidir con opciones mientras cargan participantes.
+    if (isEdit) return;
     if (tipoMovimiento !== "honorario" && tipoMovimiento !== "ingreso") return;
     if (!form.obligadoKey) return;
+    if (form.casoId) {
+      const participantesPending =
+        participantesElegiblesQuery.isLoading
+        || !participantesElegiblesQuery.isFetched
+        || !participantesElegiblesQuery.isSuccess;
+      if (participantesPending) return;
+      if ((participantesElegiblesQuery.data ?? []).length === 0 && obligadosOptions.length === 0) {
+        return;
+      }
+    }
     const stillValid = obligadosOptions.some((o) => o.key === form.obligadoKey);
     if (!stillValid) {
       setForm((f) => ({
@@ -1509,7 +1601,18 @@ export default function FinanzasForm() {
           : {}),
       }));
     }
-  }, [tipoMovimiento, form.obligadoKey, obligadosOptions, setForm]);
+  }, [
+    tipoMovimiento,
+    isEdit,
+    form.obligadoKey,
+    form.casoId,
+    obligadosOptions,
+    participantesElegiblesQuery.isLoading,
+    participantesElegiblesQuery.isFetched,
+    participantesElegiblesQuery.isSuccess,
+    participantesElegiblesQuery.data,
+    setForm,
+  ]);
 
   useEffect(() => {
     if ((tipoMovimiento !== "honorario" && tipoMovimiento !== "ingreso") || isEdit) return;
@@ -1688,33 +1791,28 @@ export default function FinanzasForm() {
               )}
             />
           </Grid>
-          {form.casoId && (tipoMovimiento === "honorario" || tipoMovimiento === "ingreso") ? (
+          {form.casoId && tipoMovimiento === "honorario" ? (
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller
                 name="obligadoKey"
                 control={control}
                 render={({ field, fieldState: { error } }) => {
-                  const obligadoLocked = tipoMovimiento === "honorario" && isEdit && Boolean(entityQuery.data?.tienePagosImputados);
+                  const obligadoLocked = isEdit && Boolean(entityQuery.data?.tienePagosImputados);
                   return (
                     <FormControl fullWidth size="small" error={Boolean(error)} disabled={obligadoLocked}>
                       <InputLabel>Obligado al pago</InputLabel>
                       <Select
                         label="Obligado al pago"
-                        {...field}
+                        name={field.name}
+                        inputRef={field.ref}
+                        onBlur={field.onBlur}
+                        value={field.value ?? ""}
                         disabled={obligadoLocked}
                         onChange={(e) => {
                           const key = e.target.value;
                           const option = obligadosOptions.find((o) => o.key === key);
                           field.onChange(key);
                           setValue("parteId", option?.parteId ? String(option.parteId) : "", { shouldValidate: false });
-                          if (tipoMovimiento === "ingreso") {
-                            setValue("selectedCuotaIds", [], { shouldValidate: false });
-                            setValue("selectedGastoIds", [], { shouldValidate: false });
-                            setValue("selectedHonorarioIds", [], { shouldValidate: false });
-                            setValue("cuotaVinculoId", "", { shouldValidate: false });
-                            setValue("gastoVinculoId", "", { shouldValidate: false });
-                            setValue("honorarioVinculoId", "", { shouldValidate: false });
-                          }
                         }}
                       >
                         {obligadosOptions.map((o) => (
@@ -1758,11 +1856,11 @@ export default function FinanzasForm() {
                         error={Boolean(error)}
                         helperText={
                           error?.message
-                          || (tipoMovimiento === "honorario" || tipoMovimiento === "ingreso"
+                          || (tipoMovimiento === "honorario"
                             ? "Será el obligado al pago"
                             : "Sin expediente (extrajudicial)")
                         }
-                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio" || tipoMovimiento === "ingreso"}
+                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio"}
                         inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
                       />
                     )}
@@ -2550,7 +2648,7 @@ export default function FinanzasForm() {
                 </Alert>
               </Grid>
             )}
-            <Grid size={{ xs: 12, md: form.casoId ? 12 : 6 }}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <Controller
                 name="casoId"
                 control={control}
@@ -2587,7 +2685,48 @@ export default function FinanzasForm() {
                 )}
               />
             </Grid>
-            {!form.casoId && (
+            {form.casoId ? (
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Controller
+                  name="obligadoKey"
+                  control={control}
+                  render={({ field, fieldState: { error } }) => (
+                    <FormControl fullWidth size="small" error={Boolean(error)}>
+                      <InputLabel>Obligado al pago</InputLabel>
+                      <Select
+                        label="Obligado al pago"
+                        name={field.name}
+                        inputRef={field.ref}
+                        onBlur={field.onBlur}
+                        value={field.value ?? ""}
+                        onChange={(e) => {
+                          const key = e.target.value;
+                          const option = obligadosOptions.find((o) => o.key === key);
+                          field.onChange(key);
+                          setValue("parteId", option?.parteId ? String(option.parteId) : "", { shouldValidate: false });
+                          setValue("selectedCuotaIds", [], { shouldValidate: false });
+                          setValue("selectedGastoIds", [], { shouldValidate: false });
+                          setValue("selectedHonorarioIds", [], { shouldValidate: false });
+                          setValue("cuotaVinculoId", "", { shouldValidate: false });
+                          setValue("gastoVinculoId", "", { shouldValidate: false });
+                          setValue("honorarioVinculoId", "", { shouldValidate: false });
+                        }}
+                      >
+                        {obligadosOptions.map((o) => (
+                          <MenuItem key={o.key} value={o.key}>{o.label}</MenuItem>
+                        ))}
+                      </Select>
+                      {error && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>{error.message}</Typography>}
+                      {participantesElegiblesQuery.isLoading && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.75 }}>
+                          Cargando participantes…
+                        </Typography>
+                      )}
+                    </FormControl>
+                  )}
+                />
+              </Grid>
+            ) : (
               <Grid size={{ xs: 12, md: 6 }}>
                 <Controller
                   name="clienteId"
@@ -2606,7 +2745,7 @@ export default function FinanzasForm() {
                           size="small"
                           label="Cliente"
                           error={Boolean(error)}
-                          helperText={error?.message || "Sin expediente (extrajudicial)"}
+                          helperText={error?.message || "Será el obligado al pago"}
                           required
                         />
                       )}
@@ -2935,7 +3074,7 @@ export default function FinanzasForm() {
               </Grid>
               </>
             )}
-            {tipoMovimiento === "ingreso" && (
+            {tipoMovimiento === "ingreso" && Boolean(obligadoIngresoKey) && !obligadoIngresoEsTercero && (
               <Grid size={{ xs: 12 }}>
                 <Paper elevation={0} sx={{ border: "1px solid", borderColor: errors.selectedGastoIds ? "error.main" : "divider", borderRadius: 2.5, overflow: "hidden" }}>
                   <Stack
@@ -2991,13 +3130,9 @@ export default function FinanzasForm() {
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
                           {!form.clienteId
                             ? "Seleccioná un cliente para ver gastos pendientes."
-                            : form.casoId && !form.obligadoKey
-                              ? "Seleccioná el obligado al pago para ver gastos imputables."
-                              : obligadoIngresoEsTercero
-                                ? "Los gastos son del cliente: no se pueden imputar a un cobro de la contraparte."
-                                : gastosIngresoQuery.isLoading
-                                  ? "Cargando gastos..."
-                                  : "No hay gastos pendientes para este filtro."}
+                            : gastosIngresoQuery.isLoading
+                              ? "Cargando gastos..."
+                              : "No hay gastos pendientes para este filtro."}
                         </Typography>
                       </Box>
                     ) : (

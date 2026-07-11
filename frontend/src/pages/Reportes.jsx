@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import * as XLSX from "xlsx";
 import { motion } from "framer-motion";
@@ -67,6 +67,7 @@ import api from "../api/axios";
 import { fetchEquipoUsuarios } from "../api/equipo";
 import { fetchAllPages } from "../api/pagination";
 import { useAuth } from "../auth/useAuth";
+import { useListState } from "../hooks/useListState";
 import {
   casoLabel,
   clienteLabel,
@@ -434,17 +435,36 @@ function StatusChip({ status }) {
 export default function Reportes() {
   const { user } = useAuth();
   const isDirector = hasDirectorRole(user);
-  const [tab, setTab] = useState("financiero");
-  const [period, setPeriod] = useState("anio");
-  const [customFrom, setCustomFrom] = useState(dateInputValue(new Date(new Date().getFullYear(), 0, 1)));
-  const [customTo, setCustomTo] = useState(dateInputValue(new Date()));
-  const [clientSearch, setClientSearch] = useState("");
-  const [clientOrderBy, setClientOrderBy] = useState("saldo");
-  const [clientOrder, setClientOrder] = useState("desc");
+  const [list, setList] = useListState(
+    {
+      tab: "financiero",
+      period: "anio",
+      customFrom: dateInputValue(new Date(new Date().getFullYear(), 0, 1)),
+      customTo: dateInputValue(new Date()),
+      clientSearch: "",
+      clientOrderBy: "saldo",
+      clientOrder: "desc",
+    },
+    { debounceKeys: ["clientSearch"] },
+  );
+  const {
+    tab,
+    period,
+    customFrom,
+    customTo,
+    clientSearch,
+    clientOrderBy,
+    clientOrder,
+  } = list;
+  const setTab = (tab) => setList({ tab });
+  const setPeriod = (period) => setList({ period });
+  const setCustomFrom = (customFrom) => setList({ customFrom });
+  const setCustomTo = (customTo) => setList({ customTo });
+  const setClientSearch = (clientSearch) => setList({ clientSearch });
 
   useEffect(() => {
-    if (!isDirector && tab === "productividad") setTab("financiero");
-  }, [isDirector, tab]);
+    if (!isDirector && tab === "productividad") setList({ tab: "financiero" });
+  }, [isDirector, tab, setList]);
 
   const availableTabs = useMemo(
     () => [
@@ -841,11 +861,13 @@ export default function Reportes() {
 
   const handleClientSort = (field) => {
     if (clientOrderBy === field) {
-      setClientOrder((current) => (current === "asc" ? "desc" : "asc"));
+      setList({ clientOrder: clientOrder === "asc" ? "desc" : "asc" });
       return;
     }
-    setClientOrderBy(field);
-    setClientOrder(field === "cliente" ? "asc" : "desc");
+    setList({
+      clientOrderBy: field,
+      clientOrder: field === "cliente" ? "asc" : "desc",
+    });
   };
 
   const handleExportExcel = () => {

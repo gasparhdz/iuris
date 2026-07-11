@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
@@ -7,6 +7,8 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import * as XLSX from "xlsx";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
+import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 import { denseTableSx } from "../theme/tableStyles";
 import { unwrapPaged } from "./finanzasUtils";
 import {
@@ -90,15 +92,6 @@ function getAvatarColor(name = "") {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function useDebounced(value, delay = 300) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return debounced;
-}
-
 function buildClienteListParams({
   page,
   rowsPerPage,
@@ -145,16 +138,34 @@ export default function Clientes() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEditar, canEliminar } = usePermisos("CLIENTES");
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [list, setList] = useListState({
+    search: "",
+    typeFilter: "all",
+    statusFilter: "all",
+    orderBy: "nombre",
+    order: "asc",
+    page: 0,
+    rowsPerPage: 10,
+  });
+  const {
+    search,
+    typeFilter,
+    statusFilter,
+    orderBy,
+    order,
+    page,
+    rowsPerPage,
+  } = list;
+  const setSearch = (search) => setList({ search });
+  const setTypeFilter = (typeFilter) => setList({ typeFilter });
+  const setStatusFilter = (statusFilter) => setList({ statusFilter });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const debouncedSearch = useDebounced(search);
-  const [orderBy, setOrderBy] = useState("nombre");
-  const [order, setOrder] = useState("asc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const listParams = useMemo(
     () => buildClienteListParams({

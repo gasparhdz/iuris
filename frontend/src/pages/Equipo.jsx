@@ -42,6 +42,7 @@ import {
   updateEquipoUsuario,
 } from "../api/equipo";
 import { useAuth } from "../auth/useAuth";
+import { useListState } from "../hooks/useListState";
 
 const MAX_USUARIOS_PLAN = 10;
 
@@ -124,7 +125,9 @@ export default function Equipo() {
   const { user } = useAuth();
   const isDirector = hasDirectorRole(user);
   const currentUserId = Number(user?.id);
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({ search: "" });
+  const { search } = list;
+  const setSearch = (search) => setList({ search });
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_USER);

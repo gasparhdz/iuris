@@ -8,6 +8,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
 import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 import {
   Avatar,
   Box,
@@ -76,17 +77,38 @@ export default function Eventos() {
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEditar, canEliminar } = usePermisos("EVENTOS");
 
-  const [search, setSearch] = useState("");
-  const [timeFilter, setTimeFilter] = useState("proximos"); // proximos, pasados, todos
-  const [tipoFilter, setTipoFilter] = useState("all");
-  const [estadoFilter, setEstadoFilter] = useState("all");
-  const [view, setView] = useState("list");
+  const [list, setList] = useListState({
+    search: "",
+    timeFilter: "proximos",
+    tipoFilter: "all",
+    estadoFilter: "all",
+    view: "list",
+    orderBy: "fechas",
+    order: "asc",
+    page: 0,
+    rowsPerPage: 10,
+  });
+  const {
+    search,
+    timeFilter,
+    tipoFilter,
+    estadoFilter,
+    view,
+    orderBy,
+    order,
+    page,
+    rowsPerPage,
+  } = list;
+  const setSearch = (search) => setList({ search });
+  const setTimeFilter = (timeFilter) => setList({ timeFilter });
+  const setTipoFilter = (tipoFilter) => setList({ tipoFilter });
+  const setEstadoFilter = (estadoFilter) => setList({ estadoFilter });
+  const setView = (view) => setList({ view });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [deleteTarget, setDeleteTarget] = useState(null);
-
-  const [orderBy, setOrderBy] = useState("fechas");
-  const [order, setOrder] = useState("asc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const debouncedSearch = useDebounced(search);
 

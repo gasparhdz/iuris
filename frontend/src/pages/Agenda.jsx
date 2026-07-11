@@ -62,6 +62,7 @@ import {
   Edit as EditIcon,
   WarningAmber as WarningIcon,
 } from "@mui/icons-material";
+import { useListState } from "../hooks/useListState";
 
 import "react-big-calendar/lib/css/react-big-calendar.css";
 
@@ -140,9 +141,18 @@ export default function Agenda() {
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   // Estados locales para la navegación del Calendario
-  const [view, setView] = useState(() => {
-    return localStorage.getItem("calView") || "month";
-  });
+  const [list, setList] = useListState(
+    {
+      view: localStorage.getItem("calView") || "month",
+      showEventos: true,
+      showTareas: true,
+    },
+    { debounceKeys: [] },
+  );
+  const { view, showEventos, showTareas } = list;
+  const setView = (view) => setList({ view });
+  const setShowEventos = (showEventos) => setList({ showEventos });
+  const setShowTareas = (showTareas) => setList({ showTareas });
   const [date, setDate] = useState(new Date());
 
   const handleViewChange = (newView) => {
@@ -153,10 +163,6 @@ export default function Agenda() {
   };
 
   const currentView = isMobile ? "agenda" : view;
-
-  // Switches de visibilidad
-  const [showEventos, setShowEventos] = useState(true);
-  const [showTareas, setShowTareas] = useState(true);
 
   // Estados del Drawer (panel lateral de detalles)
   const [drawerOpen, setDrawerOpen] = useState(false);

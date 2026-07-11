@@ -38,6 +38,7 @@ import {
   WarningAmber,
 } from "@mui/icons-material";
 import { fetchAdminEstudios, toggleAdminEstudio } from "../../api/admin";
+import { useListState } from "../../hooks/useListState";
 import { formatNumber, panelSx, planChipSx } from "./adminUi";
 
 export default function SaaSEstudios() {
@@ -46,7 +47,9 @@ export default function SaaSEstudios() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({ search: "" });
+  const { search } = list;
+  const setSearch = (search) => setList({ search });
   const [suspendTarget, setSuspendTarget] = useState(null);
 
   const estudiosQuery = useQuery({

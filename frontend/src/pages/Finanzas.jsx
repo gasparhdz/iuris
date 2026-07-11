@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link as RouterLink, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { usePermisos } from "../auth/usePermissions";
@@ -9,6 +9,8 @@ import Grid from "@mui/material/Grid";
 import { motion } from "framer-motion";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
+import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 
 const MotionDiv = motion.div;
 import {
@@ -130,15 +132,6 @@ function getPresetRange(key) {
     default:
       return { from: null, to: null };
   }
-}
-
-function useDebounced(value, delay = 300) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return debounced;
 }
 
 function TabPanel({ children, value, index }) {
@@ -282,15 +275,35 @@ export default function Finanzas() {
   // Crear cobros usa el modulo INGRESOS; cada seccion edita/elimina su propio modulo.
   const canCrearActivo = tabKey === "gastos" ? gastosPerm.canCrear : tabKey === "ingresos" ? ingresosPerm.canCrear : honorariosPerm.canCrear;
 
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({
+    search: "",
+    orderBy: "fecha",
+    order: "desc",
+    page: 0,
+    rowsPerPage: 10,
+    datePreset: "todo",
+    customFrom: "",
+    customTo: "",
+  });
+  const {
+    search,
+    orderBy,
+    order,
+    page,
+    rowsPerPage,
+    datePreset,
+    customFrom,
+    customTo,
+  } = list;
+  const setSearch = (search) => setList({ search });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
+  const setDatePreset = (datePreset) => setList({ datePreset });
+  const setCustomFrom = (customFrom) => setList({ customFrom });
+  const setCustomTo = (customTo) => setList({ customTo });
   const debouncedSearch = useDebounced(search);
-  const [orderBy, setOrderBy] = useState("fecha");
-  const [order, setOrder] = useState("desc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [datePreset, setDatePreset] = useState("todo");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
 
   const dateRange = useMemo(() => {
     if (datePreset === "custom") {
@@ -356,9 +369,14 @@ export default function Finanzas() {
     order,
   }), [page, rowsPerPage, debouncedSearch, orderBy, order]);
 
+  const skipPageResetRef = useRef(true);
   useEffect(() => {
-    setPage(0);
-  }, [tabKey, debouncedSearch, orderBy, order, datePreset, customFrom, customTo]);
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
+    setList({ page: 0 });
+  }, [tabKey, debouncedSearch, orderBy, order, datePreset, customFrom, customTo, setList]);
 
   const honorariosQuery = useQuery({
     queryKey: ["honorarios", "list", honorariosListParams],
@@ -690,14 +708,19 @@ export default function Finanzas() {
     }
   }, [tabKey, kpis, theme]);
 
-  // La navegación entre secciones ahora es por la barra lateral (?tab=). Al cambiar de
-  // sección limpiamos búsqueda, orden y página (lo que antes hacía el onChange de las tabs).
+  // Al cambiar de sección (sidebar ?tab=) limpiamos búsqueda/orden/página.
+  // No correr en el mount: si no, al volver del detalle se pierde el estado restaurado de la URL.
+  const prevTabKeyRef = useRef(tabKey);
   useEffect(() => {
-    setSearch("");
-    setOrderBy(tabKey === "cuentas_corrientes" ? "saldo" : "fecha");
-    setOrder("desc");
-    setPage(0);
-  }, [tabKey]);
+    if (prevTabKeyRef.current === tabKey) return;
+    prevTabKeyRef.current = tabKey;
+    setList({
+      search: "",
+      orderBy: tabKey === "cuentas_corrientes" ? "saldo" : "fecha",
+      order: "desc",
+      page: 0,
+    });
+  }, [tabKey, setList]);
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";

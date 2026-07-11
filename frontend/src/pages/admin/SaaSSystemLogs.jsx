@@ -27,6 +27,7 @@ import {
 import Grid from "@mui/material/Grid";
 import { BugReport, CheckCircle, ExpandLess, ExpandMore } from "@mui/icons-material";
 import { fetchSystemErrorLogs } from "../../api/admin";
+import { useListState } from "../../hooks/useListState";
 
 const emptyFilters = { nivel: "", statusCode: "", desde: "", hasta: "" };
 const statusOptions = ["400", "403", "404", "405", "409", "500"];
@@ -114,9 +115,20 @@ const codeBlockSx = {
 
 export default function SaaSSystemLogs() {
   const theme = useTheme();
-  const [filters, setFilters] = useState(emptyFilters);
-  const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
-  const [page, setPage] = useState(1);
+  const [list, setList] = useListState(
+    {
+      nivel: "",
+      statusCode: "",
+      desde: "",
+      hasta: "",
+      page: 1,
+    },
+    { debounceKeys: [] },
+  );
+  const { nivel, statusCode, desde, hasta, page } = list;
+  const setPage = (page) => setList({ page });
+  const [filters, setFilters] = useState({ nivel, statusCode, desde, hasta });
+  const appliedFilters = { nivel, statusCode, desde, hasta };
   const [logs, setLogs] = useState([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 50 });
   const [loading, setLoading] = useState(true);
@@ -157,17 +169,15 @@ export default function SaaSSystemLogs() {
     return () => {
       active = false;
     };
-  }, [appliedFilters, page]);
+  }, [appliedFilters.nivel, appliedFilters.statusCode, appliedFilters.desde, appliedFilters.hasta, page]);
 
   const applyFilters = () => {
-    setPage(1);
-    setAppliedFilters(filters);
+    setList({ ...filters, page: 1 });
   };
 
   const clearFilters = () => {
     setFilters(emptyFilters);
-    setAppliedFilters(emptyFilters);
-    setPage(1);
+    setList({ ...emptyFilters, page: 1 });
   };
 
   return (

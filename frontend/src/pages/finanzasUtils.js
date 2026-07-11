@@ -69,12 +69,20 @@ export function casoLabel(caso) {
 /** Clave estable del deudor de un honorario o plan (cliente:id | tercero:id). */
 export function deudorKeyFromItem(item) {
   if (!item) return null;
-  if (item.tipoDeudor === "tercero" || item.obligadoTerceroId != null) {
-    const id = item.obligadoTerceroId;
-    return id != null ? `tercero:${id}` : null;
+  // Preferir IDs explícitos de obligado (no depender de tipoDeudor: si viene
+  // "tercero" sin id, el fallback anterior devolvía null y el Select quedaba vacío).
+  if (item.obligadoTerceroId != null && item.obligadoTerceroId !== "") {
+    return `tercero:${item.obligadoTerceroId}`;
   }
-  const clienteId = item.obligadoClienteId ?? item.clienteId ?? null;
-  return clienteId != null ? `cliente:${clienteId}` : null;
+  if (item.obligadoClienteId != null && item.obligadoClienteId !== "") {
+    return `cliente:${item.obligadoClienteId}`;
+  }
+  if (item.tipoDeudor === "tercero") {
+    const id = item.deudorId ?? item.terceroId ?? null;
+    return id != null && id !== "" ? `tercero:${id}` : null;
+  }
+  const clienteId = item.clienteId ?? item.deudorId ?? null;
+  return clienteId != null && clienteId !== "" ? `cliente:${clienteId}` : null;
 }
 
 export function deudorNombreFromItem(item, fallbackCliente = null) {

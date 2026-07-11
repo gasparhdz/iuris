@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { usePermisos } from "../auth/usePermissions";
+import { useListState } from "../hooks/useListState";
 import {
   Alert,
   Box,
@@ -66,8 +67,13 @@ export default function ValoresJus() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEliminar } = usePermisos("VALORJUS");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [list, setList] = useListState(
+    { page: 0, rowsPerPage: 10 },
+    { debounceKeys: [] },
+  );
+  const { page, rowsPerPage } = list;
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [manualOpen, setManualOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState(initialForm);

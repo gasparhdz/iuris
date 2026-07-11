@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { alpha, useTheme } from "@mui/material/styles";
@@ -16,12 +16,15 @@ import {
 import Grid from "@mui/material/Grid";
 import { Groups, Search } from "@mui/icons-material";
 import { fetchAdminEstudios } from "../../api/admin";
+import { useListState } from "../../hooks/useListState";
 import { formatNumber, panelSx, planChipSx } from "./adminUi";
 
 export default function SaaSUsuarios() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({ search: "" });
+  const { search } = list;
+  const setSearch = (search) => setList({ search });
 
   const estudiosQuery = useQuery({
     queryKey: ["admin", "estudios"],

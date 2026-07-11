@@ -48,6 +48,7 @@ import {
   toggleAdminUsuarioEstudio,
   updateAdminUsuarioEstudio,
 } from "../../api/admin";
+import { useListState } from "../../hooks/useListState";
 import { panelSx } from "./adminUi";
 
 const EMPTY_USER = {
@@ -105,7 +106,9 @@ export default function SaaSEstudioUsuarios() {
   const { id: estudioId } = useParams();
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({ search: "" });
+  const { search } = list;
+  const setSearch = (search) => setList({ search });
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_USER);

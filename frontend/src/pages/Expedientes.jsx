@@ -9,6 +9,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
 import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 import SisfeSyncButton from "../components/SisfeSyncButton";
 import { denseTableSx } from "../theme/tableStyles";
 import {
@@ -81,16 +82,35 @@ export default function Expedientes() {
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEditar, canEliminar } = usePermisos("CASOS");
 
-  const [search, setSearch] = useState("");
-  const [ramaFilter, setRamaFilter] = useState("all");
-  const [estadoFilter, setEstadoFilter] = useState("all");
-  const [radicacionFilter, setRadicacionFilter] = useState("all");
+  const [list, setList] = useListState({
+    search: "",
+    ramaFilter: "all",
+    estadoFilter: "all",
+    radicacionFilter: "all",
+    orderBy: "caratula",
+    order: "asc",
+    page: 0,
+    rowsPerPage: 10,
+  });
+  const {
+    search,
+    ramaFilter,
+    estadoFilter,
+    radicacionFilter,
+    orderBy,
+    order,
+    page,
+    rowsPerPage,
+  } = list;
+  const setSearch = (search) => setList({ search });
+  const setRamaFilter = (ramaFilter) => setList({ ramaFilter });
+  const setEstadoFilter = (estadoFilter) => setList({ estadoFilter });
+  const setRadicacionFilter = (radicacionFilter) => setList({ radicacionFilter });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [deleteTarget, setDeleteTarget] = useState(null);
-
-  const [orderBy, setOrderBy] = useState("caratula");
-  const [order, setOrder] = useState("asc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const debouncedSearch = useDebounced(search);
 

@@ -42,6 +42,7 @@ import {
   toggleAdminPlanSuscripcion,
   updateAdminPlanSuscripcion,
 } from "../../api/admin";
+import { useListState } from "../../hooks/useListState";
 import { formatNumber, panelSx, planChipSx } from "./adminUi";
 
 const EMPTY_FORM = {
@@ -66,7 +67,9 @@ export default function SaaSPlanesSuscripcion() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({ search: "" });
+  const { search } = list;
+  const setSearch = (search) => setList({ search });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);

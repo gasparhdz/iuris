@@ -13,6 +13,7 @@ import { Add, ArrowBack, Business, Delete, Edit, Person, Save, Search } from "@m
 import api from "../api/axios";
 import { createTercero, deleteTercero, fetchTerceros, updateTercero } from "../api/terceros";
 import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 import { usePermisos } from "../auth/usePermissions";
 
 const EMPTY = {
@@ -67,15 +68,23 @@ export default function Terceros() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEditar, canEliminar } = usePermisos("TERCEROS");
-  const [search, setSearch] = useState("");
+  const [list, setList] = useListState({
+    search: "",
+    orderBy: "nombre",
+    order: "asc",
+    page: 0,
+    rowsPerPage: 10,
+  });
+  const { search, orderBy, order, page, rowsPerPage } = list;
+  const setSearch = (search) => setList({ search });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState(EMPTY);
-  const [orderBy, setOrderBy] = useState("nombre");
-  const [order, setOrder] = useState("asc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const debouncedSearch = useDebounced(search);
 

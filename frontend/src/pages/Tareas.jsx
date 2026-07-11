@@ -8,6 +8,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import api from "../api/axios";
 import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
+import { useListState } from "../hooks/useListState";
 import { denseTableSx } from "../theme/tableStyles";
 import {
   Avatar,
@@ -86,17 +87,36 @@ export default function Tareas() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
   const { canCrear, canEditar, canEliminar } = usePermisos("TAREAS");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("pendientes");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [view, setView] = useState("list");
+  const [list, setList] = useListState({
+    search: "",
+    statusFilter: "pendientes",
+    priorityFilter: "all",
+    view: "list",
+    orderBy: "titulo",
+    order: "asc",
+    page: 0,
+    rowsPerPage: 10,
+  });
+  const {
+    search,
+    statusFilter,
+    priorityFilter,
+    view,
+    orderBy,
+    order,
+    page,
+    rowsPerPage,
+  } = list;
+  const setSearch = (search) => setList({ search });
+  const setStatusFilter = (statusFilter) => setList({ statusFilter });
+  const setPriorityFilter = (priorityFilter) => setList({ priorityFilter });
+  const setView = (view) => setList({ view });
+  const setOrderBy = (orderBy) => setList({ orderBy });
+  const setOrder = (order) => setList({ order });
+  const setPage = (page) => setList({ page });
+  const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [cascadeTarget, setCascadeTarget] = useState(null);
-
-  const [orderBy, setOrderBy] = useState("titulo");
-  const [order, setOrder] = useState("asc");
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const debouncedSearch = useDebounced(search);
 
