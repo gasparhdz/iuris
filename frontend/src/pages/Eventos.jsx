@@ -54,7 +54,6 @@ import {
   LocationOn,
   Search,
   TableRows,
-  Today,
   ViewModule,
   WarningAmber,
 } from "@mui/icons-material";
@@ -176,45 +175,12 @@ export default function Eventos() {
   const totalCount = eventosQuery.data?.meta?.total ?? 0;
   const displayEvents = allEvents;
 
-  const kpiFilterParams = useMemo(() => {
-    const params = {
-      search: debouncedSearch.trim() || undefined,
-      tipoId: tipoFilter === "all" ? undefined : Number(tipoFilter),
-      estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
-    };
-    if (timeFilter === "proximos") params.upcoming = "true";
-    if (timeFilter === "pasados") params.upcoming = "false";
-    return params;
-  }, [debouncedSearch, tipoFilter, estadoFilter, timeFilter]);
-
-  const eventosKpiQuery = useQuery({
-    queryKey: ["eventos", "kpi", kpiFilterParams],
-    queryFn: () => fetchAllPages("/eventos", kpiFilterParams),
-    staleTime: 1000 * 60,
-  });
-
-  const kpiEvents = useMemo(() => eventosKpiQuery.data ?? [], [eventosKpiQuery.data]);
-
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === "asc";
     setOrder(isAsc ? "desc" : "asc");
     setOrderBy(property);
     setPage(0);
   };
-
-  const kpis = useMemo(() => {
-    const now = new Date();
-    const todayEvents = kpiEvents.filter((e) => e.fechaInicio && sameDay(new Date(e.fechaInicio), now)).length;
-    const upcomingEvents = kpiEvents.filter((e) => e.fechaInicio && new Date(e.fechaInicio) >= now).length;
-    const noLocationEvents = kpiEvents.filter((e) => !e.ubicacion).length;
-
-    return [
-      { label: "Total Eventos", value: kpiEvents.length, icon: <CalendarMonth />, tone: theme.palette.primary.main },
-      { label: "Para Hoy", value: todayEvents, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
-      { label: "Próximos", value: upcomingEvents, icon: <CalendarMonth />, tone: "hsl(150, 80%, 35%)" },
-      { label: "Sin Ubicación", value: noLocationEvents, icon: <LocationOn />, tone: "hsl(200, 80%, 45%)" },
-    ];
-  }, [kpiEvents, theme.palette.primary.main]);
 
   function invalidateEventos() {
     queryClient.invalidateQueries({ queryKey: ["eventos"] });
@@ -280,22 +246,6 @@ export default function Eventos() {
           </ButtonGroup>
         </Stack>
       </Paper>
-
-      <Grid container spacing={2} sx={{ mb: 2.5 }}>
-        {kpis.map((kpi) => (
-          <Grid key={kpi.label} size={{ xs: 12, sm: 6, lg: 3 }}>
-            <Paper elevation={0} sx={{ p: 2.25, borderRadius: "16px", border: "1px solid", borderColor: alpha(kpi.tone, 0.35), bgcolor: "background.paper", transition: "transform 0.18s ease, box-shadow 0.18s ease", "&:hover": { transform: "translateY(-4px)", boxShadow: theme.palette.mode === "dark" ? "0 18px 38px rgba(0,0,0,0.34)" : "0 18px 38px rgba(15,23,42,0.08)" } }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 900, textTransform: "uppercase" }}>{kpi.label}</Typography>
-                  <Typography variant="h4" sx={{ fontWeight: 950, mt: 0.5 }}>{kpi.value}</Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: alpha(kpi.tone, 0.12), color: kpi.tone }}>{kpi.icon}</Avatar>
-              </Stack>
-            </Paper>
-          </Grid>
-        ))}
-      </Grid>
 
       {eventosQuery.isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
@@ -579,52 +529,49 @@ function EventTable({
                     </Typography>
                   </TableCell>
                   <TableCell sx={{ maxWidth: 240 }}>
-                    <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                      {cliente && (
-                        <Tooltip title={clienteLabel(cliente)}>
-                          <Link
-                            component={RouterLink}
-                            to={`/clientes/${cliente.id}`}
-                            state={{ from: currentPath }}
-                            variant="caption"
-                            sx={{
-                              fontWeight: 800,
-                              textDecoration: "none",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxWidth: 220,
-                              display: "inline-block"
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {clienteLabel(cliente)}
-                          </Link>
-                        </Tooltip>
-                      )}
-                      {caso && (
-                        <Tooltip title={casoLabel(caso)}>
-                          <Link
-                            component={RouterLink}
-                            to={`/expedientes/${caso.id}`}
-                            state={{ from: currentPath }}
-                            variant="caption"
-                            sx={{
-                              fontWeight: 800,
-                              textDecoration: "none",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              maxWidth: 220,
-                              display: "inline-block"
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {casoLabel(caso)}
-                          </Link>
-                        </Tooltip>
-                      )}
-                    </Stack>
+                    {caso ? (
+                      <Tooltip title={casoLabel(caso)}>
+                        <Link
+                          component={RouterLink}
+                          to={`/expedientes/${caso.id}`}
+                          state={{ from: currentPath }}
+                          variant="caption"
+                          sx={{
+                            fontWeight: 800,
+                            textDecoration: "none",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: 220,
+                            display: "inline-block"
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {casoLabel(caso)}
+                        </Link>
+                      </Tooltip>
+                    ) : cliente ? (
+                      <Tooltip title={clienteLabel(cliente)}>
+                        <Link
+                          component={RouterLink}
+                          to={`/clientes/${cliente.id}`}
+                          state={{ from: currentPath }}
+                          variant="caption"
+                          sx={{
+                            fontWeight: 800,
+                            textDecoration: "none",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: 220,
+                            display: "inline-block"
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {clienteLabel(cliente)}
+                        </Link>
+                      </Tooltip>
+                    ) : null}
                   </TableCell>
                   <TableCell sx={{ maxWidth: 200 }}>
                     {event.ubicacion ? (

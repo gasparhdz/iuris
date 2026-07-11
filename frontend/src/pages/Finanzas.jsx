@@ -7,13 +7,10 @@ import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import CobranzasTable from "../components/finanzas/CobranzasTable";
 import { alpha, useTheme } from "@mui/material/styles";
 import Grid from "@mui/material/Grid";
-import { motion } from "framer-motion";
 import api from "../api/axios";
 import { fetchAllPages } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
-
-const MotionDiv = motion.div;
 import {
   Avatar,
   Box,
@@ -192,6 +189,24 @@ function EntityLink({ to, label, state }) {
     </Tooltip>
   );
 }
+
+/** Expediente si hay caso; si no, cliente. Nunca ambos (mismo criterio Eventos/Tareas). */
+function VinculacionCell({ caso, cliente, clienteLabelText, currentPath }) {
+  if (caso?.id) {
+    return <EntityLink to={`/expedientes/${caso.id}`} label={casoLabel(caso)} state={{ from: currentPath }} />;
+  }
+  const label = clienteLabelText || clienteLabel(cliente) || clienteLabelFromTareas(cliente);
+  return <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={label} state={{ from: currentPath }} />;
+}
+
+const headCellSx = {
+  fontWeight: 900,
+  fontSize: "0.72rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "text.secondary",
+  whiteSpace: "nowrap",
+};
 
 
 function TableSkeleton({ columnWidths }) {
@@ -808,7 +823,7 @@ export default function Finanzas() {
     <TableCell
       key={id}
       sortDirection={orderBy === id ? order : false}
-      sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", width }}
+      sx={{ ...headCellSx, width }}
     >
       <TableSortLabel
         active={orderBy === id}
@@ -818,6 +833,10 @@ export default function Finanzas() {
         {label}
       </TableSortLabel>
     </TableCell>
+  );
+
+  const staticHead = (label, width) => (
+    <TableCell sx={{ ...headCellSx, width }}>{label}</TableCell>
   );
 
   const tablePagination = (
@@ -994,36 +1013,23 @@ export default function Finanzas() {
       </Paper>
 
       {kpiCards.length > 0 && (
-        <MotionDiv
-          initial="hidden"
-          animate="show"
-          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
-        >
-          <Grid container spacing={2} sx={{ mb: 2.5 }}>
-            {kpiCards.map((card) => (
-              <Grid key={card.label} size={{ xs: 12, sm: 6, md: 4 }}>
-                <MotionDiv
-                  variants={{
-                    hidden: { opacity: 0, y: 16 },
-                    show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-                  }}
-                >
-                  {kpiLoading ? (
-                    <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} />
-                  ) : (
-                    <KpiCard
-                      label={card.label}
-                      valuePesos={card.value}
-                      valueUsd=""
-                      icon={card.icon}
-                      tone={card.tone}
-                    />
-                  )}
-                </MotionDiv>
-              </Grid>
-            ))}
-          </Grid>
-        </MotionDiv>
+        <Grid container spacing={2} sx={{ mb: 2.5 }}>
+          {kpiCards.map((card) => (
+            <Grid key={card.label} size={{ xs: 12, sm: 6, md: 4 }}>
+              {kpiLoading ? (
+                <Skeleton variant="rounded" height={96} sx={{ borderRadius: "16px" }} />
+              ) : (
+                <KpiCard
+                  label={card.label}
+                  valuePesos={card.value}
+                  valueUsd=""
+                  icon={card.icon}
+                  tone={card.tone}
+                />
+              )}
+            </Grid>
+          ))}
+        </Grid>
       )}
 
           <TabPanel value={tabIndex} index={0}>
@@ -1034,25 +1040,20 @@ export default function Finanzas() {
               emptyTitle="No hay honorarios para mostrar"
               emptySubtitle="Ajusta el buscador o registra honorarios desde un cliente o expediente."
               footer={tablePagination}
-              columnWidths={[180, "16%", "16%", "14%", 80, 100, 100, 80, 120]}
+              columnWidths={[180, "22%", "16%", 80, 100, 100, 80, 120]}
             >
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("cliente", "Cliente")}
-                    <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary" }}>
-                      Obligado
-                    </TableCell>
-                    {sortableHead("expediente", "Expediente")}
-                    {sortableHead("fecha", "Fecha Reg.")}
-                    {sortableHead("monto", "Monto Original")}
-                    {sortableHead("saldo", "Saldo Pendiente")}
+                    {sortableHead("expediente", "Vinculación")}
+                    {staticHead("Obligado")}
+                    {sortableHead("fecha", "Fecha")}
+                    {sortableHead("monto", "Monto")}
+                    {sortableHead("saldo", "Saldo")}
                     {sortableHead("estado", "Estado")}
-                    <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", width: 120 }}>
-                      Acciones
-                    </TableCell>
+                    {staticHead("Acciones", 120)}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1072,44 +1073,39 @@ export default function Finanzas() {
                     const chip = honorarioEstadoChip(item);
                     const saldoPendiente = getHonorarioSaldoPendiente(item, computed);
                     const puedeCobrar = chip.label === "Pendiente" || chip.label === "En Mora";
+                    const montoLabel = formatCurrency(computed.originalVal, computed.currency);
                     return (
                       <TableRow key={item.id} hover>
-                        <TableCell>
+                        <TableCell sx={{ maxWidth: 180 }}>
                           <Tooltip title={conceptoLabel(item)}>
                             <Typography variant="body2" sx={{ fontWeight: 700, ...ellipsisSx, maxWidth: 180 }}>{conceptoLabel(item)}</Typography>
                           </Tooltip>
                         </TableCell>
-                        <TableCell sx={{ maxWidth: 200 }}>
-                          <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabel(cliente) || clienteLabelFromTareas(cliente)} state={{ from: currentPath }} />
+                        <TableCell sx={{ maxWidth: 220, whiteSpace: "nowrap" }}>
+                          <VinculacionCell caso={caso} cliente={cliente} currentPath={currentPath} />
                         </TableCell>
-                        <TableCell sx={{ maxWidth: 180 }}>
+                        <TableCell sx={{ maxWidth: 160, whiteSpace: "nowrap" }}>
                           <Tooltip title={obligadoNombre}>
-                            <Typography variant="body2" sx={{ ...ellipsisSx, maxWidth: 180 }}>{obligadoNombre}</Typography>
+                            <Typography variant="body2" sx={{ ...ellipsisSx, maxWidth: 160 }}>{obligadoNombre}</Typography>
                           </Tooltip>
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 240 }}>
-                          <EntityLink to={caso?.id ? `/expedientes/${caso.id}` : null} label={casoLabel(caso)} state={{ from: currentPath }} />
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(item.fechaRegulacion)}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
-                          <Box sx={{ fontWeight: 800 }}>
-                            {formatCurrency(computed.originalVal, computed.currency)}
-                          </Box>
-                          {computed.originalRef && (
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: "0.75rem" }}>
-                              {computed.originalRef}
-                            </Typography>
-                          )}
+                          <Tooltip title={computed.originalRef || montoLabel}>
+                            <Box sx={{ fontWeight: 800, ...ellipsisSx, maxWidth: 120 }}>
+                              {montoLabel}
+                            </Box>
+                          </Tooltip>
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Box sx={{ fontWeight: 900 }}>
                             {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
                           </Box>
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} role="status" aria-label={`Estado: ${chip.label}`} />
                         </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
+                        <TableCell onClick={(e) => e.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
                           <Stack direction="row" spacing={0.25}>
                             {puedeCobrar && ingresosPerm.canCrear && (
                               <Tooltip title="Registrar cobro">
@@ -1197,24 +1193,21 @@ export default function Finanzas() {
                         {/* Nivel 1 — crítico */}
                         <Box sx={{ px: 2, pt: 1.75, pb: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                           <Box sx={{ minWidth: 0, flex: 1 }}>
-                            <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabel(cliente) || clienteLabelFromTareas(cliente)} state={{ from: currentPath }} sx={{ fontWeight: 800, fontSize: "0.95rem" }} />
+                            <VinculacionCell caso={caso} cliente={cliente} currentPath={currentPath} />
                           </Box>
                           <Box sx={{ flexShrink: 0, textAlign: "right" }}>
-                            <Typography variant="body1" fontWeight={800} color="primary.main" sx={{ lineHeight: 1.2 }}>
-                              {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
-                            </Typography>
-                            {computed.originalRef && (
-                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.68rem" }}>
-                                {computed.originalRef}
+                            <Tooltip title={computed.originalRef || formatCurrency(saldoPendiente.value, saldoPendiente.currency)}>
+                              <Typography variant="body1" fontWeight={800} color="primary.main" sx={{ lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                                {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
                               </Typography>
-                            )}
+                            </Tooltip>
                           </Box>
                         </Box>
 
                         {/* Nivel 2 — contexto */}
                         <Box sx={{ px: 2, pb: 1 }}>
                           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                            {conceptoLabel(item)}{caso ? ` · ${casoLabel(caso)}` : ""}
+                            {conceptoLabel(item)}
                           </Typography>
                           {(item.obligadoNombre || item.parte?.nombre) && (
                             <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
@@ -1270,19 +1263,18 @@ export default function Finanzas() {
               emptyTitle="No hay gastos para mostrar"
               emptySubtitle="Registra gastos desde la ficha de un cliente o expediente."
               footer={tablePagination}
-              columnWidths={[260, "25%", "25%", 80, 100, 80, 100]}
+              columnWidths={[260, "30%", 80, 100, 80, 100]}
             >
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("cliente", "Cliente")}
-                    {sortableHead("expediente", "Expediente")}
+                    {sortableHead("expediente", "Vinculación")}
                     {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
                     {sortableHead("estado", "Estado")}
-                    <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", color: "text.secondary", width: 100 }}>Acciones</TableCell>
+                    {staticHead("Acciones", 100)}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1296,22 +1288,24 @@ export default function Finanzas() {
                     const estadoCodigo = String(estadoGasto?.codigo ?? "").toUpperCase();
                     return (
                       <TableRow key={item.id} hover>
-                        <TableCell>
+                        <TableCell sx={{ maxWidth: 260 }}>
                           <Tooltip title={label}>
                             <Typography variant="body2" sx={{ fontWeight: 700, ...ellipsisSx, maxWidth: 260 }}>{label}</Typography>
                           </Tooltip>
                         </TableCell>
-                        <TableCell sx={{ maxWidth: 200 }}>
-                          <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabelFromTareas(cliente)} state={{ from: currentPath }} />
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 240 }}>
-                          <EntityLink to={caso?.id ? `/expedientes/${caso.id}` : null} label={casoLabel(caso)} state={{ from: currentPath }} />
+                        <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
+                          <VinculacionCell
+                            caso={caso}
+                            cliente={cliente}
+                            clienteLabelText={clienteLabelFromTareas(cliente)}
+                            currentPath={currentPath}
+                          />
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(item.fechaGasto)}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>
                           {gastoAmounts.formattedVal}
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Chip
                             size="small"
                             label={estadoGasto?.nombre || "Pendiente"}
@@ -1327,7 +1321,7 @@ export default function Finanzas() {
                             aria-label={`Estado: ${estadoGasto?.nombre || "Pendiente"}`}
                           />
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Stack direction="row" spacing={0.25}>
                             {ingresosPerm.canCrear && (
                             <Tooltip title="Reintegrar">
@@ -1410,9 +1404,14 @@ export default function Finanzas() {
                         {/* Nivel 1 — crítico */}
                         <Box sx={{ px: 2, pt: 1.75, pb: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                           <Box sx={{ minWidth: 0, flex: 1 }}>
-                            <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabelFromTareas(cliente)} state={{ from: currentPath }} sx={{ fontWeight: 800, fontSize: "0.95rem" }} />
+                            <VinculacionCell
+                              caso={caso}
+                              cliente={cliente}
+                              clienteLabelText={clienteLabelFromTareas(cliente)}
+                              currentPath={currentPath}
+                            />
                           </Box>
-                          <Typography variant="body1" fontWeight={800} color="warning.main" sx={{ flexShrink: 0 }}>
+                          <Typography variant="body1" fontWeight={800} color="warning.main" sx={{ flexShrink: 0, whiteSpace: "nowrap" }}>
                             {gastoAmounts.formattedVal}
                           </Typography>
                         </Box>
@@ -1420,7 +1419,7 @@ export default function Finanzas() {
                         {/* Nivel 2 — contexto */}
                         <Box sx={{ px: 2, pb: 1 }}>
                           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                            {label}{caso ? ` · ${casoLabel(caso)}` : ""}
+                            {label}
                           </Typography>
                         </Box>
 
@@ -1498,18 +1497,17 @@ export default function Finanzas() {
               emptyTitle="No hay ingresos para mostrar"
               emptySubtitle="Los cobros registrados apareceran aqui con su vinculacion."
               footer={tablePagination}
-              columnWidths={[260, "30%", "30%", 100, 100, 100]}
+              columnWidths={[260, "40%", 100, 100, 100]}
             >
               {/* Desktop Table View */}
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("cliente", "Cliente")}
-                    {sortableHead("expediente", "Expediente")}
-                    {sortableHead("fecha", "Fecha de Pago")}
+                    {sortableHead("expediente", "Vinculación")}
+                    {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
-                    <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", color: "text.secondary", width: 100 }}>Acciones</TableCell>
+                    {staticHead("Acciones", 100)}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1519,53 +1517,43 @@ export default function Finanzas() {
                     const caso = expedientesById.get(Number(item.casoId));
                     const conceptoIngreso = conceptosIngresoById.get(Number(item.tipoId));
                     const label = conceptoIngreso?.nombre || item.descripcion || `Ingreso #${item.id}`;
+                    const currency = getItemCurrencyGeneral(item, catalogQuery.data?.MONEDA ?? []);
+                    const amount = Number(item.monto ?? 0);
+                    const cotizacion = Number(item.cotizacionArs ?? 0);
+                    let montoDisplay = formatCurrency(amount, currency);
+                    let montoTooltip = montoDisplay;
+                    if (cotizacion > 0) {
+                      const formattedJus = new Intl.NumberFormat("es-AR", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 4,
+                      }).format(amount / cotizacion);
+                      montoDisplay = `${formatMoneyAr(amount)} (${formattedJus} JUS)`;
+                      montoTooltip = montoDisplay;
+                    }
                     return (
                       <TableRow key={item.id} hover>
-                        <TableCell>
+                        <TableCell sx={{ maxWidth: 260 }}>
                           <Tooltip title={item.descripcion || label}>
                             <Typography variant="body2" sx={{ fontWeight: 700, ...ellipsisSx, maxWidth: 260 }}>{label}</Typography>
                           </Tooltip>
                         </TableCell>
-                        <TableCell sx={{ maxWidth: 200 }}>
-                          <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabelFromTareas(cliente)} state={{ from: currentPath }} />
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 240 }}>
-                          <EntityLink to={caso?.id ? `/expedientes/${caso.id}` : null} label={casoLabel(caso)} state={{ from: currentPath }} />
+                        <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
+                          <VinculacionCell
+                            caso={caso}
+                            cliente={cliente}
+                            clienteLabelText={clienteLabelFromTareas(cliente)}
+                            currentPath={currentPath}
+                          />
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(item.fechaIngreso)}</TableCell>
-                        <TableCell sx={{ whiteSpace: "nowrap", color: "success.main" }}>
-                          {(() => {
-                            const currency = getItemCurrencyGeneral(item, catalogQuery.data?.MONEDA ?? []);
-                            const amount = Number(item.monto ?? 0);
-                            const cotizacion = Number(item.cotizacionArs ?? 0);
-
-                            if (cotizacion > 0) {
-                              const quantityJus = amount / cotizacion;
-                              const formattedJus = new Intl.NumberFormat("es-AR", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 4,
-                              }).format(quantityJus);
-
-                              return (
-                                <Box>
-                                  <Box component="div" sx={{ fontWeight: 900 }}>
-                                    {formatMoneyAr(amount)}
-                                  </Box>
-                                  <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: "0.75rem", fontWeight: 700 }}>
-                                    ({formattedJus} JUS)
-                                  </Typography>
-                                </Box>
-                              );
-                            }
-
-                            return (
-                              <Box sx={{ fontWeight: 900 }}>
-                                {formatCurrency(amount, currency)}
-                              </Box>
-                            );
-                          })()}
+                        <TableCell sx={{ whiteSpace: "nowrap", color: "success.main", maxWidth: 180 }}>
+                          <Tooltip title={montoTooltip}>
+                            <Box sx={{ fontWeight: 900, ...ellipsisSx, maxWidth: 180 }}>
+                              {montoDisplay}
+                            </Box>
+                          </Tooltip>
                         </TableCell>
-                        <TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Stack direction="row" spacing={0.25}>
                             {ingresosPerm.canEditar && <IconButton size="small" color="primary" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => navigate(finanzasEditarUrl("ingreso", item.id), { state: { from: currentPath, item } })} aria-label={`Editar ingreso de ${clienteNombre}`}><Edit fontSize="small" /></IconButton>}
                             {ingresosPerm.canEliminar && <IconButton size="small" color="error" sx={{ p: { xs: 1.25, md: 0.75 } }} onClick={() => finanzasModals.openDelete({ type: "ingreso", item })} aria-label={`Eliminar ingreso de ${clienteNombre}`}><Delete fontSize="small" /></IconButton>}
@@ -1594,6 +1582,7 @@ export default function Finanzas() {
                     const jusLabel = cotizacion > 0
                       ? `${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(amount / cotizacion)} JUS`
                       : null;
+                    const montoTooltip = jusLabel ? `${formattedAmount} (${jusLabel})` : formattedAmount;
                     return (
                       <Paper
                         key={item.id}
@@ -1611,22 +1600,24 @@ export default function Finanzas() {
                         {/* Nivel 1 — crítico */}
                         <Box sx={{ px: 2, pt: 1.75, pb: 1, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                           <Box sx={{ minWidth: 0, flex: 1 }}>
-                            <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={clienteLabelFromTareas(cliente)} state={{ from: currentPath }} sx={{ fontWeight: 800, fontSize: "0.95rem" }} />
+                            <VinculacionCell
+                              caso={caso}
+                              cliente={cliente}
+                              clienteLabelText={clienteLabelFromTareas(cliente)}
+                              currentPath={currentPath}
+                            />
                           </Box>
-                          <Box sx={{ flexShrink: 0, textAlign: "right" }}>
-                            <Typography variant="body1" fontWeight={800} color="success.main" sx={{ lineHeight: 1.2 }}>
-                              {formattedAmount}
+                          <Tooltip title={montoTooltip}>
+                            <Typography variant="body1" fontWeight={800} color="success.main" sx={{ lineHeight: 1.2, whiteSpace: "nowrap", flexShrink: 0 }}>
+                              {formattedAmount}{jusLabel ? ` (${jusLabel})` : ""}
                             </Typography>
-                            {jusLabel && (
-                              <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.68rem" }}>{jusLabel}</Typography>
-                            )}
-                          </Box>
+                          </Tooltip>
                         </Box>
 
                         {/* Nivel 2 — contexto */}
                         <Box sx={{ px: 2, pb: 1 }}>
                           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                            {label}{caso ? ` · ${casoLabel(caso)}` : ""}
+                            {label}
                           </Typography>
                         </Box>
 
@@ -1701,11 +1692,11 @@ export default function Finanzas() {
               <Table size="small" sx={{ ...denseTableSx, display: { xs: "none", md: "table" } }}>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.info.main, 0.08) }}>
-                    {sortableHead("cliente", "Cliente")}
-                    {sortableHead("cargos", "Total Cargos")}
-                    {sortableHead("cobrado", "Total Cobrado")}
-                    {sortableHead("saldo", "Saldo Pendiente")}
-                    {sortableHead("estado", "Estado Financiero")}
+                    {sortableHead("cliente", "Deudor")}
+                    {sortableHead("cargos", "Cargos")}
+                    {sortableHead("cobrado", "Cobrado")}
+                    {sortableHead("saldo", "Saldo")}
+                    {sortableHead("estado", "Estado")}
                   </TableRow>
                 </TableHead>
                 <TableBody>

@@ -277,28 +277,35 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
         <Table size="small" sx={denseTableSx}>
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.info.main, 0.08) }}>
-              <TableCell sx={{ width: 42 }} />
-              <TableCell sx={{ fontWeight: 900 }}>Cliente</TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Deudor</TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Expediente</TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Monto cuota</TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Periodicidad</TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Fecha de inicio</TableCell>
+              <TableCell sx={{ width: 42, whiteSpace: "nowrap" }} />
+              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Vinculación</TableCell>
+              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Deudor</TableCell>
+              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Cuota</TableCell>
+              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Periodicidad</TableCell>
+              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Inicio</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {planes.map((plan) => {
               const expanded = expandedPlanId === plan.id;
+              const cuotaLabel = formatMoneyAr(planMontoCuota(plan));
+              const totalLabel = formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan));
               return (
                 <Fragment key={plan.id}>
                   <TableRow hover onClick={() => setExpandedPlanId(expanded ? null : plan.id)} sx={{ cursor: "pointer" }}>
-                    <TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
                       <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"}>
                         {expanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
                       </IconButton>
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 200 }}>
-                      {plan.cliente ? (
+                    <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
+                      {plan.caso ? (
+                        <Tooltip title={casoLabel(plan.caso)}>
+                          <Link component={RouterLink} to={`/expedientes/${plan.caso.id}`} variant="body2" sx={linkSx} onClick={(e) => e.stopPropagation()}>
+                            <Box component="span" sx={ellipsisSx}>{casoLabel(plan.caso)}</Box>
+                          </Link>
+                        </Tooltip>
+                      ) : plan.cliente ? (
                         <Tooltip title={clienteLabel(plan.cliente)}>
                           <Link component={RouterLink} to={`/clientes/${plan.cliente.id}`} variant="body2" sx={linkSx} onClick={(e) => e.stopPropagation()}>
                             <Box component="span" sx={ellipsisSx}>{clienteLabel(plan.cliente)}</Box>
@@ -306,7 +313,7 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                         </Tooltip>
                       ) : "—"}
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 200 }}>
+                    <TableCell sx={{ maxWidth: 200, whiteSpace: "nowrap" }}>
                       <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
                         <Tooltip title={deudorNombreFromItem(plan, plan.cliente)}>
                           <Typography variant="body2" sx={{ ...ellipsisSx, fontWeight: 800 }}>
@@ -318,26 +325,16 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                         )}
                       </Stack>
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 240 }}>
-                      {plan.caso ? (
-                        <Tooltip title={casoLabel(plan.caso)}>
-                          <Link component={RouterLink} to={`/expedientes/${plan.caso.id}`} variant="body2" sx={linkSx} onClick={(e) => e.stopPropagation()}>
-                            <Box component="span" sx={ellipsisSx}>{casoLabel(plan.caso)}</Box>
-                          </Link>
-                        </Tooltip>
-                      ) : "—"}
-                    </TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>
-                      <Stack spacing={0.25}>
-                        <Typography variant="body2" sx={{ fontWeight: 900 }}>{formatMoneyAr(planMontoCuota(plan))}</Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Total: {formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan))}</Typography>
-                      </Stack>
+                      <Tooltip title={`Total: ${totalLabel}`}>
+                        <Typography variant="body2" sx={{ fontWeight: 900 }}>{cuotaLabel}</Typography>
+                      </Tooltip>
                     </TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell colSpan={7} sx={{ p: 0, borderBottom: expanded ? "1px solid" : 0, borderColor: "divider" }}>
+                    <TableCell colSpan={6} sx={{ p: 0, borderBottom: expanded ? "1px solid" : 0, borderColor: "divider" }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <PlanCuotasPanel plan={plan} invalidateKeys={invalidateKeys} />
                       </Collapse>
@@ -360,7 +357,7 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
                   <Box sx={{ flex: 1, minWidth: 0, mr: 1 }}>
                     <Typography variant="body2" sx={{ fontWeight: 900, display: "block" }} noWrap>
-                      {plan.cliente ? clienteLabel(plan.cliente) : "Sin cliente"}
+                      {plan.caso ? casoLabel(plan.caso) : (plan.cliente ? clienteLabel(plan.cliente) : "Sin vinculación")}
                     </Typography>
                     <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
                       <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 800 }}>
@@ -370,9 +367,6 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                         <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
                       )}
                     </Stack>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
-                      {plan.caso ? casoLabel(plan.caso) : "Sin expediente"}
-                    </Typography>
                   </Box>
                   <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"}>
                     {expanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
@@ -381,16 +375,17 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                 <Stack direction="row" spacing={2} sx={{ mt: 1.5, flexWrap: "wrap", gap: 1 }}>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Cuota</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 900 }}>{formatMoneyAr(planMontoCuota(plan))}</Typography>
-                    <Typography variant="caption" color="text.secondary">Total: {formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan))}</Typography>
+                    <Tooltip title={`Total: ${formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan))}`}>
+                      <Typography variant="body2" sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>{formatMoneyAr(planMontoCuota(plan))}</Typography>
+                    </Tooltip>
                   </Box>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Periodicidad</Typography>
-                    <Typography variant="body2">{plan.periodicidad?.nombre ?? "—"}</Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</Typography>
                   </Box>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Inicio</Typography>
-                    <Typography variant="body2">{formatDateShort(plan.fechaInicio)}</Typography>
+                    <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</Typography>
                   </Box>
                 </Stack>
               </Box>

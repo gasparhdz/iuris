@@ -51,7 +51,6 @@ import {
 import Grid from "@mui/material/Grid";
 import {
   Add,
-  Assignment,
   CalendarToday,
   CheckCircle,
   Delete,
@@ -61,7 +60,6 @@ import {
   PlaylistAddCheck,
   Search,
   TableRows,
-  Today,
   ViewModule,
   WarningAmber,
 } from "@mui/icons-material";
@@ -72,7 +70,6 @@ import {
   formatFriendlyDate,
   getApiError,
   isOverdue,
-  isToday,
   priorityStyles,
   unwrapData,
   unwrapEntity,
@@ -179,31 +176,6 @@ export default function Tareas() {
     setPage(0);
   };
 
-  const kpiFilterParams = useMemo(() => {
-    const params = {
-      search: debouncedSearch.trim() || undefined,
-      prioridadId: priorityFilter === "all" ? undefined : Number(priorityFilter),
-    };
-    if (statusFilter === "pendientes") params.completada = "false";
-    if (statusFilter === "completadas") params.completada = "true";
-    return params;
-  }, [debouncedSearch, priorityFilter, statusFilter]);
-
-  const tareasKpiQuery = useQuery({
-    queryKey: ["tareas", "kpi", kpiFilterParams],
-    queryFn: () => fetchAllPages("/tareas", kpiFilterParams),
-    staleTime: 1000 * 60,
-  });
-
-  const kpiTasks = useMemo(() => tareasKpiQuery.data ?? [], [tareasKpiQuery.data]);
-
-  const kpis = useMemo(() => [
-    { label: "Pendientes", value: kpiTasks.filter((t) => !t.completada).length, icon: <Assignment />, tone: theme.palette.primary.main },
-    { label: "Vencidas", value: kpiTasks.filter(isOverdue).length, icon: <WarningAmber />, tone: "hsl(350, 80%, 45%)" },
-    { label: "Para Hoy", value: kpiTasks.filter(isToday).length, icon: <Today />, tone: "hsl(32, 90%, 48%)" },
-    { label: "Completadas", value: kpiTasks.filter((t) => t.completada).length, icon: <CheckCircle />, tone: "hsl(150, 80%, 35%)" },
-  ], [kpiTasks, theme.palette.primary.main]);
-
   function invalidateTareas() {
     queryClient.invalidateQueries({ queryKey: ["tareas"] });
     queryClient.invalidateQueries({ queryKey: ["agenda"] });
@@ -299,22 +271,6 @@ export default function Tareas() {
           </ButtonGroup>
         </Stack>
       </Paper>
-
-      <Grid container spacing={2} sx={{ mb: 2.5 }}>
-        {kpis.map((kpi) => (
-          <Grid key={kpi.label} size={{ xs: 12, sm: 6, lg: 3 }}>
-            <Paper elevation={0} sx={{ p: 2.25, borderRadius: "16px", border: "1px solid", borderColor: alpha(kpi.tone, 0.35), bgcolor: "background.paper", transition: "transform 0.18s ease, box-shadow 0.18s ease", "&:hover": { transform: "translateY(-4px)", boxShadow: theme.palette.mode === "dark" ? "0 18px 38px rgba(0,0,0,0.34)" : "0 18px 38px rgba(15,23,42,0.08)" } }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 900, textTransform: "uppercase" }}>{kpi.label}</Typography>
-                  <Typography variant="h4" sx={{ fontWeight: 950, mt: 0.5 }}>{kpi.value}</Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: alpha(kpi.tone, 0.12), color: kpi.tone }}>{kpi.icon}</Avatar>
-              </Stack>
-            </Paper>
-          </Grid>
-        ))}
-      </Grid>
 
       {tareasQuery.isLoading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>
@@ -707,16 +663,16 @@ function TaskTable({
                   <TableCell>
                     <PriorityChip priority={prioridadesById.get(Number(task.prioridadId))} theme={theme} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
                     <Typography
                       variant="caption"
-                      sx={{ color: isOverdue(task) ? "error.main" : "text.secondary", fontWeight: 800 }}
+                      sx={{ color: isOverdue(task) ? "error.main" : "text.secondary", fontWeight: 800, whiteSpace: "nowrap" }}
                     >
                       {formatFriendlyDate(task.fechaLimite)}
                     </Typography>
                   </TableCell>
                   <TableCell sx={{ maxWidth: 240 }}>
-                    <TaskMeta task={task} cliente={cliente} caso={caso} showDate={false} currentPath={currentPath} />
+                    <TaskMeta task={task} cliente={caso ? undefined : cliente} caso={caso} showDate={false} currentPath={currentPath} />
                   </TableCell>
                   <TableCell>
                     <ChecklistProgress task={task} compact />
