@@ -191,7 +191,7 @@ const EMPTY_FORM = {
 const REQUIRED_FIELDS = {
   honorario: ["_clienteOCaso", "conceptoId", "_obligadoSiCaso", "monedaCodigo", "monto", "fechaRegulacion"],
   gasto:     ["_clienteOCaso", "monedaCodigo", "monto", "fechaGasto"],
-  ingreso:   ["_clienteOCaso", "monedaCodigo", "monto", "fechaIngreso"],
+  ingreso:   ["_clienteOCaso", "_obligadoSiCaso", "monedaCodigo", "monto", "fechaIngreso"],
   convenio:  ["_clienteOCaso", "convenioHonorarioId", "convenioPeriodicidad", "convenioCuotas", "convenioMontoCuota", "convenioFechaInicio"],
 };
 
@@ -420,6 +420,7 @@ export default function FinanzasForm() {
     return z.object({
       clienteId: z.string().optional(),
       casoId: z.string().optional(),
+      obligadoKey: z.string().optional(),
       conceptoIngresoId: z.string().optional(),
       monedaCodigo: z.string(),
       monto: z.union([z.number(), z.string(), z.null()]),
@@ -429,7 +430,15 @@ export default function FinanzasForm() {
       selectedGastoIds: z.array(z.number()).optional(),
       selectedHonorarioIds: z.array(z.number()).optional(),
     }).superRefine((data, ctx) => {
-      if (!data.casoId && !data.clienteId) {
+      if (data.casoId) {
+        if (!data.obligadoKey) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["obligadoKey"],
+            message: "Seleccioná el obligado al pago",
+          });
+        }
+      } else if (!data.clienteId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["casoId"],
@@ -595,7 +604,7 @@ export default function FinanzasForm() {
 
   const participantesElegiblesQuery = useQuery({
     queryKey: ["expedientes", form.casoId, "participantes-elegibles"],
-    enabled: Boolean(form.casoId) && tipoMovimiento === "honorario",
+    enabled: Boolean(form.casoId) && (tipoMovimiento === "honorario" || tipoMovimiento === "ingreso"),
     queryFn: async () => {
       const { data } = await api.get(`/expedientes/${form.casoId}/participantes-elegibles`);
       return Array.isArray(data?.data) ? data.data : [];
@@ -709,11 +718,27 @@ export default function FinanzasForm() {
     staleTime: 60_000,
   });
 
+  const obligadoIngresoKey = useMemo(() => {
+    if (tipoMovimiento !== "ingreso") return null;
+    if (form.casoId) return form.obligadoKey || null;
+    if (form.clienteId) return `cliente:${form.clienteId}`;
+    return null;
+  }, [tipoMovimiento, form.casoId, form.obligadoKey, form.clienteId]);
+
+  const obligadoIngresoEsTercero = Boolean(obligadoIngresoKey?.startsWith("tercero:"));
+
   const planesIngreso = useMemo(() => {
-    const rows = planesIngresoQuery.data ?? [];
-    if (!form.honorarioVinculoId) return rows;
-    return rows.filter((plan) => Number(plan.honorarioId) === Number(form.honorarioVinculoId));
-  }, [planesIngresoQuery.data, form.honorarioVinculoId]);
+    let rows = planesIngresoQuery.data ?? [];
+    if (form.honorarioVinculoId) {
+      rows = rows.filter((plan) => Number(plan.honorarioId) === Number(form.honorarioVinculoId));
+    }
+    // Con expediente: solo planes del obligado elegido (igual que honorarios).
+    if (form.casoId) {
+      if (!form.obligadoKey) return [];
+      return rows.filter((plan) => deudorKeyFromItem(plan) === form.obligadoKey);
+    }
+    return rows;
+  }, [planesIngresoQuery.data, form.honorarioVinculoId, form.casoId, form.obligadoKey]);
 
   const cuotasIngresoQueries = useQueries({
     queries: planesIngreso.map((plan) => ({
@@ -795,6 +820,12 @@ export default function FinanzasForm() {
       setValue("clienteId", caso.clienteId ? String(caso.clienteId) : "", { shouldValidate: true });
       setValue("obligadoKey", "", { shouldValidate: false });
       setValue("parteId", "", { shouldValidate: false });
+      setValue("selectedCuotaIds", [], { shouldValidate: false });
+      setValue("selectedGastoIds", [], { shouldValidate: false });
+      setValue("selectedHonorarioIds", [], { shouldValidate: false });
+      setValue("cuotaVinculoId", "", { shouldValidate: false });
+      setValue("gastoVinculoId", "", { shouldValidate: false });
+      setValue("honorarioVinculoId", "", { shouldValidate: false });
       return;
     }
     setValue("casoId", "", { shouldValidate: true });
@@ -803,6 +834,12 @@ export default function FinanzasForm() {
     }
     setValue("obligadoKey", "", { shouldValidate: false });
     setValue("parteId", "", { shouldValidate: false });
+    setValue("selectedCuotaIds", [], { shouldValidate: false });
+    setValue("selectedGastoIds", [], { shouldValidate: false });
+    setValue("selectedHonorarioIds", [], { shouldValidate: false });
+    setValue("cuotaVinculoId", "", { shouldValidate: false });
+    setValue("gastoVinculoId", "", { shouldValidate: false });
+    setValue("honorarioVinculoId", "", { shouldValidate: false });
   }, [lockClienteId, setValue]);
 
   const applyClienteExtrajudicial = useCallback((cliente) => {
@@ -815,6 +852,12 @@ export default function FinanzasForm() {
       setValue("obligadoKey", "", { shouldValidate: false });
       setValue("parteId", "", { shouldValidate: false });
     }
+    setValue("selectedCuotaIds", [], { shouldValidate: false });
+    setValue("selectedGastoIds", [], { shouldValidate: false });
+    setValue("selectedHonorarioIds", [], { shouldValidate: false });
+    setValue("cuotaVinculoId", "", { shouldValidate: false });
+    setValue("gastoVinculoId", "", { shouldValidate: false });
+    setValue("honorarioVinculoId", "", { shouldValidate: false });
   }, [parteClienteParam?.id, setValue]);
 
   const isJus = form.monedaCodigo === "JUS";
@@ -839,6 +882,8 @@ export default function FinanzasForm() {
     return new Map((catalog.ESTADO_GASTO ?? []).map((item) => [Number(item.id), item]));
   }, [catalog.ESTADO_GASTO]);
   const gastosPendientesIngreso = useMemo(() => {
+    // Los gastos son siempre del cliente: no ofrecerlos si el cobro es de un tercero.
+    if (form.casoId && (!form.obligadoKey || obligadoIngresoEsTercero)) return [];
     const rows = gastosIngresoQuery.data ?? [];
     return rows
       .filter((gasto) => {
@@ -847,7 +892,7 @@ export default function FinanzasForm() {
         return codigo === "PENDIENTE" || form.selectedGastoIds.includes(Number(gasto.id));
       })
       .sort((a, b) => new Date(a.fechaGasto).getTime() - new Date(b.fechaGasto).getTime());
-  }, [gastosIngresoQuery.data, estadoGastoById, form.selectedGastoIds]);
+  }, [gastosIngresoQuery.data, estadoGastoById, form.selectedGastoIds, form.casoId, form.obligadoKey, obligadoIngresoEsTercero]);
   const selectedGastos = useMemo(
     () => gastosPendientesIngreso.filter((gasto) => form.selectedGastoIds.includes(Number(gasto.id))),
     [gastosPendientesIngreso, form.selectedGastoIds],
@@ -904,24 +949,30 @@ export default function FinanzasForm() {
     const rows = honorariosPendientesQuery.data ?? [];
     return rows
       .filter((h) => !honorarioIdsConPlan.has(Number(h.id)) || form.selectedHonorarioIds.includes(Number(h.id)))
+      .filter((h) => {
+        if (!form.casoId) return true;
+        if (!form.obligadoKey) return false;
+        return deudorKeyFromItem(h) === form.obligadoKey;
+      })
       .sort((a, b) => {
         const va = new Date(a.fechaVencimiento ?? a.fechaRegulacion).getTime();
         const vb = new Date(b.fechaVencimiento ?? b.fechaRegulacion).getTime();
         return va - vb;
       });
-  }, [honorariosPendientesQuery.data, honorarioIdsConPlan, form.selectedHonorarioIds]);
+  }, [honorariosPendientesQuery.data, honorarioIdsConPlan, form.selectedHonorarioIds, form.casoId, form.obligadoKey]);
   const selectedHonorariosDirectos = useMemo(
     () => honorariosSinPlanIngreso.filter((h) => form.selectedHonorarioIds.includes(Number(h.id))),
     [honorariosSinPlanIngreso, form.selectedHonorarioIds],
   );
-  /** Deudor activo del ingreso: no se pueden mezclar cuotas/honorarios de distintos deudores. */
+  /** Deudor activo del ingreso: el obligado elegido (o el inferido de la selección). */
   const deudorActivoIngreso = useMemo(() => {
+    if (obligadoIngresoKey) return obligadoIngresoKey;
     const fromCuota = selectedCuotas[0]?.plan;
     if (fromCuota) return deudorKeyFromItem(fromCuota);
     const fromHon = selectedHonorariosDirectos[0];
     if (fromHon) return deudorKeyFromItem(fromHon);
     return null;
-  }, [selectedCuotas, selectedHonorariosDirectos]);
+  }, [obligadoIngresoKey, selectedCuotas, selectedHonorariosDirectos]);
   const totalHonorariosDirectosSeleccionadosCents = useMemo(
     () => selectedHonorariosDirectos.reduce(
       (acc, h) => acc + Math.round(Number(honorarioMontoBase(h) ?? 0) * 100),
@@ -1180,14 +1231,42 @@ export default function FinanzasForm() {
     const pendientes = honorariosPendientesQuery.data ?? [];
     const match = pendientes.find((h) => Number(h.id) === Number(queryHonorarioId));
     if (match && !form.descripcion) {
+      const deudorKey = deudorKeyFromItem(match);
       setForm((f) => ({
         ...f,
         honorarioVinculoId: String(match.id),
         descripcion: `Cobro honorario #${match.id}`,
         monto: queryMonto ?? f.monto,
+        ...(deudorKey && !f.obligadoKey ? { obligadoKey: deudorKey } : {}),
       }));
     }
   }, [isEdit, queryHonorarioId, tipoMovimiento, honorariosPendientesQuery.data, queryMonto, form.descripcion, setForm]);
+
+  // Deep-link desde plan/cuota: precargar el obligado del plan.
+  useEffect(() => {
+    if (isEdit || tipoMovimiento !== "ingreso" || form.obligadoKey) return;
+    const planes = planesIngresoQuery.data ?? [];
+    if (!planes.length) return;
+    let match = null;
+    if (queryPlanId) match = planes.find((p) => Number(p.id) === Number(queryPlanId));
+    if (!match && queryHonorarioId) match = planes.find((p) => Number(p.honorarioId) === Number(queryHonorarioId));
+    if (!match && queryCuotaId) {
+      // Si solo hay cuotaId, el plan se infiere cuando las cuotas carguen; acá usamos honorarioVinculoId/planVinculoId.
+      match = planes.find((p) => Number(p.id) === Number(form.planVinculoId)) ?? null;
+    }
+    const deudorKey = deudorKeyFromItem(match);
+    if (deudorKey) {
+      setForm((f) => (f.obligadoKey ? f : { ...f, obligadoKey: deudorKey }));
+    }
+  }, [isEdit, tipoMovimiento, form.obligadoKey, form.planVinculoId, planesIngresoQuery.data, queryPlanId, queryHonorarioId, queryCuotaId, setForm]);
+
+  // Reintegro de gasto: el obligado es siempre el cliente del expediente/caso.
+  useEffect(() => {
+    if (isEdit || tipoMovimiento !== "ingreso" || !queryGastoId || form.obligadoKey) return;
+    if (form.casoId && form.clienteId) {
+      setForm((f) => ({ ...f, obligadoKey: `cliente:${f.clienteId}` }));
+    }
+  }, [isEdit, tipoMovimiento, queryGastoId, form.obligadoKey, form.casoId, form.clienteId, setForm]);
 
   useEffect(() => {
     if (!isEdit && tipoMovimiento === "convenio" && queryHonorarioId) {
@@ -1417,16 +1496,23 @@ export default function FinanzasForm() {
   const loading = catalogQuery.isLoading || (isEdit && entityQuery.isLoading);
 
   useEffect(() => {
-    if (tipoMovimiento !== "honorario") return;
+    if (tipoMovimiento !== "honorario" && tipoMovimiento !== "ingreso") return;
     if (!form.obligadoKey) return;
     const stillValid = obligadosOptions.some((o) => o.key === form.obligadoKey);
     if (!stillValid) {
-      setForm((f) => ({ ...f, obligadoKey: "", parteId: "" }));
+      setForm((f) => ({
+        ...f,
+        obligadoKey: "",
+        parteId: "",
+        ...(tipoMovimiento === "ingreso"
+          ? { selectedCuotaIds: [], selectedGastoIds: [], selectedHonorarioIds: [], cuotaVinculoId: "", gastoVinculoId: "", honorarioVinculoId: "" }
+          : {}),
+      }));
     }
   }, [tipoMovimiento, form.obligadoKey, obligadosOptions, setForm]);
 
   useEffect(() => {
-    if (tipoMovimiento !== "honorario" || isEdit) return;
+    if ((tipoMovimiento !== "honorario" && tipoMovimiento !== "ingreso") || isEdit) return;
     if (form.obligadoKey) return;
     if (obligadosOptions.length === 1) {
       const only = obligadosOptions[0];
@@ -1602,13 +1688,13 @@ export default function FinanzasForm() {
               )}
             />
           </Grid>
-          {form.casoId && tipoMovimiento === "honorario" ? (
+          {form.casoId && (tipoMovimiento === "honorario" || tipoMovimiento === "ingreso") ? (
             <Grid size={{ xs: 12, md: 6 }}>
               <Controller
                 name="obligadoKey"
                 control={control}
                 render={({ field, fieldState: { error } }) => {
-                  const obligadoLocked = isEdit && Boolean(entityQuery.data?.tienePagosImputados);
+                  const obligadoLocked = tipoMovimiento === "honorario" && isEdit && Boolean(entityQuery.data?.tienePagosImputados);
                   return (
                     <FormControl fullWidth size="small" error={Boolean(error)} disabled={obligadoLocked}>
                       <InputLabel>Obligado al pago</InputLabel>
@@ -1621,6 +1707,14 @@ export default function FinanzasForm() {
                           const option = obligadosOptions.find((o) => o.key === key);
                           field.onChange(key);
                           setValue("parteId", option?.parteId ? String(option.parteId) : "", { shouldValidate: false });
+                          if (tipoMovimiento === "ingreso") {
+                            setValue("selectedCuotaIds", [], { shouldValidate: false });
+                            setValue("selectedGastoIds", [], { shouldValidate: false });
+                            setValue("selectedHonorarioIds", [], { shouldValidate: false });
+                            setValue("cuotaVinculoId", "", { shouldValidate: false });
+                            setValue("gastoVinculoId", "", { shouldValidate: false });
+                            setValue("honorarioVinculoId", "", { shouldValidate: false });
+                          }
                         }}
                       >
                         {obligadosOptions.map((o) => (
@@ -1664,11 +1758,11 @@ export default function FinanzasForm() {
                         error={Boolean(error)}
                         helperText={
                           error?.message
-                          || (tipoMovimiento === "honorario"
+                          || (tipoMovimiento === "honorario" || tipoMovimiento === "ingreso"
                             ? "Será el obligado al pago"
                             : "Sin expediente (extrajudicial)")
                         }
-                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio"}
+                        required={tipoMovimiento === "honorario" || tipoMovimiento === "convenio" || tipoMovimiento === "ingreso"}
                         inputProps={{ ...params.inputProps, "aria-label": "Buscar cliente por nombre o CUIT" }}
                       />
                     )}
@@ -2692,7 +2786,12 @@ export default function FinanzasForm() {
                       <Box>
                         <Typography variant="subtitle1" sx={{ fontWeight: 950 }}>Honorarios</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>
-                          {clienteLabel(selectedCliente) || "Seleccioná un cliente"} — Expediente {planesIngreso[0]?.caso?.nroExpte || casoLabel(selectedCaso) || "Sin expediente"}
+                          {form.casoId && form.obligadoKey
+                            ? (obligadosOptions.find((o) => o.key === form.obligadoKey)?.label
+                              || deudorNombreFromItem(planesIngreso[0], selectedCliente))
+                            : (clienteLabel(selectedCliente) || "Seleccioná un cliente")}
+                          {" — Expediente "}
+                          {planesIngreso[0]?.caso?.nroExpte || casoLabel(selectedCaso) || "Sin expediente"}
                         </Typography>
                       </Box>
                     </Stack>
@@ -2715,7 +2814,13 @@ export default function FinanzasForm() {
                     {planesIngreso.length === 0 ? (
                       <Box sx={{ px: 2, py: 3, color: "text.secondary" }}>
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                          {!form.clienteId ? "Seleccioná un cliente para ver honorarios/cuotas pendientes." : planesIngresoQuery.isLoading ? "Cargando honorarios..." : "No hay honorarios/cuotas pendientes para este filtro."}
+                          {!form.clienteId
+                            ? "Seleccioná un cliente para ver honorarios/cuotas pendientes."
+                            : form.casoId && !form.obligadoKey
+                              ? "Seleccioná el obligado al pago para ver sus planes y cuotas."
+                              : planesIngresoQuery.isLoading
+                                ? "Cargando honorarios..."
+                                : "No hay honorarios/cuotas pendientes para este deudor."}
                         </Typography>
                       </Box>
                     ) : planesIngreso.map((plan) => {
@@ -2884,7 +2989,15 @@ export default function FinanzasForm() {
                     {gastosPendientesIngreso.length === 0 ? (
                       <Box sx={{ px: 2, py: 3, color: "text.secondary" }}>
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                          {!form.clienteId ? "Seleccioná un cliente para ver gastos pendientes." : gastosIngresoQuery.isLoading ? "Cargando gastos..." : "No hay gastos pendientes para este filtro."}
+                          {!form.clienteId
+                            ? "Seleccioná un cliente para ver gastos pendientes."
+                            : form.casoId && !form.obligadoKey
+                              ? "Seleccioná el obligado al pago para ver gastos imputables."
+                              : obligadoIngresoEsTercero
+                                ? "Los gastos son del cliente: no se pueden imputar a un cobro de la contraparte."
+                                : gastosIngresoQuery.isLoading
+                                  ? "Cargando gastos..."
+                                  : "No hay gastos pendientes para este filtro."}
                         </Typography>
                       </Box>
                     ) : (
@@ -3032,7 +3145,13 @@ export default function FinanzasForm() {
                     {honorariosSinPlanIngreso.length === 0 ? (
                       <Box sx={{ px: 2, py: 3, color: "text.secondary" }}>
                         <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                          {!form.clienteId ? "Seleccioná un cliente para ver honorarios sin plan." : honorariosPendientesQuery.isLoading ? "Cargando honorarios..." : "No hay honorarios sin plan pendientes para este filtro."}
+                          {!form.clienteId
+                            ? "Seleccioná un cliente para ver honorarios sin plan."
+                            : form.casoId && !form.obligadoKey
+                              ? "Seleccioná el obligado al pago para ver honorarios sin plan."
+                              : honorariosPendientesQuery.isLoading
+                                ? "Cargando honorarios..."
+                                : "No hay honorarios sin plan pendientes para este deudor."}
                         </Typography>
                       </Box>
                     ) : (
