@@ -199,6 +199,7 @@ export function invalidateFinanzasQueries(queryClient, extra = []) {
     ["planes"],
     ["clientes"],
     ["expedientes"],
+    ["reportes", "proyeccion-cobranzas"],
     ...extra,
   ];
   keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));

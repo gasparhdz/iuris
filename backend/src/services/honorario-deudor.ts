@@ -29,6 +29,12 @@ export function honorarioDeudorEsCliente(h: HonorarioDeudorRef, clienteId: numbe
   return deudor?.tipo === "cliente" && deudor.id === clienteId;
 }
 
+/** True si el deudor del honorario es el tercero indicado. */
+export function honorarioDeudorEsTercero(h: HonorarioDeudorRef, terceroId: number): boolean {
+  const deudor = resolveHonorarioDeudor(h);
+  return deudor?.tipo === "tercero" && deudor.id === terceroId;
+}
+
 /** Clave estable para agrupar por deudor. */
 export function deudorKey(deudor: DeudorResuelto): string {
   return `${deudor.tipo}:${deudor.id}`;

@@ -21,6 +21,7 @@ import {
   atribuirMontosPorDeudor,
   deudorKey,
   honorarioDeudorEsCliente,
+  honorarioDeudorEsTercero,
   resolveHonorarioDeudor,
   type DeudorResuelto,
 } from "./honorario-deudor.js";
@@ -71,6 +72,30 @@ export class CuentaCorrienteService {
       honorarios: honorariosCliente,
       gastos: gastosCliente,
       ingresos: ingresosCliente,
+    });
+  }
+
+  /** Libro mayor del deudor-tercero (honorarios/cuotas imputados; sin gastos). */
+  static async getCuentaCorrienteTercero(terceroId: number, estudioId: number): Promise<CCResult> {
+    const tercero = await TercerosQueries.findById(terceroId, estudioId);
+    if (!tercero) throw new Error("TERCERO_NOT_FOUND");
+
+    const datos = await this.loadDatos(estudioId, {});
+    const honorariosTercero = datos.honorarios.filter((h) => honorarioDeudorEsTercero(h, terceroId));
+    const ingresosTercero = await this.filterIngresosParaDeudor(
+      estudioId,
+      datos.ingresos,
+      { tipo: "tercero", id: terceroId },
+      datos.honorarios,
+      null,
+    );
+
+    return buildCuentaCorriente({
+      fechaCorte: datos.fechaCorte,
+      valorJusActual: datos.valorJusActual,
+      honorarios: honorariosTercero,
+      gastos: [],
+      ingresos: ingresosTercero,
     });
   }
 

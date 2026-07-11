@@ -206,6 +206,10 @@ export const proyeccionCobranzaSchema = z.object({
   cliente: personaMiniSchema.optional(),
   casoId: z.number().nullable(),
   caso: casoMiniSchema.optional(),
+  tipoDeudor: z.enum(["cliente", "tercero"]).optional(),
+  deudorNombre: z.string().nullable().optional(),
+  obligadoTerceroId: z.number().nullable().optional(),
+  obligadoClienteId: z.number().nullable().optional(),
 });
 
 export const proyeccionCobranzasResponseSchema = z.object({

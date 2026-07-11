@@ -9,8 +9,8 @@ import { formatSaldoCuota, type CuotaRecordatorio } from "./cobranza-recordatori
 export const NOTIFICATION_PATHS = {
   tarea: (id: number) => `/tareas/${id}`,
   evento: (id: number) => `/eventos/${id}`,
-  /** Tab de planes/cuotas en Finanzas (no existe `convenios`). */
-  cobranza: () => `/finanzas?tab=planes`,
+  /** Tab de cobranzas: cuotas vencidas y por vencer. */
+  cobranza: () => `/finanzas?tab=cobranzas`,
 } as const;
 
 export type CasoResumenNotificacion = {

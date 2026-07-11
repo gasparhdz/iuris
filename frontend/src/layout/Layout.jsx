@@ -59,6 +59,7 @@ import {
   Payments as GastosIcon,
   TrendingUp as IngresosIcon,
   EventRepeat as PlanesIcon,
+  NotificationsActive as CobranzasIcon,
   AccountBalanceWallet as CuentaCorrienteIcon,
   Shield as ShieldIcon,
 } from "@mui/icons-material";
@@ -97,6 +98,7 @@ const allMenuItems = [
       { text: "Gastos", icon: <GastosIcon />, path: "/finanzas", tab: "gastos", modulo: "GASTOS" },
       { text: "Ingresos", icon: <IngresosIcon />, path: "/finanzas", tab: "ingresos", modulo: "INGRESOS" },
       { text: "Planes", icon: <PlanesIcon />, path: "/finanzas", tab: "planes", modulo: "PLANES" },
+      { text: "Cobranzas", icon: <CobranzasIcon />, path: "/finanzas", tab: "cobranzas", modulo: "PLANES" },
       { text: "Cuentas Corrientes", icon: <CuentaCorrienteIcon />, path: "/finanzas", tab: "cuentas_corrientes", modulos: ["INGRESOS", "HONORARIOS", "GASTOS"] },
     ],
   },

@@ -8,6 +8,7 @@ import {
   terceroQuerySchema, idParamSchema,
   terceroResponseSchema, terceroListResponseSchema,
 } from "../schemas/terceros.schema.js";
+import { cuentaCorrienteResponseSchema } from "../schemas/clientes.schema.js";
 
 export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
   const server = fastify.withTypeProvider<ZodTypeProvider>();
@@ -26,6 +27,18 @@ export const tercerosRoutes: FastifyPluginAsync = async (fastify) => {
       response: documentedResponses(200, terceroListResponseSchema),
     },
   }, TercerosController.findAll);
+
+  // Misma auth que el ledger de cliente: quien ve CC en Finanzas puede abrir el detalle.
+  server.get("/:id/cuenta-corriente", {
+    preHandler: [fastify.authenticate, fastify.authorize("CLIENTES", "ver"), fastify.authorize("HONORARIOS", "ver")],
+    schema: {
+      tags: ["Terceros"],
+      summary: "Cuenta corriente del tercero (libro mayor calculado en backend)",
+      security: [{ bearerAuth: [] }],
+      params: idParamSchema,
+      response: documentedResponses(200, cuentaCorrienteResponseSchema),
+    },
+  }, TercerosController.findCuentaCorriente);
 
   server.get("/:id", {
     ...can("ver"),

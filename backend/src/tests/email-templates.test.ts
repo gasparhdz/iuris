@@ -60,7 +60,7 @@ describe("email-templates", () => {
     expect(rendered.text).toContain("/eventos/15");
   });
 
-  it("renderiza cobranza con CTA a planes y copy de cuotas", () => {
+  it("renderiza cobranza con CTA a cobranzas y copy de cuotas", () => {
     const rendered = renderRecordatorioCobranza({
       vencidas: [{
         numero: 1,
@@ -76,7 +76,7 @@ describe("email-templates", () => {
     });
 
     expect(rendered.html).toContain("Ver cuotas pendientes");
-    expect(rendered.html).toContain("/finanzas?tab=planes");
+    expect(rendered.html).toContain("/finanzas?tab=cobranzas");
     expect(rendered.html).toContain("García, Ana");
     expect(rendered.text).toContain("Ver cuotas pendientes:");
   });

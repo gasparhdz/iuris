@@ -263,6 +263,10 @@ export class PlanesService {
           cliente: plan.cliente?.id ? plan.cliente : null,
           casoId: plan.casoId ?? null,
           caso: plan.caso?.id ? plan.caso : null,
+          tipoDeudor: plan.tipoDeudor ?? "cliente",
+          deudorNombre: plan.deudorNombre ?? null,
+          obligadoTerceroId: plan.obligadoTerceroId ?? null,
+          obligadoClienteId: plan.obligadoClienteId ?? null,
         });
       }
     }

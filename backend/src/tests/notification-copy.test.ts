@@ -91,6 +91,6 @@ describe("notification-copy", () => {
   it("deep-links apuntan al ítem / tab correcto", () => {
     expect(NOTIFICATION_PATHS.tarea(42)).toBe("/tareas/42");
     expect(NOTIFICATION_PATHS.evento(7)).toBe("/eventos/7");
-    expect(NOTIFICATION_PATHS.cobranza()).toBe("/finanzas?tab=planes");
+    expect(NOTIFICATION_PATHS.cobranza()).toBe("/finanzas?tab=cobranzas");
   });
 });

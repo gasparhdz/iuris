@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { usePermisos } from "../auth/usePermissions";
 import { useFinanzasModals } from "../components/finanzas/useFinanzasModals";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
+import CobranzasTable from "../components/finanzas/CobranzasTable";
 import { alpha, useTheme } from "@mui/material/styles";
 import Grid from "@mui/material/Grid";
 import { motion } from "framer-motion";
@@ -81,12 +82,13 @@ import {
 } from "./finanzasUtils";
 import { clienteLabel as clienteLabelFromTareas } from "./tareasUtils";
 
-const TAB_KEYS = ["honorarios", "gastos", "ingresos", "planes", "cuentas_corrientes"];
+const TAB_KEYS = ["honorarios", "gastos", "ingresos", "planes", "cobranzas", "cuentas_corrientes"];
 const TAB_LABELS = {
   honorarios: "Honorarios",
   gastos: "Gastos",
   ingresos: "Ingresos",
   planes: "Planes",
+  cobranzas: "Cobranzas",
   cuentas_corrientes: "Cuentas Corrientes",
 };
 
@@ -273,13 +275,20 @@ export default function Finanzas() {
   const gastosPerm = usePermisos("GASTOS");
   const ingresosPerm = usePermisos("INGRESOS");
   // Crear cobros usa el modulo INGRESOS; cada seccion edita/elimina su propio modulo.
-  const canCrearActivo = tabKey === "gastos" ? gastosPerm.canCrear : tabKey === "ingresos" ? ingresosPerm.canCrear : honorariosPerm.canCrear;
+  const canCrearActivo = tabKey === "gastos"
+    ? gastosPerm.canCrear
+    : tabKey === "ingresos"
+      ? ingresosPerm.canCrear
+      : tabKey === "cobranzas" || tabKey === "cuentas_corrientes"
+        ? false
+        : honorariosPerm.canCrear;
 
   const [list, setList] = useListState({
     search: "",
     orderBy: "fecha",
     order: "desc",
     page: 0,
+    pagePv: 0,
     rowsPerPage: 10,
     datePreset: "todo",
     customFrom: "",
@@ -290,6 +299,7 @@ export default function Finanzas() {
     orderBy,
     order,
     page,
+    pagePv,
     rowsPerPage,
     datePreset,
     customFrom,
@@ -299,6 +309,7 @@ export default function Finanzas() {
   const setOrderBy = (orderBy) => setList({ orderBy });
   const setOrder = (order) => setList({ order });
   const setPage = (page) => setList({ page });
+  const setPagePv = (pagePv) => setList({ pagePv });
   const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
   const setDatePreset = (datePreset) => setList({ datePreset });
   const setCustomFrom = (customFrom) => setList({ customFrom });
@@ -375,7 +386,7 @@ export default function Finanzas() {
       skipPageResetRef.current = false;
       return;
     }
-    setList({ page: 0 });
+    setList({ page: 0, pagePv: 0 });
   }, [tabKey, debouncedSearch, orderBy, order, datePreset, customFrom, customTo, setList]);
 
   const honorariosQuery = useQuery({
@@ -719,6 +730,7 @@ export default function Finanzas() {
       orderBy: tabKey === "cuentas_corrientes" ? "saldo" : "fecha",
       order: "desc",
       page: 0,
+      pagePv: 0,
     });
   }, [tabKey, setList]);
 
@@ -827,16 +839,37 @@ export default function Finanzas() {
   );
 
   const selectedClienteId = searchParams.get("clienteId") ? Number(searchParams.get("clienteId")) : null;
+  const selectedTerceroId = searchParams.get("terceroId") ? Number(searchParams.get("terceroId")) : null;
 
-  if (selectedClienteId) {
+  const openCuentaCorrienteDetalle = (item) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("clienteId");
+      next.delete("terceroId");
+      if (item.tipoDeudor === "tercero" && item.terceroId != null) {
+        next.set("terceroId", String(item.terceroId));
+      } else if (item.clienteId != null) {
+        next.set("clienteId", String(item.clienteId));
+      }
+      return next;
+    });
+  };
+
+  const closeCuentaCorrienteDetalle = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("clienteId");
+      next.delete("terceroId");
+      return next;
+    });
+  };
+
+  if (selectedClienteId || selectedTerceroId) {
     return (
-      <ClienteCuentaCorrienteDetail
-        clienteId={selectedClienteId}
-        onBack={() => setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete("clienteId");
-          return next;
-        })}
+      <DeudorCuentaCorrienteDetail
+        tipoDeudor={selectedTerceroId ? "tercero" : "cliente"}
+        deudorId={selectedTerceroId || selectedClienteId}
+        onBack={closeCuentaCorrienteDetalle}
       />
     );
   }
@@ -852,7 +885,7 @@ export default function Finanzas() {
             {TAB_LABELS[tabKey]}
           </Typography>
         </Box>
-        {tabKey !== "cuentas_corrientes" && canCrearActivo && (
+        {tabKey !== "cuentas_corrientes" && tabKey !== "cobranzas" && canCrearActivo && (
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -887,9 +920,11 @@ export default function Finanzas() {
           value={search}
           onChange={(event) => { setSearch(event.target.value); setPage(0); }}
           placeholder={
-            tabKey === "honorarios"
-              ? "Buscar por concepto, cliente o expediente..."
-              : "Buscar por descripcion, cliente o expediente..."
+            tabKey === "cobranzas"
+              ? "Buscar por deudor o expediente..."
+              : tabKey === "honorarios"
+                ? "Buscar por concepto, cliente o expediente..."
+                : "Buscar por descripcion, cliente o expediente..."
           }
           slotProps={{
             input: {
@@ -903,7 +938,7 @@ export default function Finanzas() {
           sx={{ flex: "1 1 240px", minWidth: 200 }}
         />
         <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1, ml: { md: "auto" } }}>
-          {tabKey !== "cuentas_corrientes" && (
+          {tabKey !== "cuentas_corrientes" && tabKey !== "cobranzas" && (
             <>
           <CalendarMonth sx={{ color: "text.secondary", fontSize: 20, mr: 0.5 }} />
         <Typography
@@ -1637,6 +1672,22 @@ export default function Finanzas() {
           </TabPanel>
 
           <TabPanel value={tabIndex} index={4}>
+            <CobranzasTable
+              search={debouncedSearch}
+              page={page}
+              pagePorVencer={pagePv}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+              onPagePorVencerChange={setPagePv}
+              onRowsPerPageChange={(next) => {
+                setRowsPerPage(next);
+                setPage(0);
+                setPagePv(0);
+              }}
+            />
+          </TabPanel>
+
+          <TabPanel value={tabIndex} index={5}>
             <FinanzasTableShell
               loading={kpiLoading}
               error={activeError}
@@ -1660,16 +1711,13 @@ export default function Finanzas() {
                 <TableBody>
                   {paginatedRows.map((item) => {
                     const deudor = item.saldoPendiente > 0;
-                    const canOpenDetalle = item.tipoDeudor !== "tercero" && item.clienteId != null;
+                    const canOpenDetalle = (item.tipoDeudor === "tercero" && item.terceroId != null)
+                      || (item.tipoDeudor !== "tercero" && item.clienteId != null);
                     return (
                       <TableRow
                         key={item.key}
                         hover={canOpenDetalle}
-                        onClick={canOpenDetalle ? () => setSearchParams((prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set("clienteId", String(item.clienteId));
-                          return next;
-                        }) : undefined}
+                        onClick={canOpenDetalle ? () => openCuentaCorrienteDetalle(item) : undefined}
                         sx={{ cursor: canOpenDetalle ? "pointer" : "default" }}
                       >
                         <TableCell sx={{ fontWeight: 900 }}>
@@ -1699,16 +1747,13 @@ export default function Finanzas() {
                 <Stack spacing={1.5}>
                   {paginatedRows.map((item) => {
                     const deudor = item.saldoPendiente > 0;
-                    const canOpenDetalle = item.tipoDeudor !== "tercero" && item.clienteId != null;
+                    const canOpenDetalle = (item.tipoDeudor === "tercero" && item.terceroId != null)
+                      || (item.tipoDeudor !== "tercero" && item.clienteId != null);
                     return (
                       <Paper
                         key={item.key}
                         elevation={0}
-                        onClick={canOpenDetalle ? () => setSearchParams((prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set("clienteId", String(item.clienteId));
-                          return next;
-                        }) : undefined}
+                        onClick={canOpenDetalle ? () => openCuentaCorrienteDetalle(item) : undefined}
                         sx={{
                           borderRadius: "12px",
                           border: "1px solid",
@@ -1953,23 +1998,29 @@ function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrin
   );
 }
 
-function ClienteCuentaCorrienteDetail({ clienteId, onBack }) {
+function DeudorCuentaCorrienteDetail({ tipoDeudor, deudorId, onBack }) {
+  const isTercero = tipoDeudor === "tercero";
   // El libro mayor se calcula en el backend (motor Decimal); acá solo se renderiza.
   const ccQuery = useQuery({
-    queryKey: ["clientes", clienteId, "cuenta-corriente"],
+    queryKey: [isTercero ? "terceros" : "clientes", deudorId, "cuenta-corriente"],
     queryFn: async () => {
-      const { data } = await api.get(`/clientes/${clienteId}/cuenta-corriente`);
+      const path = isTercero
+        ? `/terceros/${deudorId}/cuenta-corriente`
+        : `/clientes/${deudorId}/cuenta-corriente`;
+      const { data } = await api.get(path);
       return data?.data ?? data;
     },
-    enabled: Boolean(clienteId),
+    enabled: Boolean(deudorId),
   });
-  const clienteQuery = useQuery({
-    queryKey: ["clientes", clienteId],
+  const personaQuery = useQuery({
+    queryKey: [isTercero ? "terceros" : "clientes", deudorId],
     queryFn: async () => {
-      const { data } = await api.get(`/clientes/${clienteId}`);
+      const path = isTercero ? `/terceros/${deudorId}` : `/clientes/${deudorId}`;
+      const { data } = await api.get(path);
       return data?.data ?? data;
     },
-    enabled: Boolean(clienteId),
+    enabled: Boolean(deudorId),
+    retry: false,
   });
 
   const loading = ccQuery.isLoading;
@@ -2000,8 +2051,17 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack }) {
     );
   }
 
-  const cliente = clienteQuery.data ?? null;
-  const nombre = clienteLabel(cliente) || (cliente ? [cliente.apellido, cliente.nombre].filter(Boolean).join(", ") : "") || `Cliente #${clienteId}`;
+  const persona = personaQuery.data ?? null;
+  const nombre = clienteLabel(persona)
+    || (persona ? [persona.apellido, persona.nombre].filter(Boolean).join(", ") : "")
+    || (isTercero ? `Tercero #${deudorId}` : `Cliente #${deudorId}`);
+
+  const subtitle = isTercero ? (
+    <Stack direction="row" spacing={1} alignItems="center" component="span" sx={{ display: "inline-flex" }}>
+      <Box component="span">{nombre}</Box>
+      <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
+    </Stack>
+  ) : nombre;
 
   return (
     <Stack spacing={3}>
@@ -2057,7 +2117,7 @@ function ClienteCuentaCorrienteDetail({ clienteId, onBack }) {
       */}
 
       <CuentaCorrienteLedger
-        subtitle={nombre}
+        subtitle={subtitle}
         rows={rows}
         formatDate={formatDateShort}
         formatMoney={formatMoneyAr}
