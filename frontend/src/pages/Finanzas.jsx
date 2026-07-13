@@ -89,6 +89,11 @@ const TAB_LABELS = {
   cuentas_corrientes: "Cuentas Corrientes",
 };
 
+const HONORARIOS_ORDER_BY = new Set(["fecha", "concepto", "cliente", "expediente", "vencimiento", "monto", "interes", "saldo", "estado"]);
+const GASTOS_ORDER_BY = new Set(["fecha", "concepto", "cliente", "expediente", "monto", "estado"]);
+const INGRESOS_ORDER_BY = new Set(["fecha", "concepto", "cliente", "expediente", "monto"]);
+const CC_ORDER_BY = new Set(["cliente", "cargos", "cobrado", "saldo", "estado"]);
+
 const DATE_PRESETS = [
   { key: "todo", label: "Todo" },
   { key: "hoy", label: "Hoy" },
@@ -358,7 +363,7 @@ export default function Finanzas() {
     ...honorariosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-    orderBy,
+    orderBy: HONORARIOS_ORDER_BY.has(orderBy) ? orderBy : "fecha",
     order,
   }), [honorariosFilterParams, page, rowsPerPage, orderBy, order]);
 
@@ -371,7 +376,7 @@ export default function Finanzas() {
     ...gastosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-    orderBy,
+    orderBy: GASTOS_ORDER_BY.has(orderBy) ? orderBy : "fecha",
     order,
   }), [gastosFilterParams, page, rowsPerPage, orderBy, order]);
 
@@ -384,7 +389,7 @@ export default function Finanzas() {
     ...ingresosFilterParams,
     page: page + 1,
     limit: rowsPerPage,
-    orderBy,
+    orderBy: INGRESOS_ORDER_BY.has(orderBy) ? orderBy : "fecha",
     order,
   }), [ingresosFilterParams, page, rowsPerPage, orderBy, order]);
 
@@ -392,7 +397,7 @@ export default function Finanzas() {
     page: page + 1,
     limit: rowsPerPage,
     search: debouncedSearch.trim() || undefined,
-    orderBy,
+    orderBy: CC_ORDER_BY.has(orderBy) ? orderBy : "saldo",
     order,
   }), [page, rowsPerPage, debouncedSearch, orderBy, order]);
 
