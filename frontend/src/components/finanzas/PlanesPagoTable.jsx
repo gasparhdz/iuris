@@ -25,10 +25,11 @@ import {
   Typography,
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import { Delete, EventRepeat, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
+import { KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import {
   clienteLabel,
   casoLabel,
+  casoCaratulaLabel,
   cuotaEstadoChip,
   cuotaMontoDisplay,
   cuotaTotalAPagar,
@@ -44,6 +45,26 @@ import {
   linkSx,
 } from "../../pages/finanzasUtils";
 import { getApiError } from "../../pages/tareasUtils";
+
+const compactCellSx = { py: 0.5, px: 1.25, fontSize: "0.8125rem" };
+const compactHeadSx = {
+  ...compactCellSx,
+  fontWeight: 900,
+  fontSize: "0.68rem",
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "text.secondary",
+  whiteSpace: "nowrap",
+};
+const cobrarBtnSx = {
+  fontWeight: 800,
+  borderRadius: "8px",
+  minWidth: 0,
+  px: 1.25,
+  py: 0.25,
+  fontSize: "0.75rem",
+  lineHeight: 1.4,
+};
 
 function unwrapArray(data) {
   const raw = data?.data ?? data;
@@ -75,7 +96,6 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
 
   const cobrarMutation = useMutation({
     mutationFn: async (cuota) => {
-      // Refrescar cuotas antes de cobrar para no partir de un saldo viejo.
       await queryClient.invalidateQueries({ queryKey: ["planes", plan.id, "cuotas"] });
       const freshCuotas = await queryClient.fetchQuery({
         queryKey: ["planes", plan.id, "cuotas"],
@@ -114,17 +134,17 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
 
   if (cuotasQuery.isLoading) {
     return (
-      <Stack spacing={1} sx={{ p: 2, bgcolor: "action.hover" }}>
-        <Skeleton variant="rounded" height={34} />
-        <Skeleton variant="rounded" height={34} />
+      <Stack spacing={0.75} sx={{ p: 1.25, bgcolor: "action.hover" }}>
+        <Skeleton variant="rounded" height={28} />
+        <Skeleton variant="rounded" height={28} />
       </Stack>
     );
   }
 
   if (cuotasQuery.isError) {
     return (
-      <Box sx={{ p: 2, bgcolor: "action.hover" }}>
-        <Typography variant="body2" color="error">
+      <Box sx={{ p: 1.25, bgcolor: "action.hover" }}>
+        <Typography variant="body2" color="error" sx={{ fontSize: "0.8125rem" }}>
           {getApiError(cuotasQuery.error, "No se pudieron cargar las cuotas")}
         </Typography>
       </Box>
@@ -134,26 +154,25 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
   const cuotas = cuotasQuery.data ?? [];
 
   return (
-    <Box sx={{ p: 2, bgcolor: "action.hover" }}>
+    <Box sx={{ px: 1.25, py: 1, bgcolor: "action.hover" }}>
       {cuotas.length === 0 ? (
-        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+        <Typography variant="body2" sx={{ color: "text.secondary", fontSize: "0.8125rem" }}>
           Este plan no tiene cuotas generadas.
         </Typography>
       ) : (
         <>
-          {/* Desktop */}
           <Box sx={{ display: { xs: "none", md: "block" } }}>
             <Table size="small" sx={denseTableSx}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 900 }}>Nro cuota</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Vencimiento</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Monto cuota</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Monto cobrado</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Saldo</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Interés</TableCell>
-                  <TableCell sx={{ fontWeight: 900 }}>Estado</TableCell>
-                  <TableCell sx={{ fontWeight: 900, width: 110 }}>Acciones</TableCell>
+                  <TableCell sx={compactHeadSx}>Nro</TableCell>
+                  <TableCell sx={compactHeadSx}>Vencimiento</TableCell>
+                  <TableCell sx={compactHeadSx}>Monto</TableCell>
+                  <TableCell sx={compactHeadSx}>Cobrado</TableCell>
+                  <TableCell sx={compactHeadSx}>Saldo</TableCell>
+                  <TableCell sx={compactHeadSx}>Interés</TableCell>
+                  <TableCell sx={compactHeadSx}>Estado</TableCell>
+                  <TableCell sx={{ ...compactHeadSx, width: 88 }}>Acciones</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -162,32 +181,46 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
                   const totalAPagar = cuotaTotalAPagar(cuota);
                   const interesPesos = Number(cuota.interes?.pesos ?? 0);
                   const chip = cuotaEstadoChip(cuota);
+                  const saldoLabel = formatMoneyAr(cuota.interes?.aplica ? totalAPagar : saldo);
+                  const saldoTooltip = cuota.interes?.aplica
+                    ? `Saldo ${formatMoneyAr(saldo)} · Total ${formatMoneyAr(totalAPagar)}`
+                    : saldoLabel;
+                  const pending = cobrarMutation.isPending
+                    && Number(cobrarMutation.variables?.id) === Number(cuota.id);
                   return (
-                    <TableRow key={cuota.id}>
-                      <TableCell sx={{ fontWeight: 800 }}>{cuota.numero}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(cuota.vencimiento)}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{formatMoneyAr(cuotaMontoDisplay(cuota))}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>{formatMoneyAr(cuota.montoCobrado)}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>
-                        {cuota.interes?.aplica ? (
-                          <Stack spacing={0.25}>
-                            <Typography variant="body2" sx={{ fontWeight: 900 }}>Saldo: {formatMoneyAr(saldo)}</Typography>
-                            <Typography variant="caption" color="warning.main" sx={{ fontWeight: 900 }}>Total: {formatMoneyAr(totalAPagar)}</Typography>
-                          </Stack>
-                        ) : formatMoneyAr(saldo)}
+                    <TableRow key={cuota.id} hover>
+                      <TableCell sx={{ ...compactCellSx, fontWeight: 800 }}>#{cuota.numero}</TableCell>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatDateShort(cuota.vencimiento)}</TableCell>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", fontWeight: 800 }}>
+                        {formatMoneyAr(cuotaMontoDisplay(cuota))}
                       </TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatMoneyAr(cuota.montoCobrado)}</TableCell>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", fontWeight: 900 }}>
+                        <Tooltip title={saldoTooltip}>
+                          <Box component="span">{saldoLabel}</Box>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>
                         {cuota.interes?.aplica ? (
-                          <Typography variant="body2" color="warning.main" sx={{ fontWeight: 900 }}>+{formatMoneyAr(interesPesos)}</Typography>
+                          <Typography variant="body2" color="warning.main" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>
+                            +{formatMoneyAr(interesPesos)}
+                          </Typography>
                         ) : "—"}
                       </TableCell>
-                      <TableCell>
-                        <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} />
+                      <TableCell sx={compactCellSx}>
+                        <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
                       </TableCell>
-                      <TableCell>
+                      <TableCell sx={compactCellSx}>
                         {saldo > 0 && (
-                          <Button size="small" variant="contained" color="success" disabled={cobrarMutation.isPending} onClick={(e) => { e.stopPropagation(); cobrarMutation.mutate(cuota); }} sx={{ fontWeight: 900, borderRadius: "9px" }}>
-                            {cobrarMutation.isPending ? <CircularProgress size={16} color="inherit" /> : "Cobrar"}
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            disabled={cobrarMutation.isPending}
+                            onClick={(e) => { e.stopPropagation(); cobrarMutation.mutate(cuota); }}
+                            sx={cobrarBtnSx}
+                          >
+                            {pending ? <CircularProgress size={14} color="inherit" /> : "Cobrar"}
                           </Button>
                         )}
                       </TableCell>
@@ -197,42 +230,36 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
               </TableBody>
             </Table>
           </Box>
-          {/* Mobile */}
+
           <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" } }}>
             {cuotas.map((cuota) => {
               const saldo = Number(cuota.saldoPesos ?? cuota.saldo ?? 0);
               const totalAPagar = cuotaTotalAPagar(cuota);
               const interesPesos = Number(cuota.interes?.pesos ?? 0);
               const chip = cuotaEstadoChip(cuota);
+              const pending = cobrarMutation.isPending
+                && Number(cobrarMutation.variables?.id) === Number(cuota.id);
               return (
-                <Paper key={cuota.id} elevation={0} sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: "10px" }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 900 }}>Cuota #{cuota.numero}</Typography>
-                    <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} />
+                <Paper key={cuota.id} elevation={0} sx={{ px: 1.25, py: 1, border: "1px solid", borderColor: "divider", borderRadius: "8px" }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ mb: 0.75 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>Cuota #{cuota.numero}</Typography>
+                    <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 800, height: 20, fontSize: "0.65rem" }} />
                   </Stack>
-                  <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 1, mb: 1 }}>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Vto</Typography>
-                      <Typography variant="body2">{formatDateShort(cuota.vencimiento)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Monto</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 900 }}>{formatMoneyAr(cuotaMontoDisplay(cuota))}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Saldo</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 900 }}>{cuota.interes?.aplica ? formatMoneyAr(totalAPagar) : formatMoneyAr(saldo)}</Typography>
-                    </Box>
-                    {cuota.interes?.aplica && (
-                      <Box>
-                        <Typography variant="caption" color="warning.main" sx={{ fontWeight: 800, display: "block" }}>Interés</Typography>
-                        <Typography variant="body2" color="warning.main" sx={{ fontWeight: 900 }}>+{formatMoneyAr(interesPesos)}</Typography>
-                      </Box>
-                    )}
-                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.75, lineHeight: 1.3 }}>
+                    {formatDateShort(cuota.vencimiento)} · {formatMoneyAr(cuotaMontoDisplay(cuota))}
+                    {cuota.interes?.aplica ? ` · Total ${formatMoneyAr(totalAPagar)} (+${formatMoneyAr(interesPesos)})` : ` · Saldo ${formatMoneyAr(saldo)}`}
+                  </Typography>
                   {saldo > 0 && (
-                    <Button size="small" variant="contained" color="success" fullWidth disabled={cobrarMutation.isPending} onClick={(e) => { e.stopPropagation(); cobrarMutation.mutate(cuota); }} sx={{ fontWeight: 900, borderRadius: "9px", mt: 0.5 }}>
-                      {cobrarMutation.isPending ? <CircularProgress size={16} color="inherit" /> : "Cobrar cuota"}
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="success"
+                      fullWidth
+                      disabled={cobrarMutation.isPending}
+                      onClick={(e) => { e.stopPropagation(); cobrarMutation.mutate(cuota); }}
+                      sx={cobrarBtnSx}
+                    >
+                      {pending ? <CircularProgress size={14} color="inherit" /> : "Cobrar"}
                     </Button>
                   )}
                 </Paper>
@@ -251,9 +278,9 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
 
   if (loading) {
     return (
-      <Stack spacing={1} sx={{ p: 2 }}>
-        <Skeleton variant="rounded" height={36} />
-        <Skeleton variant="rounded" height={36} />
+      <Stack spacing={1} sx={{ p: 1.5 }}>
+        <Skeleton variant="rounded" height={32} />
+        <Skeleton variant="rounded" height={32} />
       </Stack>
     );
   }
@@ -272,17 +299,16 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
 
   return (
     <>
-      {/* Desktop */}
-      <TableContainer component={Paper} elevation={0} sx={{ borderRadius: 0, display: { xs: "none", md: "block" } }}>
+      <TableContainer sx={{ display: { xs: "none", md: "block" } }}>
         <Table size="small" sx={denseTableSx}>
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.info.main, 0.08) }}>
-              <TableCell sx={{ width: 42, whiteSpace: "nowrap" }} />
-              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Vinculación</TableCell>
-              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Deudor</TableCell>
-              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Cuota</TableCell>
-              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Periodicidad</TableCell>
-              <TableCell sx={{ fontWeight: 900, fontSize: "0.72rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "text.secondary", whiteSpace: "nowrap" }}>Inicio</TableCell>
+              <TableCell sx={{ ...compactHeadSx, width: 40 }} />
+              <TableCell sx={compactHeadSx}>Expte / Cliente</TableCell>
+              <TableCell sx={compactHeadSx}>Deudor</TableCell>
+              <TableCell sx={compactHeadSx}>Cuota</TableCell>
+              <TableCell sx={compactHeadSx}>Periodicidad</TableCell>
+              <TableCell sx={compactHeadSx}>Inicio</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -292,54 +318,60 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
               const totalLabel = formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan));
               return (
                 <Fragment key={plan.id}>
-                  <TableRow hover onClick={() => setExpandedPlanId(expanded ? null : plan.id)} sx={{ cursor: "pointer" }}>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>
-                      <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"}>
+                  <TableRow
+                    hover
+                    onClick={() => setExpandedPlanId(expanded ? null : plan.id)}
+                    sx={{ cursor: "pointer", "& > td": compactCellSx }}
+                  >
+                    <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", width: 40 }}>
+                      <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"} sx={{ p: 0.25 }}>
                         {expanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
                       </IconButton>
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
+                    <TableCell sx={{ ...compactCellSx, maxWidth: 240, whiteSpace: "nowrap" }}>
                       {plan.caso ? (
                         <Tooltip title={casoLabel(plan.caso)}>
-                          <Link component={RouterLink} to={`/expedientes/${plan.caso.id}`} variant="body2" sx={linkSx} onClick={(e) => e.stopPropagation()}>
-                            <Box component="span" sx={ellipsisSx}>{casoLabel(plan.caso)}</Box>
+                          <Link component={RouterLink} to={`/expedientes/${plan.caso.id}`} variant="body2" sx={{ ...linkSx, fontSize: "0.8125rem" }} onClick={(e) => e.stopPropagation()}>
+                            <Box component="span" sx={ellipsisSx}>{casoCaratulaLabel(plan.caso)}</Box>
                           </Link>
                         </Tooltip>
                       ) : plan.cliente ? (
                         <Tooltip title={clienteLabel(plan.cliente)}>
-                          <Link component={RouterLink} to={`/clientes/${plan.cliente.id}`} variant="body2" sx={linkSx} onClick={(e) => e.stopPropagation()}>
+                          <Link component={RouterLink} to={`/clientes/${plan.cliente.id}`} variant="body2" sx={{ ...linkSx, fontSize: "0.8125rem" }} onClick={(e) => e.stopPropagation()}>
                             <Box component="span" sx={ellipsisSx}>{clienteLabel(plan.cliente)}</Box>
                           </Link>
                         </Tooltip>
                       ) : "—"}
                     </TableCell>
-                    <TableCell sx={{ maxWidth: 200, whiteSpace: "nowrap" }}>
-                      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                    <TableCell sx={{ ...compactCellSx, maxWidth: 200, whiteSpace: "nowrap" }}>
+                      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
                         <Tooltip title={deudorNombreFromItem(plan, plan.cliente)}>
-                          <Typography variant="body2" sx={{ ...ellipsisSx, fontWeight: 800 }}>
+                          <Typography variant="body2" sx={{ ...ellipsisSx, fontWeight: 800, fontSize: "0.8125rem" }}>
                             {deudorNombreFromItem(plan, plan.cliente)}
                           </Typography>
                         </Tooltip>
                         {isDeudorTercero(plan) && (
-                          <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800, flexShrink: 0 }} />
+                          <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800, flexShrink: 0 }} />
                         )}
                       </Stack>
                     </TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                    <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>
                       <Tooltip title={`Total: ${totalLabel}`}>
-                        <Typography variant="body2" sx={{ fontWeight: 900 }}>{cuotaLabel}</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>{cuotaLabel}</Typography>
                       </Tooltip>
                     </TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</TableCell>
+                    <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</TableCell>
+                    <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</TableCell>
                   </TableRow>
-                  <TableRow>
-                    <TableCell colSpan={6} sx={{ p: 0, borderBottom: expanded ? "1px solid" : 0, borderColor: "divider" }}>
-                      <Collapse in={expanded} timeout="auto" unmountOnExit>
-                        <PlanCuotasPanel plan={plan} invalidateKeys={invalidateKeys} />
-                      </Collapse>
-                    </TableCell>
-                  </TableRow>
+                  {expanded && (
+                    <TableRow>
+                      <TableCell colSpan={6} sx={{ p: 0, borderBottom: "1px solid", borderColor: "divider" }}>
+                        <Collapse in={expanded} timeout="auto" unmountOnExit>
+                          <PlanCuotasPanel plan={plan} invalidateKeys={invalidateKeys} />
+                        </Collapse>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </Fragment>
               );
             })}
@@ -347,46 +379,28 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
         </Table>
       </TableContainer>
 
-      {/* Mobile */}
-      <Stack spacing={1.5} sx={{ display: { xs: "flex", md: "none" }, p: 1.5 }}>
+      <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" }, p: 1 }}>
         {planes.map((plan) => {
           const expanded = expandedPlanId === plan.id;
           return (
-            <Paper key={plan.id} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "12px", overflow: "hidden" }}>
-              <Box sx={{ p: 2, cursor: "pointer" }} onClick={() => setExpandedPlanId(expanded ? null : plan.id)}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                  <Box sx={{ flex: 1, minWidth: 0, mr: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 900, display: "block" }} noWrap>
-                      {plan.caso ? casoLabel(plan.caso) : (plan.cliente ? clienteLabel(plan.cliente) : "Sin vinculación")}
+            <Paper key={plan.id} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "10px", overflow: "hidden" }}>
+              <Box sx={{ px: 1.5, py: 1.25, cursor: "pointer" }} onClick={() => setExpandedPlanId(expanded ? null : plan.id)}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem", display: "block" }} noWrap>
+                      {plan.caso ? casoCaratulaLabel(plan.caso) : (plan.cliente ? clienteLabel(plan.cliente) : "Sin expte / cliente")}
                     </Typography>
-                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-                      <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 800 }}>
-                        Deudor: {deudorNombreFromItem(plan, plan.cliente)}
-                      </Typography>
-                      {isDeudorTercero(plan) && (
-                        <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem", fontWeight: 800 }} />
-                      )}
-                    </Stack>
+                    <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 700, display: "block", lineHeight: 1.3 }}>
+                      {deudorNombreFromItem(plan, plan.cliente)}
+                      {isDeudorTercero(plan) ? " · Tercero" : ""}
+                      {" · "}{formatMoneyAr(planMontoCuota(plan))}
+                      {" · "}{plan.periodicidad?.nombre ?? "—"}
+                      {" · "}{formatDateShort(plan.fechaInicio)}
+                    </Typography>
                   </Box>
-                  <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"}>
+                  <IconButton size="small" aria-label={expanded ? "Ocultar cuotas" : "Ver cuotas"} sx={{ p: 0.25, flexShrink: 0 }}>
                     {expanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
                   </IconButton>
-                </Stack>
-                <Stack direction="row" spacing={2} sx={{ mt: 1.5, flexWrap: "wrap", gap: 1 }}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Cuota</Typography>
-                    <Tooltip title={`Total: ${formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan))}`}>
-                      <Typography variant="body2" sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>{formatMoneyAr(planMontoCuota(plan))}</Typography>
-                    </Tooltip>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Periodicidad</Typography>
-                    <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>Inicio</Typography>
-                    <Typography variant="body2" sx={{ whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</Typography>
-                  </Box>
                 </Stack>
               </Box>
               <Collapse in={expanded} timeout="auto" unmountOnExit>

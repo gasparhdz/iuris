@@ -53,7 +53,7 @@ export const eventoQuerySchema = z.object({
   estadoId: positiveIntSchema.optional(),
   upcoming: z.enum(["true", "false"]).optional(),
   ...paginationQuerySchema.shape,
-  orderBy: z.enum(["evento", "tipoEstado", "fechas", "vinculaciones", "ubicacion"]).default("fechas"),
+  orderBy: z.enum(["evento", "tipo", "estado", "fechas", "vinculaciones", "ubicacion"]).default("fechas"),
   order: z.enum(["asc", "desc"]).default("asc"),
 }).strict();
 

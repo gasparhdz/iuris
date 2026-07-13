@@ -224,7 +224,7 @@ function mapContactoToDb(contacto) {
 function getClienteTitle(form) {
   return form.tipo === "juridica"
     ? form.razonSocial
-    : [form.nombre, form.apellido].filter(Boolean).join(" ");
+    : [form.apellido, form.nombre].filter(Boolean).join(", ");
 }
 
 export default function ClienteForm() {

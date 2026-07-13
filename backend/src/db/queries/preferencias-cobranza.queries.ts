@@ -19,6 +19,7 @@ import {
 import type { CuotaRecordatorio } from "../../services/cobranza-recordatorio.js";
 import { PREFERENCIAS_COBRANZA_DEFAULTS } from "../../services/cobranza-recordatorio.js";
 import { padresCasoClienteVivos } from "./padre-vivo.js";
+import { personaNombreExpr } from "../sql/personaNombre.js";
 
 export type PreferenciasCobranza = {
   habilitado: boolean;
@@ -120,9 +121,9 @@ export class CobranzaRecordatorioQueries {
     const estadoCondonadaId = await this.findEstadoCuotaId("CONDONADA");
 
     const obligadoCliente = alias(clientes, "obligado_cliente");
-    const clienteNombreFallback = sql<string>`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), 'Sin cliente')`;
-    const obligadoClienteNombre = sql<string>`COALESCE(${obligadoCliente.razonSocial}, NULLIF(CONCAT_WS(', ', ${obligadoCliente.apellido}, ${obligadoCliente.nombre}), ''), ${obligadoCliente.nombre}, 'Sin cliente')`;
-    const terceroNombre = sql<string>`COALESCE(${terceros.razonSocial}, NULLIF(CONCAT_WS(', ', ${terceros.apellido}, ${terceros.nombre}), ''), ${terceros.nombre}, 'Sin nombre')`;
+    const clienteNombreFallback = sql<string>`COALESCE(NULLIF(${personaNombreExpr(clientes.razonSocial, clientes.apellido, clientes.nombre)}, ''), 'Sin cliente')`;
+    const obligadoClienteNombre = sql<string>`COALESCE(NULLIF(${personaNombreExpr(obligadoCliente.razonSocial, obligadoCliente.apellido, obligadoCliente.nombre)}, ''), 'Sin cliente')`;
+    const terceroNombre = sql<string>`COALESCE(NULLIF(${personaNombreExpr(terceros.razonSocial, terceros.apellido, terceros.nombre)}, ''), 'Sin nombre')`;
     const clienteNombre = sql<string>`CASE
       WHEN ${honorarios.obligadoTerceroId} IS NOT NULL THEN ${terceroNombre}
       WHEN ${honorarios.obligadoClienteId} IS NOT NULL THEN ${obligadoClienteNombre}

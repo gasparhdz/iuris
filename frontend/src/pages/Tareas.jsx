@@ -9,7 +9,7 @@ import api from "../api/axios";
 import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
-import { denseTableSx } from "../theme/tableStyles";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -65,6 +65,7 @@ import {
 } from "@mui/icons-material";
 import {
   casoLabel,
+  casoCaratulaLabel,
   checklistStats,
   clienteLabel,
   formatFriendlyDate,
@@ -118,12 +119,13 @@ export default function Tareas() {
   const debouncedSearch = useDebounced(search);
 
   const listParams = useMemo(() => {
+    const sortable = new Set(["titulo", "prioridad", "vencimiento", "vinculacion"]);
     const params = {
       page: page + 1,
       limit: rowsPerPage,
       search: debouncedSearch.trim() || undefined,
       prioridadId: priorityFilter === "all" ? undefined : Number(priorityFilter),
-      orderBy,
+      orderBy: sortable.has(orderBy) ? orderBy : "titulo",
       order,
     };
     if (statusFilter === "pendientes") params.completada = "false";
@@ -402,7 +404,13 @@ export default function Tareas() {
 
 function PriorityChip({ priority, theme }) {
   const styles = priorityStyles(priority, theme);
-  return <Chip size="small" label={priority?.nombre ?? "Sin prioridad"} sx={{ bgcolor: styles.bg, color: styles.color, border: "1px solid", borderColor: styles.border, fontWeight: 900 }} />;
+  return (
+    <Chip
+      size="small"
+      label={priority?.nombre ?? "Sin prioridad"}
+      sx={{ bgcolor: styles.bg, color: styles.color, border: "1px solid", borderColor: styles.border, fontWeight: 800, height: 22, fontSize: "0.7rem" }}
+    />
+  );
 }
 
 function CascadeConfirmDialog({ open, incompleteCount, onClose, onOnlyTask, onCascade, theme }) {
@@ -495,7 +503,7 @@ function TaskMeta({ task, cliente, caso, showDate = true, currentPath }) {
           >
             <FolderOpen sx={{ fontSize: 15, flexShrink: 0 }} />
             <Box component="span" sx={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {casoLabel(caso)}
+              {casoCaratulaLabel(caso)}
             </Box>
           </Link>
         </Tooltip>
@@ -530,7 +538,7 @@ function TaskCard({ task, theme, priority, cliente, caso, currentPath, onOpen, o
             <PriorityChip priority={priority} theme={theme} />
             <ChecklistProgress task={task} />
           </Stack>
-          <TaskMeta task={task} cliente={cliente} caso={caso} currentPath={currentPath} />
+          <TaskMeta task={task} cliente={caso ? undefined : cliente} caso={caso} currentPath={currentPath} />
           {(canEditar || canEliminar) && (
             <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
               {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={onEdit}><Edit fontSize="small" /></IconButton></Tooltip>}
@@ -567,12 +575,12 @@ function TaskTable({
   disabled
 }) {
   const columns = [
-    { id: "titulo", label: "Tarea" },
-    { id: "prioridad", label: "Prioridad", width: 130 },
-    { id: "vencimiento", label: "Vencimiento", width: 140 },
-    { id: "vinculacion", label: "Vinculación", width: 220 },
-    { id: "checklist", label: "Checklist", width: 130 },
-    { id: "acciones", label: "Acciones", width: 100 }
+    { id: "titulo", label: "Tarea", sortable: true },
+    { id: "prioridad", label: "Prioridad", width: 130, sortable: true },
+    { id: "vencimiento", label: "Vencimiento", width: 140, sortable: true },
+    { id: "vinculacion", label: "Expte / Cliente", width: 220, sortable: true },
+    { id: "checklist", label: "Checklist", width: 130, sortable: false },
+    { id: "acciones", label: "Acciones", width: 100, sortable: false }
   ];
 
   return (
@@ -582,19 +590,12 @@ function TaskTable({
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
               {columns.map((column) => {
-                const isSortable = column.id !== "acciones";
+                const isSortable = column.sortable !== false;
                 return (
                   <TableCell
                     key={column.id}
                     sortDirection={orderBy === column.id ? order : false}
-                    sx={{
-                      width: column.width,
-                      fontWeight: 900,
-                      color: "text.secondary",
-                      fontSize: "0.72rem",
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase"
-                    }}
+                    sx={{ ...tableHeadCellSx, width: column.width }}
                   >
                     {isSortable ? (
                       <TableSortLabel
@@ -624,70 +625,63 @@ function TaskTable({
                 <TableRow
                   key={task.id}
                   hover
-                  sx={{
-                    cursor: "pointer",
-                    "& td": { py: 0.75, px: 2 }
-                  }}
+                  sx={{ cursor: "pointer" }}
                   onClick={() => onOpen(task)}
                 >
                   <TableCell>
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
                       <Checkbox
                         checked={Boolean(task.completada)}
                         disabled={disabled}
                         onClick={(event) => event.stopPropagation()}
                         onChange={(event) => onToggle(event, task)}
                         size="small"
-                        sx={{ p: 0.5 }}
+                        sx={{ p: 0.25 }}
                       />
-                      <Box sx={{ minWidth: 0 }}>
+                      <Tooltip title={task.descripcion || task.titulo}>
                         <Typography
                           variant="body2"
+                          noWrap
                           sx={{
-                            fontWeight: 900,
-                            wordBreak: "break-word",
+                            fontWeight: 800,
+                            fontSize: "0.8125rem",
                             textDecoration: task.completada ? "line-through" : "none",
                             color: task.completada ? "text.secondary" : "text.primary"
                           }}
                         >
                           {task.titulo}
                         </Typography>
-                        {task.descripcion && (
-                          <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }} noWrap>
-                            {task.descripcion}
-                          </Typography>
-                        )}
-                      </Box>
+                      </Tooltip>
                     </Stack>
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
                     <PriorityChip priority={prioridadesById.get(Number(task.prioridadId))} theme={theme} />
                   </TableCell>
                   <TableCell sx={{ whiteSpace: "nowrap" }}>
                     <Typography
                       variant="caption"
-                      sx={{ color: isOverdue(task) ? "error.main" : "text.secondary", fontWeight: 800, whiteSpace: "nowrap" }}
+                      sx={{ color: isOverdue(task) ? "error.main" : "text.secondary", fontWeight: 800, whiteSpace: "nowrap", fontSize: "0.8125rem" }}
                     >
                       {formatFriendlyDate(task.fechaLimite)}
                     </Typography>
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 240 }}>
+                  <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
                     <TaskMeta task={task} cliente={caso ? undefined : cliente} caso={caso} showDate={false} currentPath={currentPath} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
                     <ChecklistProgress task={task} compact />
                   </TableCell>
-                  <TableCell onClick={(event) => event.stopPropagation()}>
+                  <TableCell onClick={(event) => event.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
                     {canEditar && (
                       <Tooltip title="Editar">
-                        <IconButton size="small" color="primary" onClick={(event) => onEdit(event, task)}>
+                        <IconButton size="small" color="primary" sx={{ p: 0.5 }} onClick={(event) => onEdit(event, task)}>
                           <Edit fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     )}
                     {canEliminar && (
                       <Tooltip title="Eliminar">
-                        <IconButton size="small" color="error" onClick={(event) => onDelete(event, task)}>
+                        <IconButton size="small" color="error" sx={{ p: 0.5 }} onClick={(event) => onDelete(event, task)}>
                           <Delete fontSize="small" />
                         </IconButton>
                       </Tooltip>

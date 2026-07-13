@@ -88,7 +88,7 @@ const PARAMETROS: ParamSeed[] = [
   { id: 53, categoriaId: 3, codigo: 'EJECUTANDO_SENTENCIA', nombre: 'Ejecutando sentencia', orden: 5, parentId: null },
   { id: 54, categoriaId: 3, codigo: 'EN_ESTUDIO', nombre: 'En estudio', orden: 6, parentId: null },
   { id: 55, categoriaId: 3, codigo: 'EN_TRAMITE', nombre: 'En trámite', orden: 7, parentId: null },
-  { id: 56, categoriaId: 3, codigo: 'FINALIZADO', nombre: 'Finalizado', orden: 8, parentId: null },
+  { id: 56, categoriaId: 3, codigo: 'FINALIZADO', nombre: 'Finalizado', orden: 8, parentId: null, activo: false },
   { id: 57, categoriaId: 3, codigo: 'EN_MEDIACION', nombre: 'En mediación', orden: 9, parentId: null },
   { id: 58, categoriaId: 3, codigo: 'PARA_SENTENCIA', nombre: 'Para sentencia', orden: 10, parentId: null },
   { id: 59, categoriaId: 3, codigo: 'PARALIZADO', nombre: 'Paralizado', orden: 11, parentId: null },

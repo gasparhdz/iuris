@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, eventos, parametros } from "../schema.js";
 import { padresCasoClienteVivos } from "./padre-vivo.js";
+import { vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
 
 type NewEvento = typeof eventos.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -15,7 +16,7 @@ type EventoListFilters = {
   tipoId?: number;
   estadoId?: number;
   upcoming?: boolean;
-  orderBy?: "evento" | "tipoEstado" | "fechas" | "vinculaciones" | "ubicacion";
+  orderBy?: "evento" | "tipo" | "estado" | "fechas" | "vinculaciones" | "ubicacion";
   order?: "asc" | "desc";
 };
 
@@ -50,14 +51,20 @@ export class EventosQueries {
     const tipoParam = alias(parametros, "evento_tipo_sort");
     const estadoParam = alias(parametros, "evento_estado_sort");
     const sortDir = order === "desc" ? desc : asc;
-    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
-    const vinculacionExpr = sql`trim(concat_ws(' ', ${clienteNombre}, coalesce(${casos.caratula}, ${casos.nroExpte}, '')))`;
+    const vinculacionExpr = vinculacionExpteClienteSortExpr(
+      casos.caratula,
+      clientes.razonSocial,
+      clientes.apellido,
+      clientes.nombre,
+    );
     const orderExpr = (() => {
       switch (orderBy) {
         case "evento":
           return sortDir(eventos.descripcion);
-        case "tipoEstado":
-          return sortDir(sql`concat_ws(' ', ${tipoParam.nombre}, ${estadoParam.nombre})`);
+        case "tipo":
+          return sortDir(tipoParam.nombre);
+        case "estado":
+          return sortDir(estadoParam.nombre);
         case "vinculaciones":
           return sortDir(vinculacionExpr);
         case "ubicacion":

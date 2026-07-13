@@ -70,7 +70,7 @@ export const tareaQuerySchema = z.object({
   search: z.string().optional(),
   prioridadId: positiveIntSchema.optional(),
   ...paginationQuerySchema.shape,
-  orderBy: z.enum(["titulo", "prioridad", "vencimiento", "vinculacion", "checklist"]).default("titulo"),
+  orderBy: z.enum(["titulo", "prioridad", "vencimiento", "vinculacion"]).default("titulo"),
   order: z.enum(["asc", "desc"]).default("asc"),
 }).strict();
 

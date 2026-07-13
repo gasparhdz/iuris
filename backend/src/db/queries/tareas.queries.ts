@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, parametros, subTareas, tareas } from "../schema.js";
 import { padresCasoClienteVivos } from "./padre-vivo.js";
+import { vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
 
 type NewTarea = typeof tareas.$inferInsert;
 type NewSubTarea = typeof subTareas.$inferInsert;
@@ -14,7 +15,7 @@ type TareaListFilters = {
   asignadoA?: number;
   search?: string;
   prioridadId?: number;
-  orderBy?: "titulo" | "prioridad" | "vencimiento" | "vinculacion" | "checklist";
+  orderBy?: "titulo" | "prioridad" | "vencimiento" | "vinculacion";
   order?: "asc" | "desc";
 };
 
@@ -41,14 +42,12 @@ export class TareasQueries {
 
     const prioridadParam = alias(parametros, "tarea_prioridad_sort");
     const sortDir = order === "desc" ? desc : asc;
-    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
-    const vinculacionExpr = sql`trim(concat_ws(' ', ${clienteNombre}, coalesce(${casos.caratula}, ${casos.nroExpte}, '')))`;
-    const checklistPercent = sql<number>`coalesce((
-      select round(100.0 * count(*) filter (where ${subTareas.completada}) / nullif(count(*), 0))
-      from ${subTareas}
-      where ${subTareas.tareaId} = ${tareas.id}
-        and ${subTareas.deletedAt} is null
-    ), 0)`;
+    const vinculacionExpr = vinculacionExpteClienteSortExpr(
+      casos.caratula,
+      clientes.razonSocial,
+      clientes.apellido,
+      clientes.nombre,
+    );
     const orderExpr = (() => {
       switch (orderBy) {
         case "prioridad":
@@ -57,8 +56,6 @@ export class TareasQueries {
           return sortDir(tareas.fechaLimite);
         case "vinculacion":
           return sortDir(vinculacionExpr);
-        case "checklist":
-          return sortDir(checklistPercent);
         case "titulo":
         default:
           return sortDir(tareas.titulo);

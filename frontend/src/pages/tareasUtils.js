@@ -47,6 +47,13 @@ export function casoLabel(caso) {
   return caso.caratula || caso.nroExpte || `Expediente #${caso.id}`;
 }
 
+/** Solo carátula (sin nro. de expte.) para la columna Expte / Cliente. */
+export function casoCaratulaLabel(caso) {
+  if (!caso) return "";
+  const caratula = (caso.caratula ?? "").toString().trim();
+  return caratula || `Expediente #${caso.id}`;
+}
+
 export function nullableNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
   const parsed = Number(value);

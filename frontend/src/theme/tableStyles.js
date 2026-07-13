@@ -1,11 +1,12 @@
 export const denseTableSx = {
-  "& td": { py: 0.75, px: 2 },
+  "& td, & th": { py: 0.5, px: 1.25, fontSize: "0.8125rem" },
 };
 
 export const tableHeadCellSx = {
   fontWeight: 900,
-  fontSize: "0.72rem",
-  letterSpacing: "0.08em",
+  fontSize: "0.68rem",
+  letterSpacing: "0.06em",
   textTransform: "uppercase",
   color: "text.secondary",
+  whiteSpace: "nowrap",
 };

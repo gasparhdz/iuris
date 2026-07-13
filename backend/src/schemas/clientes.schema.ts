@@ -399,7 +399,7 @@ export const clienteQuerySchema = z.object({
   search: z.string().optional(),
   tipo: z.enum(["fisica", "juridica"]).optional(),
   estado: z.enum(["activo", "inactivo"]).optional(),
-  orderBy: z.enum(["nombre", "identificacion", "telCelular", "email", "casosActivos", "activo", "tipo"]).default("nombre"),
+  orderBy: z.enum(["nombre", "identificacion", "casosActivos", "activo", "tipo"]).default("nombre"),
   order: z.enum(["asc", "desc"]).default("asc"),
 }).strict();
 

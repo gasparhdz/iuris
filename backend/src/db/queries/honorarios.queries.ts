@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-or
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, categorias, clientes, honorarios, ingresoAplicaciones, ingresos, parametros, planCuotas, planesPago, terceros } from "../schema.js";
+import { personaNombreSortExpr, vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
 
 type NewHonorario = typeof honorarios.$inferInsert;
 
@@ -55,8 +56,13 @@ export class HonorariosQueries {
     const whereCondition = and(...conditions);
 
     const sortDir = order === "desc" ? desc : asc;
-    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
-    const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
+    const clienteNombre = personaNombreSortExpr(clientes.razonSocial, clientes.apellido, clientes.nombre);
+    const expedienteExpr = vinculacionExpteClienteSortExpr(
+      casos.caratula,
+      clientes.razonSocial,
+      clientes.apellido,
+      clientes.nombre,
+    );
     const montoBase = sql`COALESCE(${honorarios.montoPesos}::numeric, ${honorarios.jus} * ${honorarios.valorJusRef})`;
     const montoCobradoExpr = sql`coalesce((
       select sum(${ingresoAplicaciones.montoCapital})

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../index.js";
 import { casos, participantesCaso, terceros } from "../schema.js";
+import { personaNombreSortExpr } from "../sql/personaNombre.js";
 
 type NewTercero = typeof terceros.$inferInsert;
 
@@ -45,7 +46,7 @@ export class TercerosQueries {
           return sortDir(terceros.tipoPersonaId);
         case "nombre":
         default:
-          return sortDir(sql`COALESCE(${terceros.razonSocial}, CONCAT_WS(' ', ${terceros.nombre}, ${terceros.apellido}), '')`);
+          return sortDir(personaNombreSortExpr(terceros.razonSocial, terceros.apellido, terceros.nombre));
       }
     })();
 

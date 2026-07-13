@@ -66,6 +66,13 @@ export function casoLabel(caso) {
   return caratula || nro || `Expediente #${caso.id}`;
 }
 
+/** Solo carátula (sin nro. de expte.) para la columna Expte / Cliente. */
+export function casoCaratulaLabel(caso) {
+  if (!caso) return "";
+  const caratula = (caso.caratula ?? "").toString().trim();
+  return caratula || `Expediente #${caso.id}`;
+}
+
 /** Clave estable del deudor de un honorario o plan (cliente:id | tercero:id). */
 export function deudorKeyFromItem(item) {
   if (!item) return null;

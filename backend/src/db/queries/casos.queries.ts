@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, ilike, isNull, or, sql, aliasedTab
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, participantesCaso, usuarios, tareas, eventos, terceros, parametros, categorias } from "../schema.js";
+import { personaNombreSortExpr } from "../sql/personaNombre.js";
 
 type NewCaso = typeof casos.$inferInsert;
 type NewParticipanteCaso = typeof participantesCaso.$inferInsert;
@@ -60,7 +61,7 @@ export class CasosQueries {
     const estadoParam = alias(parametros, "caso_estado_sort");
     const radicacionParam = alias(parametros, "caso_radicacion_sort");
     const sortDir = order === "desc" ? desc : asc;
-    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
+    const clienteNombre = personaNombreSortExpr(clientes.razonSocial, clientes.apellido, clientes.nombre);
     const orderExpr = (() => {
       switch (orderBy) {
         case "cliente":

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 const MotionDiv = motion.div;
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { formatPersonaIdentificacion } from "../utils/personaFormat";
 import { alpha } from "@mui/material/styles";
 import {
   AppBar,
@@ -281,7 +282,7 @@ export default function Layout() {
   };
 
   const getPersonTitle = (item) => {
-    return item.razonSocial || [item.nombre, item.apellido].filter(Boolean).join(" ") || "Sin nombre";
+    return item.razonSocial || [item.apellido, item.nombre].filter(Boolean).join(", ") || "Sin nombre";
   };
 
   const formatSearchDate = (value) => {
@@ -296,7 +297,9 @@ export default function Layout() {
 
   const getSearchResultMeta = (groupKey, item) => {
     if (groupKey === "expedientes") return [item.nroExpte, item.descripcion].filter(Boolean).join(" · ");
-    if (groupKey === "clientes" || groupKey === "terceros") return [item.dni && `DNI ${item.dni}`, item.cuit && `CUIT ${item.cuit}`].filter(Boolean).join(" · ");
+    if (groupKey === "clientes" || groupKey === "terceros") {
+      return formatPersonaIdentificacion({ cuit: item.cuit, dni: item.dni });
+    }
     if (groupKey === "tareas") return [item.descripcion, item.fechaLimite && `Vence ${formatSearchDate(item.fechaLimite)}`].filter(Boolean).join(" · ");
     if (groupKey === "eventos") return [item.observaciones, item.fechaInicio && formatSearchDate(item.fechaInicio)].filter(Boolean).join(" · ");
     return "";

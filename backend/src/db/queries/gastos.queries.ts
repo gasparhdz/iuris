@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql }
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, gastos, parametros } from "../schema.js";
+import { personaNombreSortExpr, vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
 
 type NewGasto = typeof gastos.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -52,8 +53,13 @@ export class GastosQueries {
     const whereCondition = and(...conditions);
 
     const sortDir = order === "desc" ? desc : asc;
-    const clienteNombre = sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`;
-    const expedienteExpr = sql`COALESCE(${casos.caratula}, ${casos.nroExpte}, '')`;
+    const clienteNombre = personaNombreSortExpr(clientes.razonSocial, clientes.apellido, clientes.nombre);
+    const expedienteExpr = vinculacionExpteClienteSortExpr(
+      casos.caratula,
+      clientes.razonSocial,
+      clientes.apellido,
+      clientes.nombre,
+    );
     const conceptoExpr = sql`COALESCE(${conceptoParam.nombre}, ${gastos.descripcion}, '')`;
     const orderExpr = (() => {
       switch (orderBy) {

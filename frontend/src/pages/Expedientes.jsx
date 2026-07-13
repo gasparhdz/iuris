@@ -11,7 +11,7 @@ import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
 import SisfeSyncButton from "../components/SisfeSyncButton";
-import { denseTableSx } from "../theme/tableStyles";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -67,6 +67,7 @@ function clienteNombre(cliente) {
 
 function estadoColor(nombre = "") {
   const text = nombre.toLowerCase();
+  if (text.includes("sentencia") && !text.includes("ejecut") && !text.includes("para ")) return "success";
   if (text.includes("final")) return "success";
   if (text.includes("apel")) return "warning";
   if (text.includes("arch")) return "default";
@@ -349,7 +350,7 @@ export default function Expedientes() {
                     { id: "caratula", label: "Carátula" },
                     { id: "cliente", label: "Cliente" },
                     { id: "nroExpte", label: "Expediente" },
-                    { id: "tipo", label: "Tipo de Caso" },
+                    { id: "tipo", label: "Tipo" },
                     { id: "juzgado", label: "Juzgado" },
                     { id: "estado", label: "Estado" },
                     { id: "acciones", label: "Acciones" }
@@ -359,13 +360,7 @@ export default function Expedientes() {
                       <TableCell
                         key={column.id}
                         sortDirection={orderBy === column.id ? order : false}
-                        sx={{
-                          fontWeight: 900,
-                          fontSize: "0.72rem",
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                          color: "text.secondary"
-                        }}
+                        sx={tableHeadCellSx}
                       >
                         {isSortable ? (
                           <TableSortLabel
@@ -397,10 +392,7 @@ export default function Expedientes() {
                     <TableRow
                       key={caso.id}
                       hover
-                      sx={{
-                        cursor: "pointer",
-                        "& td": { py: 0.75, px: 2 }
-                      }}
+                      sx={{ cursor: "pointer" }}
                       onClick={() => navigate(`/expedientes/${caso.id}`)}
                     >
                       <TableCell sx={{ maxWidth: 240 }}>
@@ -409,6 +401,7 @@ export default function Expedientes() {
                           noWrap
                           sx={{
                             fontWeight: 800,
+                            fontSize: "0.8125rem",
                             textOverflow: "ellipsis",
                             overflow: "hidden",
                             whiteSpace: "nowrap"
@@ -417,13 +410,14 @@ export default function Expedientes() {
                           {caso.caratula}
                         </Typography>
                       </TableCell>
-                      <TableCell onClick={(event) => event.stopPropagation()} sx={{ maxWidth: 180 }}>
+                      <TableCell onClick={(event) => event.stopPropagation()} sx={{ maxWidth: 180, whiteSpace: "nowrap" }}>
                         <Link
                           component={RouterLink}
                           to={`/clientes/${caso.clienteId}`}
                           noWrap
                           sx={{
                             fontWeight: 800,
+                            fontSize: "0.8125rem",
                             textDecoration: "none",
                             color: "primary.main",
                             display: "block",
@@ -436,13 +430,31 @@ export default function Expedientes() {
                           {clienteNombre(cliente)}
                         </Link>
                       </TableCell>
-                      <TableCell>{caso.nroExpte || "Sin número"}</TableCell>
-                      <TableCell>{tipo?.nombre || "Sin tipo"}</TableCell>
-                      <TableCell>{radicacion?.nombre || "Sin radicación"}</TableCell>
-                      <TableCell>{estado ? <Chip size="small" color={estadoColor(estado.nombre)} label={estado.nombre} sx={{ fontWeight: 800 }} /> : "Sin estado"}</TableCell>
-                      <TableCell onClick={(event) => event.stopPropagation()}>
-                        {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={() => navigate(`/expedientes/editar/${caso.id}`)}><Edit fontSize="small" /></IconButton></Tooltip>}
-                        {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(caso)}><Delete fontSize="small" /></IconButton></Tooltip>}
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{caso.nroExpte || "Sin número"}</TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{tipo?.nombre || "Sin tipo"}</TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{radicacion?.nombre || "Sin radicación"}</TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {estado ? (
+                          <Chip size="small" color={estadoColor(estado.nombre)} label={estado.nombre} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
+                        ) : (
+                          "Sin estado"
+                        )}
+                      </TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
+                        {canEditar && (
+                          <Tooltip title="Editar">
+                            <IconButton size="small" color="primary" sx={{ p: 0.5 }} onClick={() => navigate(`/expedientes/editar/${caso.id}`)}>
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {canEliminar && (
+                          <Tooltip title="Eliminar">
+                            <IconButton size="small" color="error" sx={{ p: 0.5 }} onClick={() => setDeleteTarget(caso)}>
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

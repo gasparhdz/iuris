@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, ilike, isNull, or, sql } from "dri
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
 import { casos, clientes, contactosClientes, eventos, gastos, honorarios, ingresoAplicaciones, ingresos, notasCliente, parametros, planesPago, tareas } from "../schema.js";
+import { personaNombreSortExpr } from "../sql/personaNombre.js";
 
 type NewCliente = typeof clientes.$inferInsert;
 type NewContactoCliente = typeof contactosClientes.$inferInsert;
@@ -15,7 +16,7 @@ type ClienteListFilters = {
   search?: string;
   tipo?: "fisica" | "juridica";
   estado?: "activo" | "inactivo";
-  orderBy?: "nombre" | "identificacion" | "telCelular" | "email" | "casosActivos" | "activo" | "tipo";
+  orderBy?: "nombre" | "identificacion" | "casosActivos" | "activo" | "tipo";
   order?: "asc" | "desc";
 };
 
@@ -66,10 +67,6 @@ export class ClientesQueries {
       switch (orderBy) {
         case "identificacion":
           return sortDir(sql`COALESCE(${clientes.cuit}, ${clientes.dni}, '')`);
-        case "telCelular":
-          return sortDir(clientes.telCelular);
-        case "email":
-          return sortDir(clientes.email);
         case "casosActivos":
           return sortDir(CASOS_ACTIVOS_EXPR);
         case "activo":
@@ -78,7 +75,7 @@ export class ClientesQueries {
           return sortDir(clientes.tipoPersonaId);
         case "nombre":
         default:
-          return sortDir(sql`COALESCE(${clientes.razonSocial}, CONCAT_WS(' ', ${clientes.nombre}, ${clientes.apellido}), '')`);
+          return sortDir(personaNombreSortExpr(clientes.razonSocial, clientes.apellido, clientes.nombre));
       }
     })();
 

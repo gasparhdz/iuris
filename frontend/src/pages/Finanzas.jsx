@@ -55,7 +55,7 @@ import {
 } from "@mui/icons-material";
 import {
   clienteLabel,
-  casoLabel,
+  casoCaratulaLabel,
   conceptoLabel,
   denseTableSx,
   ellipsisSx,
@@ -190,10 +190,11 @@ function EntityLink({ to, label, state }) {
   );
 }
 
-/** Expediente si hay caso; si no, cliente. Nunca ambos (mismo criterio Eventos/Tareas). */
+/** Expediente (carátula) si hay caso; si no, cliente. Nunca ambos. */
 function VinculacionCell({ caso, cliente, clienteLabelText, currentPath }) {
   if (caso?.id) {
-    return <EntityLink to={`/expedientes/${caso.id}`} label={casoLabel(caso)} state={{ from: currentPath }} />;
+    const label = casoCaratulaLabel(caso);
+    return <EntityLink to={`/expedientes/${caso.id}`} label={label} state={{ from: currentPath }} />;
   }
   const label = clienteLabelText || clienteLabel(cliente) || clienteLabelFromTareas(cliente);
   return <EntityLink to={cliente?.id ? `/clientes/${cliente.id}` : null} label={label} state={{ from: currentPath }} />;
@@ -793,6 +794,12 @@ export default function Finanzas() {
           ? (planesQuery.data ?? []).length
           : ccResumenQuery.data?.meta?.total ?? 0;
 
+  const planesAll = useMemo(() => planesQuery.data ?? [], [planesQuery.data]);
+  const planesPaged = useMemo(
+    () => planesAll.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
+    [planesAll, page, rowsPerPage],
+  );
+
   const activeRows = tabKey === "honorarios"
     ? processedHonorarios
     : tabKey === "gastos"
@@ -800,7 +807,7 @@ export default function Finanzas() {
       : tabKey === "ingresos"
         ? ingresos
         : tabKey === "planes"
-          ? (planesQuery.data ?? [])
+          ? planesPaged
           : cuentasCorrientes;
   const paginatedRows = activeRows;
 
@@ -1047,7 +1054,7 @@ export default function Finanzas() {
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("expediente", "Vinculación")}
+                    {sortableHead("expediente", "Expte / Cliente")}
                     {staticHead("Obligado")}
                     {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
@@ -1270,7 +1277,7 @@ export default function Finanzas() {
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("expediente", "Vinculación")}
+                    {sortableHead("expediente", "Expte / Cliente")}
                     {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
                     {sortableHead("estado", "Estado")}
@@ -1504,7 +1511,7 @@ export default function Finanzas() {
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
-                    {sortableHead("expediente", "Vinculación")}
+                    {sortableHead("expediente", "Expte / Cliente")}
                     {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
                     {staticHead("Acciones", 100)}
@@ -1652,14 +1659,37 @@ export default function Finanzas() {
           </TabPanel>
 
           <TabPanel value={tabIndex} index={3}>
-            <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
-              <PlanesPagoTable
-                planes={planesQuery.data ?? []}
-                loading={planesQuery.isLoading}
-                error={planesQuery.error}
-                empty="No hay planes de pago cargados"
+            {planesQuery.isLoading ? (
+              <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+                <PlanesPagoTable planes={[]} loading error={null} empty="" />
+              </Paper>
+            ) : activeError ? (
+              <FinanzasTableShell
+                loading={false}
+                error={activeError}
+                isEmpty={false}
+                emptyTitle=""
+                emptySubtitle=""
               />
-            </Paper>
+            ) : planesAll.length === 0 ? (
+              <FinanzasTableShell
+                loading={false}
+                error={null}
+                isEmpty
+                emptyTitle="No hay planes de pago cargados"
+                emptySubtitle="Los planes aparecerán acá cuando crees cuotas desde un honorario."
+              />
+            ) : (
+              <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+                <PlanesPagoTable
+                  planes={planesPaged}
+                  loading={false}
+                  error={null}
+                  empty="No hay planes de pago cargados"
+                />
+                {tablePagination}
+              </Paper>
+            )}
           </TabPanel>
 
           <TabPanel value={tabIndex} index={4}>

@@ -15,6 +15,8 @@ import { createTercero, deleteTercero, fetchTerceros, updateTercero } from "../a
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
 import { usePermisos } from "../auth/usePermissions";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
+import { formatPersonaIdentificacion } from "../utils/personaFormat";
 
 const EMPTY = {
   tipo: "fisica",
@@ -37,7 +39,7 @@ const EMPTY = {
 };
 
 function label(t) {
-  return t?.razonSocial || [t?.nombre, t?.apellido].filter(Boolean).join(" ") || `Contacto #${t?.id}`;
+  return t?.razonSocial || [t?.apellido, t?.nombre].filter(Boolean).join(", ") || `Contacto #${t?.id}`;
 }
 
 const panelSx = {
@@ -401,8 +403,8 @@ export default function Terceros() {
                       <Typography variant="body1" sx={{ fontWeight: 800 }} noWrap>
                         {label(t)}
                       </Typography>
-                      <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                        {t.cuit || t.dni || "—"}
+                      <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 400 }}>
+                        {formatPersonaIdentificacion({ cuit: t.cuit, dni: t.dni }) || "Sin dato"}
                       </Typography>
                     </Box>
                   </Stack>
@@ -414,7 +416,7 @@ export default function Terceros() {
                         href={`mailto:${t.email}`}
                         variant="body2"
                         onClick={(event) => event.stopPropagation()}
-                        sx={{ color: "primary.main", fontWeight: 700, textDecoration: "none" }}
+                        sx={{ color: "primary.main", fontWeight: 400, textDecoration: "none" }}
                       >
                         {t.email}
                       </Typography>
@@ -425,7 +427,7 @@ export default function Terceros() {
                         href={`tel:${t.telefono}`}
                         variant="body2"
                         onClick={(event) => event.stopPropagation()}
-                        sx={{ color: "text.secondary", fontWeight: 600, textDecoration: "none" }}
+                        sx={{ color: "text.secondary", fontWeight: 400, textDecoration: "none" }}
                       >
                         {t.telefono}
                       </Typography>
@@ -470,12 +472,12 @@ export default function Terceros() {
       ) : (
         <Paper elevation={0} sx={{ ...panelSx, borderRadius: "16px", overflow: "hidden" }}>
           <TableContainer>
-            <Table>
+            <Table size="small" sx={denseTableSx}>
               <TableHead>
                 <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
                   {[
                     { id: "nombre", label: "Nombre / Razón Social", sortable: true },
-                    { id: "dni", label: "Identificación", sortable: true },
+                    { id: "dni", label: "DNI / CUIT", sortable: true },
                     { id: "email", label: "Email", sortable: false },
                     { id: "telefono", label: "Teléfono", sortable: false },
                     { id: "observaciones", label: "Observaciones", sortable: false },
@@ -487,13 +489,7 @@ export default function Terceros() {
                         key={column.id}
                         align={column.align}
                         sortDirection={orderBy === column.id ? order : false}
-                        sx={{
-                          fontWeight: 800,
-                          color: "text.secondary",
-                          fontSize: "0.72rem",
-                          letterSpacing: "0.06em",
-                          textTransform: "uppercase",
-                        }}
+                        sx={tableHeadCellSx}
                       >
                         {isSortable ? (
                           <TableSortLabel
@@ -517,27 +513,66 @@ export default function Terceros() {
                 {displayRows.map((t) => {
                   const isJuridica = Boolean(t.razonSocial);
                   const tone = isJuridica ? theme.palette.secondary.main : theme.palette.primary.main;
+                  const idLabel = formatPersonaIdentificacion({ cuit: t.cuit, dni: t.dni });
                   return (
-                    <TableRow key={t.id} hover sx={{ "& td": { py: 0.75, px: 2 } }}>
+                    <TableRow key={t.id} hover>
                       <TableCell>
-                        <Stack direction="row" spacing={1.5} alignItems="center">
-                          <Avatar sx={{ width: 32, height: 32, bgcolor: alpha(tone, 0.12), color: tone }}>
-                            {isJuridica ? <Business fontSize="small" /> : <Person fontSize="small" />}
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                          <Avatar sx={{ width: 24, height: 24, bgcolor: alpha(tone, 0.12), color: tone }}>
+                            {isJuridica ? <Business sx={{ fontSize: 14 }} /> : <Person sx={{ fontSize: 14 }} />}
                           </Avatar>
-                          <Typography variant="body2" sx={{ fontWeight: 800 }}>{label(t)}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {label(t)}
+                          </Typography>
                         </Stack>
                       </TableCell>
-                      <TableCell>{t.cuit || t.dni || "—"}</TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ fontWeight: 700 }}>{t.email || "Sin email"}</Typography>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {idLabel || (
+                          <Typography component="span" variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
+                            Sin dato
+                          </Typography>
+                        )}
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" sx={{ color: "text.secondary" }}>{t.telefono || "Sin teléfono"}</Typography>
+                      <TableCell sx={{ whiteSpace: "nowrap", maxWidth: 180 }}>
+                        {t.email ? (
+                          <Typography variant="body2" sx={{ fontWeight: 400, fontSize: "0.8125rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {t.email}
+                          </Typography>
+                        ) : (
+                          <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
+                            Sin email
+                          </Typography>
+                        )}
                       </TableCell>
-                      <TableCell sx={{ maxWidth: 260 }}><Typography variant="body2" noWrap>{t.observaciones || "—"}</Typography></TableCell>
-                      <TableCell align="right">
-                        {canEditar && <Tooltip title="Editar"><IconButton size="small" onClick={() => { setEditing(t); setOpen(true); }}><Edit fontSize="small" /></IconButton></Tooltip>}
-                        {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={() => setDeleteTarget(t)}><Delete fontSize="small" /></IconButton></Tooltip>}
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {t.telefono ? (
+                          <Typography variant="body2" sx={{ color: "text.secondary", fontSize: "0.8125rem", fontWeight: 400 }}>
+                            {t.telefono}
+                          </Typography>
+                        ) : (
+                          <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
+                            Sin teléfono
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 260 }}>
+                        <Typography variant="body2" noWrap sx={{ fontSize: "0.8125rem" }}>{t.observaciones || "—"}</Typography>
+                      </TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                        {canEditar && (
+                          <Tooltip title="Editar">
+                            <IconButton size="small" sx={{ p: 0.5 }} onClick={() => { setEditing(t); setOpen(true); }}>
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {canEliminar && (
+                          <Tooltip title="Eliminar">
+                            <IconButton size="small" color="error" sx={{ p: 0.5 }} onClick={() => setDeleteTarget(t)}>
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

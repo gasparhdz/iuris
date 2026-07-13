@@ -9,8 +9,9 @@ import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
-import { denseTableSx } from "../theme/tableStyles";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import { unwrapPaged } from "./finanzasUtils";
+import { formatPersonaIdentificacion } from "../utils/personaFormat";
 import {
   Avatar,
   Box,
@@ -101,13 +102,14 @@ function buildClienteListParams({
   orderBy,
   order,
 }) {
+  const sortable = new Set(["nombre", "identificacion", "casosActivos", "activo", "tipo"]);
   return {
     page: page + 1,
     limit: rowsPerPage,
     search: search.trim() || undefined,
     tipo: typeFilter === "all" ? undefined : typeFilter,
     estado: statusFilter === "all" ? undefined : (statusFilter === "active" ? "activo" : "inactivo"),
-    orderBy,
+    orderBy: sortable.has(orderBy) ? orderBy : "nombre",
     order,
   };
 }
@@ -115,14 +117,14 @@ function buildClienteListParams({
 function mapDbToFrontend(c) {
   const isFisica = isPersonaFisicaId(c.tipoPersonaId);
   const nombre = isFisica
-    ? compactJoin([c.nombre, c.apellido])
+    ? [c.apellido, c.nombre].filter(Boolean).join(", ")
     : c.razonSocial ?? "";
 
   return {
     ...c,
     nombre,
     tipo: isFisica ? "fisica" : "juridica",
-    identificacion: c.cuit || c.dni || "",
+    identificacion: formatPersonaIdentificacion({ cuit: c.cuit, dni: c.dni }),
     telefono: c.telCelular || c.telFijo || "",
     direccion: buildDireccion(c),
     notas: c.observaciones ?? "",
@@ -252,7 +254,7 @@ export default function Clientes() {
       const exportItems = await fetchAllClientesForExport();
       const rows = exportItems.map((cliente) => ({
         "Nombre/Apellido / Razón Social": cliente.nombre || "",
-        "CUIT / Identificación": cliente.identificacion || "",
+        "DNI / CUIT": cliente.identificacion || "",
         Email: cliente.email || "",
         "Teléfono": cliente.telefono || "",
         Estado: cliente.activo ? "Activo" : "Inactivo",
@@ -458,26 +460,20 @@ export default function Clientes() {
               <TableHead>
                 <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.08 : 0.05) }}>
                   {[
-                    { id: "nombre", label: "Nombre" },
-                    { id: "identificacion", label: "Identificación" },
-                    { id: "telCelular", label: "Celular" },
-                    { id: "email", label: "Email" },
-                    { id: "casosActivos", label: "Expedientes Activos" },
-                    { id: "activo", label: "Estado" },
-                    { id: "acciones", label: "Acciones" }
+                    { id: "nombre", label: "Nombre", sortable: true },
+                    { id: "identificacion", label: "DNI / CUIT", sortable: true },
+                    { id: "telCelular", label: "Celular", sortable: false },
+                    { id: "email", label: "Email", sortable: false },
+                    { id: "casosActivos", label: "Exp. activos", sortable: true },
+                    { id: "activo", label: "Estado", sortable: true },
+                    { id: "acciones", label: "Acciones", sortable: false }
                   ].map((column) => {
-                    const isSortable = column.id !== "acciones";
+                    const isSortable = column.sortable;
                     return (
                       <TableCell
                         key={column.id}
                         sortDirection={orderBy === column.id ? order : false}
-                        sx={{
-                          fontWeight: 900,
-                          color: "text.secondary",
-                          fontSize: "0.72rem",
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase"
-                        }}
+                        sx={tableHeadCellSx}
                       >
                         {isSortable ? (
                           <TableSortLabel
@@ -504,24 +500,29 @@ export default function Clientes() {
                   <TableRow
                     key={cliente.id}
                     hover
-                    sx={{
-                      cursor: "pointer",
-                      "& td": { py: 0.75, px: 2 }
-                    }}
+                    sx={{ cursor: "pointer" }}
                     onClick={() => navigate(`/clientes/${cliente.id}`)}
                   >
                     <TableCell>
-                      <Stack direction="row" spacing={1.5} alignItems="center">
-                        <Avatar sx={{ bgcolor: getAvatarColor(cliente.nombre), fontWeight: 900, width: 32, height: 32, fontSize: "0.85rem" }}>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                        <Avatar sx={{ bgcolor: getAvatarColor(cliente.nombre), fontWeight: 900, width: 24, height: 24, fontSize: "0.7rem" }}>
                           {getInitials(cliente.nombre)}
                         </Avatar>
-                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {cliente.nombre || "Sin nombre"}
                         </Typography>
                       </Stack>
                     </TableCell>
-                    <TableCell>{cliente.identificacion || "Sin dato"}</TableCell>
-                    <TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {cliente.identificacion ? (
+                        cliente.identificacion
+                      ) : (
+                        <Typography component="span" variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
+                          Sin dato
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
                       {cliente.telCelular ? (
                         <Typography
                           component="a"
@@ -531,19 +532,20 @@ export default function Clientes() {
                           sx={{
                             color: "text.primary",
                             textDecoration: "none",
-                            fontWeight: 800,
-                            whiteSpace: "nowrap"
+                            fontWeight: 400,
+                            whiteSpace: "nowrap",
+                            fontSize: "0.8125rem",
                           }}
                         >
                           {cliente.telCelular}
                         </Typography>
                       ) : (
-                        <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                        <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
                           Sin celular
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap", maxWidth: 180 }}>
                       {cliente.email ? (
                         <Typography
                           component="a"
@@ -557,34 +559,36 @@ export default function Clientes() {
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             maxWidth: 180,
-                            display: "inline-block"
+                            display: "inline-block",
+                            fontSize: "0.8125rem",
+                            fontWeight: 400,
                           }}
                         >
                           {cliente.email}
                         </Typography>
                       ) : (
-                        <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                        <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>
                           Sin email
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <Chip icon={<FolderOpen />} size="small" label={cliente.casosActivos} sx={{ fontWeight: 900 }} />
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      <Chip icon={<FolderOpen sx={{ fontSize: "14px !important" }} />} size="small" label={cliente.casosActivos} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
                     </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={cliente.activo ? "Activo" : "Inactivo"} color={cliente.activo ? "success" : "default"} sx={{ fontWeight: 900 }} />
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      <Chip size="small" label={cliente.activo ? "Activo" : "Inactivo"} color={cliente.activo ? "success" : "default"} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
                     </TableCell>
-                    <TableCell onClick={(event) => event.stopPropagation()}>
+                    <TableCell onClick={(event) => event.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
                       {canEditar && (
                         <Tooltip title="Editar">
-                          <IconButton size="small" color="primary" onClick={() => goToEdit(cliente.id)}>
+                          <IconButton size="small" color="primary" onClick={() => goToEdit(cliente.id)} sx={{ p: 0.5 }}>
                             <Edit fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
                       {canEliminar && (
                         <Tooltip title="Eliminar">
-                          <IconButton size="small" color="error" onClick={() => setDeleteTarget(cliente)}>
+                          <IconButton size="small" color="error" onClick={() => setDeleteTarget(cliente)} sx={{ p: 0.5 }}>
                             <Delete fontSize="small" />
                           </IconButton>
                         </Tooltip>

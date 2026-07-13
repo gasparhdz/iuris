@@ -9,6 +9,7 @@ import api from "../api/axios";
 import { fetchAllPages, unwrapPaged } from "../api/pagination";
 import { useDebounced } from "../hooks/useDebounced";
 import { useListState } from "../hooks/useListState";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import {
   Avatar,
   Box,
@@ -59,6 +60,7 @@ import {
 } from "@mui/icons-material";
 import {
   casoLabel,
+  casoCaratulaLabel,
   clienteLabel,
   formatFriendlyDate,
   getApiError,
@@ -112,13 +114,14 @@ export default function Eventos() {
   const debouncedSearch = useDebounced(search);
 
   const listParams = useMemo(() => {
+    const sortable = new Set(["evento", "tipo", "estado", "fechas", "vinculaciones", "ubicacion"]);
     const params = {
       page: page + 1,
       limit: rowsPerPage,
       search: debouncedSearch.trim() || undefined,
       tipoId: tipoFilter === "all" ? undefined : Number(tipoFilter),
       estadoId: estadoFilter === "all" ? undefined : Number(estadoFilter),
-      orderBy,
+      orderBy: sortable.has(orderBy) ? orderBy : "fechas",
       order,
     };
     if (timeFilter === "proximos") params.upcoming = "true";
@@ -398,8 +401,11 @@ function EventCard({ event, tipo, estado, cliente, caso, currentPath, onOpen, on
             {formatEventDates(event.fechaInicio, event.fechaFin)}
           </Typography>
           <Stack spacing={0.25}>
-            {cliente && <Link component={RouterLink} to={`/clientes/${cliente.id}`} state={{ from: currentPath }} variant="caption" sx={{ fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{clienteLabel(cliente)}</Link>}
-            {caso && <Link component={RouterLink} to={`/expedientes/${caso.id}`} state={{ from: currentPath }} variant="caption" sx={{ display: "inline-flex", alignItems: "center", gap: 0.35, fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{casoLabel(caso)}</Link>}
+            {caso ? (
+              <Link component={RouterLink} to={`/expedientes/${caso.id}`} state={{ from: currentPath }} variant="caption" sx={{ display: "inline-flex", alignItems: "center", gap: 0.35, fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{casoCaratulaLabel(caso)}</Link>
+            ) : cliente ? (
+              <Link component={RouterLink} to={`/clientes/${cliente.id}`} state={{ from: currentPath }} variant="caption" sx={{ fontWeight: 800, textDecoration: "none" }} onClick={(e) => e.stopPropagation()}>{clienteLabel(cliente)}</Link>
+            ) : null}
           </Stack>
           {(canEditar || canEliminar) && (
             <Stack direction="row" justifyContent="flex-end" spacing={0.5}>
@@ -436,33 +442,28 @@ function EventTable({
   canEliminar = true
 }) {
   const columns = [
-    { id: "evento", label: "Evento" },
-    { id: "tipoEstado", label: "Tipo / Estado" },
-    { id: "fechas", label: "Fechas" },
-    { id: "vinculaciones", label: "Vinculaciones" },
-    { id: "ubicacion", label: "Ubicación" },
-    { id: "acciones", label: "Acciones" },
+    { id: "evento", label: "Evento", sortable: true },
+    { id: "tipo", label: "Tipo", sortable: true },
+    { id: "estado", label: "Estado", sortable: true },
+    { id: "fechas", label: "Fechas", sortable: true },
+    { id: "vinculaciones", label: "Expte / Cliente", sortable: true },
+    { id: "ubicacion", label: "Ubicación", sortable: true },
+    { id: "acciones", label: "Acciones", sortable: false },
   ];
 
   return (
     <Paper elevation={0} sx={{ borderRadius: "16px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
       <TableContainer>
-        <Table size="small">
+        <Table size="small" sx={denseTableSx}>
           <TableHead>
             <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
               {columns.map((column) => {
-                const isSortable = column.id !== "acciones";
+                const isSortable = column.sortable !== false;
                 return (
                   <TableCell
                     key={column.id}
                     sortDirection={orderBy === column.id ? order : false}
-                    sx={{
-                      fontWeight: 900,
-                      fontSize: "0.72rem",
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: "text.secondary"
-                    }}
+                    sx={tableHeadCellSx}
                   >
                     {isSortable ? (
                       <TableSortLabel
@@ -494,10 +495,7 @@ function EventTable({
                 <TableRow
                   key={event.id}
                   hover
-                  sx={{
-                    cursor: "pointer",
-                    "& td": { py: 0.75, px: 2 }
-                  }}
+                  sx={{ cursor: "pointer" }}
                   onClick={() => onOpen(event)}
                 >
                   <TableCell sx={{ maxWidth: 280 }}>
@@ -505,7 +503,8 @@ function EventTable({
                       <Typography
                         variant="body2"
                         sx={{
-                          fontWeight: 900,
+                          fontWeight: 800,
+                          fontSize: "0.8125rem",
                           color: "text.primary",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
@@ -517,18 +516,26 @@ function EventTable({
                       </Typography>
                     </Tooltip>
                   </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                      {tipo && <Chip size="small" label={tipo.nombre} variant="outlined" sx={{ fontWeight: 900 }} />}
-                      {estado && <Chip size="small" label={estado.nombre} color="info" sx={{ fontWeight: 900 }} />}
-                    </Stack>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
+                    {tipo ? (
+                      <Chip size="small" label={tipo.nombre} variant="outlined" sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
+                    ) : (
+                      <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>Sin tipo</Typography>
+                    )}
                   </TableCell>
                   <TableCell sx={{ whiteSpace: "nowrap" }}>
-                    <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 800 }}>
+                    {estado ? (
+                      <Chip size="small" label={estado.nombre} color="info" sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
+                    ) : (
+                      <Typography variant="caption" sx={{ color: "text.disabled", fontWeight: 400 }}>Sin estado</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
+                    <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 800, fontSize: "0.8125rem" }}>
                       {formatEventDates(event.fechaInicio, event.fechaFin)}
                     </Typography>
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 240 }}>
+                  <TableCell sx={{ maxWidth: 240, whiteSpace: "nowrap" }}>
                     {caso ? (
                       <Tooltip title={casoLabel(caso)}>
                         <Link
@@ -538,6 +545,7 @@ function EventTable({
                           variant="caption"
                           sx={{
                             fontWeight: 800,
+                            fontSize: "0.8125rem",
                             textDecoration: "none",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -547,7 +555,7 @@ function EventTable({
                           }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {casoLabel(caso)}
+                          {casoCaratulaLabel(caso)}
                         </Link>
                       </Tooltip>
                     ) : cliente ? (
@@ -559,6 +567,7 @@ function EventTable({
                           variant="caption"
                           sx={{
                             fontWeight: 800,
+                            fontSize: "0.8125rem",
                             textDecoration: "none",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -573,7 +582,7 @@ function EventTable({
                       </Tooltip>
                     ) : null}
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 200 }}>
+                  <TableCell sx={{ maxWidth: 200, whiteSpace: "nowrap" }}>
                     {event.ubicacion ? (
                       <Tooltip title={event.ubicacion}>
                         <Typography
@@ -585,7 +594,8 @@ function EventTable({
                             whiteSpace: "nowrap",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
-                            width: "100%"
+                            width: "100%",
+                            fontSize: "0.8125rem",
                           }}
                         >
                           <LocationOn sx={{ fontSize: 13, color: "text.secondary", flexShrink: 0 }} />
@@ -599,8 +609,20 @@ function EventTable({
                     )}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()} sx={{ whiteSpace: "nowrap" }}>
-                    {canEditar && <Tooltip title="Editar"><IconButton size="small" color="primary" onClick={(e) => onEdit(e, event)}><Edit fontSize="small" /></IconButton></Tooltip>}
-                    {canEliminar && <Tooltip title="Eliminar"><IconButton size="small" color="error" onClick={(e) => onDelete(e, event)}><Delete fontSize="small" /></IconButton></Tooltip>}
+                    {canEditar && (
+                      <Tooltip title="Editar">
+                        <IconButton size="small" color="primary" sx={{ p: 0.5 }} onClick={(e) => onEdit(e, event)}>
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {canEliminar && (
+                      <Tooltip title="Eliminar">
+                        <IconButton size="small" color="error" sx={{ p: 0.5 }} onClick={(e) => onDelete(e, event)}>
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
               );

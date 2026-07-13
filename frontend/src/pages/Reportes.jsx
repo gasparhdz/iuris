@@ -40,6 +40,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TableSortLabel,
   Tabs,
@@ -68,6 +69,7 @@ import { fetchEquipoUsuarios } from "../api/equipo";
 import { fetchAllPages } from "../api/pagination";
 import { useAuth } from "../auth/useAuth";
 import { useListState } from "../hooks/useListState";
+import { denseTableSx, tableHeadCellSx } from "../theme/tableStyles";
 import {
   casoLabel,
   clienteLabel,
@@ -235,18 +237,40 @@ function getExpedienteClienteId(expediente) {
   return Number(expediente?.clienteId ?? expediente?.cliente?.id ?? expediente?.clientePrincipalId ?? 0);
 }
 
-function isExpedienteActivo(expediente) {
-  // El dato real es el booleano `activo`; si no viene, caemos a códigos de estado.
-  if (typeof expediente?.activo === "boolean") return expediente.activo;
-  const estado = String(expediente?.estado?.codigo || expediente?.estado || expediente?.estadoNombre || "").toUpperCase();
-  return !["CERRADO", "FINALIZADO", "ARCHIVADO"].includes(estado);
+const ESTADOS_CASO_CERRADOS = new Set([
+  "ARCHIVADO",
+  "CON_SENTENCIA",
+  "CERRADO",
+  "FINALIZADO", // legacy: dejar de usar; se mantiene por datos históricos
+]);
+
+function isExpedienteActivo(expediente, estadoById) {
+  // `casos.activo` solo marca soft-delete; el estado de gestión vive en ESTADO_CASO.
+  const estadoId = expediente?.estadoId != null ? Number(expediente.estadoId) : null;
+  const fromCatalog = estadoId != null && estadoById ? estadoById.get(estadoId) : null;
+  const codigo = String(fromCatalog?.codigo || expediente?.estado?.codigo || "").toUpperCase().trim();
+  const nombre = String(fromCatalog?.nombre || expediente?.estado?.nombre || expediente?.estadoNombre || "")
+    .toUpperCase()
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (codigo && ESTADOS_CASO_CERRADOS.has(codigo)) return false;
+  if (
+    nombre === "CON SENTENCIA"
+    || nombre.includes("ARCHIV")
+    || nombre === "CERRADO"
+    || nombre.includes("FINALIZ")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function lastMovementDate(expediente) {
+  // No usar updatedAt: cualquier edición admin sesga "días sin movimiento".
   const candidates = [
     expediente?.sisfeFechaUltimaActualizacion,
     expediente?.sisfeFechaUbicacionActual,
-    expediente?.updatedAt,
     expediente?.fechaEstado,
     expediente?.createdAt,
   ]
@@ -301,6 +325,25 @@ function expedienteTipo(expediente, tipoCasoById) {
 function compactLabel(value, maxLength = 34) {
   const text = String(value || "Sin dato").trim();
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function pageSlice(rows, page, rowsPerPage) {
+  const start = page * rowsPerPage;
+  return rows.slice(start, start + rowsPerPage);
+}
+
+/** Tick de categoría en una sola línea (sin wrap). Título nativo = nombre completo. */
+function CategoryAxisTick({ x, y, payload, maxChars = 24 }) {
+  const full = String(payload?.value ?? "");
+  const label = compactLabel(full, maxChars);
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{full}</title>
+      <text dy={4} textAnchor="end" fill="currentColor" fontSize={11} style={{ whiteSpace: "nowrap" }}>
+        {label}
+      </text>
+    </g>
+  );
 }
 
 function gastoConceptoReportLabel(item) {
@@ -393,7 +436,17 @@ function ChartPanel({ title, subtitle, loading, children }) {
   );
 }
 
-function TableShell({ loading, isEmpty, emptyTitle, children }) {
+function TableShell({
+  loading,
+  isEmpty,
+  emptyTitle,
+  children,
+  count,
+  page = 0,
+  rowsPerPage = 10,
+  onPageChange,
+  onRowsPerPageChange,
+}) {
   if (loading) {
     return (
       <Paper elevation={0} sx={{ ...panelSx, p: 2 }}>
@@ -414,9 +467,24 @@ function TableShell({ loading, isEmpty, emptyTitle, children }) {
       </Paper>
     );
   }
+  const showPagination = typeof count === "number" && onPageChange && onRowsPerPageChange;
   return (
     <Paper elevation={0} sx={{ ...panelSx, overflow: "hidden" }}>
       <TableContainer>{children}</TableContainer>
+      {showPagination && (
+        <TablePagination
+          component="div"
+          count={count}
+          page={page}
+          onPageChange={(_, nextPage) => onPageChange(nextPage)}
+          rowsPerPage={rowsPerPage}
+          onRowsPerPageChange={(event) => onRowsPerPageChange(parseInt(event.target.value, 10))}
+          rowsPerPageOptions={[5, 10, 25, 50]}
+          labelRowsPerPage="Filas:"
+          labelDisplayedRows={({ from, to, count: total }) => `${from}-${to} de ${total}`}
+          sx={{ borderTop: "1px solid", borderColor: "divider" }}
+        />
+      )}
     </Paper>
   );
 }
@@ -427,7 +495,7 @@ function StatusChip({ status }) {
     <Chip
       size="small"
       label={status}
-      sx={{ bgcolor: alpha(tone, 0.12), color: tone, border: `1px solid ${alpha(tone, 0.3)}`, fontWeight: 900 }}
+      sx={{ bgcolor: alpha(tone, 0.12), color: tone, border: `1px solid ${alpha(tone, 0.3)}`, fontWeight: 800, height: 22, fontSize: "0.7rem" }}
     />
   );
 }
@@ -444,6 +512,11 @@ export default function Reportes() {
       clientSearch: "",
       clientOrderBy: "saldo",
       clientOrder: "desc",
+      rowsPerPage: 10,
+      pageCartera: 0,
+      pageSinMov: 0,
+      pageVenc: 0,
+      pageProd: 0,
     },
     { debounceKeys: ["clientSearch"] },
   );
@@ -455,26 +528,40 @@ export default function Reportes() {
     clientSearch,
     clientOrderBy,
     clientOrder,
+    rowsPerPage,
+    pageCartera,
+    pageSinMov,
+    pageVenc,
+    pageProd,
   } = list;
   const setTab = (tab) => setList({ tab });
   const setPeriod = (period) => setList({ period });
   const setCustomFrom = (customFrom) => setList({ customFrom });
   const setCustomTo = (customTo) => setList({ customTo });
-  const setClientSearch = (clientSearch) => setList({ clientSearch });
+  const setClientSearch = (clientSearch) => setList({ clientSearch, pageCartera: 0 });
+  const setRowsPerPage = (next) => setList({
+    rowsPerPage: next,
+    pageCartera: 0,
+    pageSinMov: 0,
+    pageVenc: 0,
+    pageProd: 0,
+  });
+  const setPageCartera = (pageCartera) => setList({ pageCartera });
+  const setPageSinMov = (pageSinMov) => setList({ pageSinMov });
+  const setPageVenc = (pageVenc) => setList({ pageVenc });
+  const setPageProd = (pageProd) => setList({ pageProd });
 
   useEffect(() => {
-    if (!isDirector && tab === "productividad") setList({ tab: "financiero" });
-  }, [isDirector, tab, setList]);
+    if (tab === "productividad" || tab === "vencimientos") setList({ tab: "financiero" });
+  }, [tab, setList]);
 
   const availableTabs = useMemo(
     () => [
       { key: "financiero", label: "Resumen Financiero" },
       { key: "clientes", label: "Cartera de Clientes" },
       { key: "expedientes", label: "Estado de Expedientes" },
-      { key: "vencimientos", label: "Vencimientos" },
-      ...(isDirector ? [{ key: "productividad", label: "Productividad por Abogado" }] : []),
     ],
-    [isDirector],
+    [],
   );
 
   const activeIndex = Math.max(0, availableTabs.findIndex((item) => item.key === tab));
@@ -589,6 +676,7 @@ export default function Reportes() {
   const eventos = useMemo(() => eventosQuery.data ?? [], [eventosQuery.data]);
   const proyeccionCuotas = useMemo(() => proyeccionQuery.data ?? [], [proyeccionQuery.data]);
   const tipoCasoById = useMemo(() => new Map((catalogQuery.data?.TIPO_CASO ?? []).map((t) => [Number(t.id), t])), [catalogQuery.data?.TIPO_CASO]);
+  const estadoCasoById = useMemo(() => new Map((catalogQuery.data?.ESTADO_CASO ?? []).map((t) => [Number(t.id), t])), [catalogQuery.data?.ESTADO_CASO]);
 
   const clientesById = useMemo(() => new Map(clientes.map((cliente) => [Number(cliente.id), cliente])), [clientes]);
   const expedientesById = useMemo(() => new Map(expedientes.map((item) => [Number(item.id), item])), [expedientes]);
@@ -672,10 +760,10 @@ export default function Reportes() {
           completadas: userTasks.filter((task) => task.completada).length,
           pendientes: userTasks.filter((task) => !task.completada).length,
           vencidas: userTasks.filter(isTaskOverdue).length,
-          expedientesActivos: expedientes.filter((expediente) => isExpedienteActivo(expediente) && isCaseAssignedTo(expediente, usuario.id)).length,
+          expedientesActivos: expedientes.filter((expediente) => isExpedienteActivo(expediente, estadoCasoById) && isCaseAssignedTo(expediente, usuario.id)).length,
         };
       });
-  }, [isDirector, equipo, tareas, expedientes]);
+  }, [isDirector, equipo, tareas, expedientes, estadoCasoById]);
 
   const cartera = useMemo(() => {
     const rows = ccResumenItems.map((item) => {
@@ -693,7 +781,7 @@ export default function Reportes() {
         tipoDeudor,
         cliente: nombre,
         expedientesActivos: clienteId != null
-          ? expedientes.filter((expediente) => getExpedienteClienteId(expediente) === clienteId && isExpedienteActivo(expediente)).length
+          ? expedientes.filter((expediente) => getExpedienteClienteId(expediente) === clienteId && isExpedienteActivo(expediente, estadoCasoById)).length
           : 0,
         honorariosPendientes: Number(totales?.honorariosPendientesPesos || 0),
         saldo,
@@ -708,7 +796,7 @@ export default function Reportes() {
         const direction = clientOrder === "asc" ? 1 : -1;
         return compareValues(a[clientOrderBy], b[clientOrderBy]) * direction;
       });
-  }, [ccResumenItems, clientesById, expedientes, clientSearch, clientOrderBy, clientOrder]);
+  }, [ccResumenItems, clientesById, expedientes, clientSearch, clientOrderBy, clientOrder, estadoCasoById]);
 
   const clientesEstadoPie = useMemo(() => {
     const counts = new Map([
@@ -734,7 +822,7 @@ export default function Reportes() {
         const nombre = item.deudorNombre
           || (item.clienteId != null ? getPersonaName(clientesById.get(Number(item.clienteId))) : null)
           || (item.tipoDeudor === "tercero" ? `Tercero #${item.terceroId}` : `Cliente #${item.clienteId}`);
-        deudores.push({ name: compactLabel(nombre, 22), saldo });
+        deudores.push({ name: nombre, saldo });
       }
     });
 
@@ -795,14 +883,14 @@ export default function Reportes() {
     });
 
     const sinMovimiento = expedientes
-      .filter(isExpedienteActivo)
+      .filter((item) => isExpedienteActivo(item, estadoCasoById))
       .map((item) => ({ item, dias: daysSince(lastMovementDate(item)) }))
       .filter((row) => row.dias !== null && row.dias >= SIN_MOVIMIENTO_DIAS)
       .sort((a, b) => b.dias - a.dias);
 
     return {
-      activos: expedientes.filter(isExpedienteActivo).length,
-      cerrados: expedientes.filter((item) => !isExpedienteActivo(item)).length,
+      activos: expedientes.filter((item) => isExpedienteActivo(item, estadoCasoById)).length,
+      cerrados: expedientes.filter((item) => !isExpedienteActivo(item, estadoCasoById)).length,
       abiertosMes: expedientes.filter((item) => {
         const date = toDate(expedienteDate(item));
         return date && date >= monthStart;
@@ -822,12 +910,12 @@ export default function Reportes() {
         Expediente: casoLabel(item),
         Cliente: clienteLabel(item.cliente) || clienteLabel(clientesById.get(getExpedienteClienteId(item))) || "Sin cliente",
         Tipo: expedienteTipo(item, tipoCasoById),
-        Estado: isExpedienteActivo(item) ? "Activo" : "Cerrado",
+        Estado: isExpedienteActivo(item, estadoCasoById) ? "Activo" : "Cerrado",
         Apertura: formatDateShort(expedienteDate(item)),
         "Días sin movimiento": daysSince(lastMovementDate(item)) ?? "",
       })),
     };
-  }, [expedientes, clientesById, tipoCasoById]);
+  }, [expedientes, clientesById, tipoCasoById, estadoCasoById]);
 
   const vencimientos = useMemo(() => {
     const items = [];
@@ -861,12 +949,13 @@ export default function Reportes() {
 
   const handleClientSort = (field) => {
     if (clientOrderBy === field) {
-      setList({ clientOrder: clientOrder === "asc" ? "desc" : "asc" });
+      setList({ clientOrder: clientOrder === "asc" ? "desc" : "asc", pageCartera: 0 });
       return;
     }
     setList({
       clientOrderBy: field,
       clientOrder: field === "cliente" ? "asc" : "desc",
+      pageCartera: 0,
     });
   };
 
@@ -942,7 +1031,7 @@ export default function Reportes() {
             Reportes y Estadísticas
           </Typography>
           <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 700 }}>
-            Indicadores financieros, productividad, cartera y expedientes.
+            Indicadores financieros, cartera y expedientes.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1.25} className="reportes-actions">
@@ -1031,10 +1120,16 @@ export default function Reportes() {
                   <ChartPanel title="Top deudores" subtitle="Clientes con mayor saldo pendiente" loading={loadingFinancial}>
                     {resumenFinanciero.topDeudores.length ? (
                       <ResponsiveContainer width="100%" height={280}>
-                        <RBarChart data={resumenFinanciero.topDeudores} layout="vertical" margin={{ left: 24 }}>
+                        <RBarChart data={resumenFinanciero.topDeudores} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
                           <XAxis type="number" tickFormatter={(value) => `$${Math.round(value / 1000)}k`} />
-                          <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={168}
+                            interval={0}
+                            tick={<CategoryAxisTick maxChars={26} />}
+                          />
                           <RechartsTooltip content={<ChartTooltip money />} />
                           <Bar dataKey="saldo" name="Saldo" radius={[0, 8, 8, 0]}>
                             {resumenFinanciero.topDeudores.map((entry, index) => (
@@ -1058,21 +1153,30 @@ export default function Reportes() {
             <Box component={motion.div} initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, lg: 7 }}>
-                  <TableShell loading={loadingProductividad} isEmpty={!productividad.length} emptyTitle="Sin usuarios activos para reportar">
-                    <Table>
+                  <TableShell
+                    loading={loadingProductividad}
+                    isEmpty={!productividad.length}
+                    emptyTitle="Sin usuarios activos para reportar"
+                    count={productividad.length}
+                    page={pageProd}
+                    rowsPerPage={rowsPerPage}
+                    onPageChange={setPageProd}
+                    onRowsPerPageChange={setRowsPerPage}
+                  >
+                    <Table size="small" sx={denseTableSx}>
                       <TableHead>
                         <TableRow>
-                          <TableCell>Abogado</TableCell>
-                          <TableCell align="right">Tareas completadas</TableCell>
-                          <TableCell align="right">Tareas pendientes</TableCell>
-                          <TableCell align="right">Tareas vencidas</TableCell>
-                          <TableCell align="right">Expedientes activos asignados</TableCell>
+                          <TableCell sx={tableHeadCellSx}>Abogado</TableCell>
+                          <TableCell align="right" sx={tableHeadCellSx}>Completadas</TableCell>
+                          <TableCell align="right" sx={tableHeadCellSx}>Pendientes</TableCell>
+                          <TableCell align="right" sx={tableHeadCellSx}>Vencidas</TableCell>
+                          <TableCell align="right" sx={tableHeadCellSx}>Exp. activos</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {productividad.map((row) => (
+                        {pageSlice(productividad, pageProd, rowsPerPage).map((row) => (
                           <TableRow key={row.id} hover>
-                            <TableCell sx={{ fontWeight: 900 }}>{row.abogado}</TableCell>
+                            <TableCell sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap" }}>{row.abogado}</TableCell>
                             <TableCell align="right">{row.completadas}</TableCell>
                             <TableCell align="right">{row.pendientes}</TableCell>
                             <TableCell align="right">{row.vencidas}</TableCell>
@@ -1124,17 +1228,26 @@ export default function Reportes() {
                       },
                     }}
                   />
-                  <TableShell loading={loadingCartera} isEmpty={!cartera.length} emptyTitle="Sin clientes para reportar">
-                    <Table>
+                  <TableShell
+                    loading={loadingCartera}
+                    isEmpty={!cartera.length}
+                    emptyTitle="Sin clientes para reportar"
+                    count={cartera.length}
+                    page={pageCartera}
+                    rowsPerPage={rowsPerPage}
+                    onPageChange={setPageCartera}
+                    onRowsPerPageChange={setRowsPerPage}
+                  >
+                    <Table size="small" sx={denseTableSx}>
                       <TableHead>
                         <TableRow>
                           {[
                             ["cliente", "Deudor"],
-                            ["expedientesActivos", "Expedientes activos"],
-                            ["honorariosPendientes", "Honorarios pendientes"],
+                            ["expedientesActivos", "Exp. activos"],
+                            ["honorariosPendientes", "Hon. pendientes"],
                             ["estado", "Estado"],
                           ].map(([field, label]) => (
-                            <TableCell key={field} align={field === "cliente" || field === "estado" ? "left" : "right"}>
+                            <TableCell key={field} align={field === "cliente" || field === "estado" ? "left" : "right"} sx={tableHeadCellSx}>
                               <TableSortLabel active={clientOrderBy === field} direction={clientOrderBy === field ? clientOrder : "asc"} onClick={() => handleClientSort(field)}>
                                 {label}
                               </TableSortLabel>
@@ -1143,18 +1256,18 @@ export default function Reportes() {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {cartera.map((row) => (
+                        {pageSlice(cartera, pageCartera, rowsPerPage).map((row) => (
                           <TableRow key={row.id} hover>
-                            <TableCell sx={{ fontWeight: 900 }}>
-                              <Stack direction="row" spacing={1} alignItems="center">
-                                <span>{row.cliente}</span>
+                            <TableCell sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap" }}>
+                              <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                                <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.cliente}</Box>
                                 {row.tipoDeudor === "tercero" && (
                                   <Chip size="small" label="Tercero" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 800 }} />
                                 )}
                               </Stack>
                             </TableCell>
                             <TableCell align="right">{row.expedientesActivos}</TableCell>
-                            <TableCell align="right">{formatMoneyAr(row.honorariosPendientes)}</TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{formatMoneyAr(row.honorariosPendientes)}</TableCell>
                             <TableCell><StatusChip status={row.estado} /></TableCell>
                           </TableRow>
                         ))}
@@ -1186,7 +1299,7 @@ export default function Reportes() {
               <Grid container spacing={2} sx={{ mb: 2 }}>
                 {[
                   { title: "Activos", value: estadoExpedientes.activos, caption: "Expedientes en curso", icon: <FolderSpecial />, tone: CARD_TONES.blue },
-                  { title: "Cerrados", value: estadoExpedientes.cerrados, caption: "Finalizados o archivados", icon: <AssignmentTurnedIn />, tone: CARD_TONES.green },
+                  { title: "Cerrados", value: estadoExpedientes.cerrados, caption: "Con sentencia o archivados", icon: <AssignmentTurnedIn />, tone: CARD_TONES.green },
                   { title: "Abiertos este mes", value: estadoExpedientes.abiertosMes, caption: "Altas recientes", icon: <TrendingUp />, tone: CARD_TONES.orange },
                   { title: "Sin movimiento", value: estadoExpedientes.sinMovimiento, caption: "+90 días sin actividad", icon: <WarningAmber />, tone: CARD_TONES.red },
                 ].map((item) => (
@@ -1211,40 +1324,74 @@ export default function Reportes() {
                 </Grid>
                 <Grid size={{ xs: 12, lg: 6 }}>
                   <ChartPanel title="Tipos de expediente" subtitle="Distribución por categoría" loading={loadingExpedientes}>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <RBarChart data={estadoExpedientes.tipos} layout="vertical" margin={{ left: 34 }}>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
-                        <XAxis type="number" allowDecimals={false} />
-                        <YAxis type="category" dataKey="name" width={120} />
-                        <RechartsTooltip content={<ChartTooltip />} />
-                        <Bar dataKey="cantidad" name="Cantidad" fill={CARD_TONES.violet} radius={[0, 8, 8, 0]} />
-                      </RBarChart>
-                    </ResponsiveContainer>
+                    {estadoExpedientes.tipos.length ? (
+                      <ResponsiveContainer
+                        width="100%"
+                        height={Math.min(520, Math.max(280, estadoExpedientes.tipos.length * 34))}
+                      >
+                        <RBarChart
+                          data={estadoExpedientes.tipos}
+                          layout="vertical"
+                          margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
+                          <XAxis type="number" allowDecimals={false} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={168}
+                            interval={0}
+                            tick={<CategoryAxisTick maxChars={28} />}
+                          />
+                          <RechartsTooltip content={<ChartTooltip />} />
+                          <Bar dataKey="cantidad" name="Cantidad" fill={CARD_TONES.violet} radius={[0, 8, 8, 0]} />
+                        </RBarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <Box sx={{ height: 280, display: "grid", placeItems: "center", color: "text.secondary" }}>
+                        <Typography variant="body2" sx={{ fontWeight: 800 }}>Sin tipos para mostrar.</Typography>
+                      </Box>
+                    )}
                   </ChartPanel>
                 </Grid>
               </Grid>
 
               <Box sx={{ mt: 2 }}>
                 <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>Expedientes sin movimiento (+90 días)</Typography>
-                <TableShell loading={loadingExpedientes} isEmpty={!estadoExpedientes.sinMovimientoRows.length} emptyTitle="Todos los expedientes activos tienen movimiento reciente">
-                  <Table>
+                <TableShell
+                  loading={loadingExpedientes}
+                  isEmpty={!estadoExpedientes.sinMovimientoRows.length}
+                  emptyTitle="Todos los expedientes activos tienen movimiento reciente"
+                  count={estadoExpedientes.sinMovimientoRows.length}
+                  page={pageSinMov}
+                  rowsPerPage={rowsPerPage}
+                  onPageChange={setPageSinMov}
+                  onRowsPerPageChange={setRowsPerPage}
+                >
+                  <Table size="small" sx={denseTableSx}>
                     <TableHead>
                       <TableRow>
-                        <TableCell>Expediente</TableCell>
-                        <TableCell>Cliente</TableCell>
-                        <TableCell>Tipo</TableCell>
-                        <TableCell align="right">Último movimiento</TableCell>
-                        <TableCell align="right">Días</TableCell>
+                        <TableCell sx={tableHeadCellSx}>Expediente</TableCell>
+                        <TableCell sx={tableHeadCellSx}>Cliente</TableCell>
+                        <TableCell sx={tableHeadCellSx}>Tipo</TableCell>
+                        <TableCell align="right" sx={tableHeadCellSx}>Último mov.</TableCell>
+                        <TableCell align="right" sx={tableHeadCellSx}>Días</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {estadoExpedientes.sinMovimientoRows.map((row) => (
+                      {pageSlice(estadoExpedientes.sinMovimientoRows, pageSinMov, rowsPerPage).map((row) => (
                         <TableRow key={row.id} hover>
-                          <TableCell sx={{ fontWeight: 900 }}>{compactLabel(row.expediente, 48)}</TableCell>
-                          <TableCell>{row.cliente}</TableCell>
-                          <TableCell>{row.tipo}</TableCell>
-                          <TableCell align="right">{row.ultimoMovimiento}</TableCell>
-                          <TableCell align="right"><Chip size="small" label={`${row.dias} d`} sx={{ fontWeight: 900, bgcolor: alpha(CARD_TONES.red, 0.12), color: CARD_TONES.red }} /></TableCell>
+                          <TableCell sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap", maxWidth: 280 }}>
+                            <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", display: "block" }} title={row.expediente}>
+                              {row.expediente}
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.8125rem" }}>{row.cliente}</TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.8125rem" }}>{row.tipo}</TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{row.ultimoMovimiento}</TableCell>
+                          <TableCell align="right">
+                            <Chip size="small" label={`${row.dias} d`} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem", bgcolor: alpha(CARD_TONES.red, 0.12), color: CARD_TONES.red }} />
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1270,29 +1417,52 @@ export default function Reportes() {
               </Grid>
 
               <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>Próximos vencimientos (hasta 30 días)</Typography>
-              <TableShell loading={loadingVencimientos} isEmpty={!vencimientos.rows.length} emptyTitle="No hay vencimientos próximos">
-                <Table>
+              <TableShell
+                loading={loadingVencimientos}
+                isEmpty={!vencimientos.rows.length}
+                emptyTitle="No hay vencimientos próximos"
+                count={vencimientos.rows.length}
+                page={pageVenc}
+                rowsPerPage={rowsPerPage}
+                onPageChange={setPageVenc}
+                onRowsPerPageChange={setRowsPerPage}
+              >
+                <Table size="small" sx={denseTableSx}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Tipo</TableCell>
-                      <TableCell>Detalle</TableCell>
-                      <TableCell>Cliente</TableCell>
-                      <TableCell align="right">Fecha</TableCell>
-                      <TableCell align="right">Estado</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Tipo</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Detalle</TableCell>
+                      <TableCell sx={tableHeadCellSx}>Cliente</TableCell>
+                      <TableCell align="right" sx={tableHeadCellSx}>Fecha</TableCell>
+                      <TableCell align="right" sx={tableHeadCellSx}>Estado</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {vencimientos.rows.map((row) => (
+                    {pageSlice(vencimientos.rows, pageVenc, rowsPerPage).map((row) => (
                       <TableRow key={row.id} hover>
-                        <TableCell><Chip size="small" label={row.tipo} sx={{ fontWeight: 800 }} /></TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>{compactLabel(row.titulo, 48)}</TableCell>
-                        <TableCell>{clienteLabel(clientesById.get(Number(row.clienteId))) || "—"}</TableCell>
-                        <TableCell align="right">{formatDateShort(row.fecha)}</TableCell>
-                        <TableCell align="right">
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
+                          <Chip size="small" label={row.tipo} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
+                        </TableCell>
+                        <TableCell sx={{ fontWeight: 800, fontSize: "0.8125rem", whiteSpace: "nowrap", maxWidth: 320 }}>
+                          <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", display: "block" }} title={row.titulo}>
+                            {row.titulo}
+                          </Box>
+                        </TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap", fontSize: "0.8125rem" }}>
+                          {clienteLabel(clientesById.get(Number(row.clienteId))) || "—"}
+                        </TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{formatDateShort(row.fecha)}</TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                           <Chip
                             size="small"
                             label={row.dias < 0 ? `Vencido ${Math.abs(row.dias)}d` : row.dias === 0 ? "Hoy" : `En ${row.dias}d`}
-                            sx={{ fontWeight: 900, bgcolor: alpha(row.dias < 0 ? CARD_TONES.red : row.dias <= 7 ? CARD_TONES.orange : CARD_TONES.blue, 0.12), color: row.dias < 0 ? CARD_TONES.red : row.dias <= 7 ? CARD_TONES.orange : CARD_TONES.blue }}
+                            sx={{
+                              fontWeight: 800,
+                              height: 22,
+                              fontSize: "0.7rem",
+                              bgcolor: alpha(row.dias < 0 ? CARD_TONES.red : row.dias <= 7 ? CARD_TONES.orange : CARD_TONES.blue, 0.12),
+                              color: row.dias < 0 ? CARD_TONES.red : row.dias <= 7 ? CARD_TONES.orange : CARD_TONES.blue,
+                            }}
                           />
                         </TableCell>
                       </TableRow>
