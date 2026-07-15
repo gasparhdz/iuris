@@ -57,6 +57,13 @@
       "when": 1783712000000,
       "tag": "0007_eventos_movimiento_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784086034810,
+      "tag": "0008_ingresos-obligado",
+      "breakpoints": true
     }
   ]
 }

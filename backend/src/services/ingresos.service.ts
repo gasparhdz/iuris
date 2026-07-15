@@ -96,6 +96,8 @@ export class IngresosService {
       const updateData: Parameters<typeof IngresosQueries.updateIngreso>[2] = { updatedAt: new Date(), updatedBy: userId };
       if (data.clienteId !== undefined) updateData.clienteId = data.clienteId;
       if (data.casoId !== undefined) updateData.casoId = data.casoId;
+      if (data.obligadoClienteId !== undefined) updateData.obligadoClienteId = data.obligadoClienteId;
+      if (data.obligadoTerceroId !== undefined) updateData.obligadoTerceroId = data.obligadoTerceroId;
       if (data.cuotaId !== undefined) updateData.cuotaId = data.cuotaId;
       if (data.descripcion !== undefined) updateData.descripcion = data.descripcion;
       if (data.monto !== undefined) updateData.monto = data.monto.toFixed(2);

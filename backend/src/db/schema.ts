@@ -738,6 +738,9 @@ export const ingresos = pgTable("ingresos", {
   estudioId: integer("estudio_id").references(() => estudios.id).notNull(),
   clienteId: integer("cliente_id"),
   casoId: integer("caso_id"),
+  // Quién pagó realmente (deudor-céntrico): cliente o tercero, excluyentes.
+  obligadoClienteId: integer("obligado_cliente_id"),
+  obligadoTerceroId: integer("obligado_tercero_id"),
   cuotaId: integer("cuota_id").references(() => planCuotas.id, { onDelete: "set null" }),
   descripcion: text("descripcion"),
   monto: decimal("monto", { precision: 14, scale: 2 }).notNull(),
@@ -765,6 +768,20 @@ export const ingresos = pgTable("ingresos", {
     columns: [table.casoId, table.estudioId],
     foreignColumns: [casos.id, casos.estudioId],
   }),
+  foreignKey({
+    name: "ingresos_obligado_cliente_estudio_fk",
+    columns: [table.obligadoClienteId, table.estudioId],
+    foreignColumns: [clientes.id, clientes.estudioId],
+  }),
+  foreignKey({
+    name: "ingresos_obligado_tercero_estudio_fk",
+    columns: [table.obligadoTerceroId, table.estudioId],
+    foreignColumns: [terceros.id, terceros.estudioId],
+  }),
+  check(
+    "ingresos_obligado_xor_check",
+    sql`(${table.obligadoClienteId} IS NULL OR ${table.obligadoTerceroId} IS NULL)`
+  ),
   index("ingresos_estudio_created_idx")
     .on(table.estudioId, table.createdAt)
     .where(sql`${table.deletedAt} IS NULL`),

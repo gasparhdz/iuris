@@ -35,7 +35,12 @@ type CCHonorarioConMeta = CCHonorario & {
 };
 
 type CCGastoConMeta = CCGasto & { clienteId: number | null };
-type CCIngresoConMeta = CCIngreso & { clienteId: number | null; id: number };
+type CCIngresoConMeta = CCIngreso & {
+  clienteId: number | null;
+  id: number;
+  obligadoClienteId?: number | null;
+  obligadoTerceroId?: number | null;
+};
 
 export type CCResumenDeudor = {
   tipoDeudor: "cliente" | "tercero";
@@ -142,16 +147,24 @@ export class CuentaCorrienteService {
     }
 
     // Ingresos: atribuir al deudor de las deudas imputadas (monto partido por aplicación);
-    // sin apps → cliente del ingreso.
+    // el sobrante no imputado (saldo a favor) va al obligado del ingreso (o cliente como legado).
     const ingresoDeudores = await this.mapIngresosADeudores(estudioId, datos.ingresos, datos.honorarios);
     for (const ingreso of datos.ingresos) {
-      const atribuciones = ingresoDeudores.get(ingreso.id);
-      if (atribuciones && atribuciones.length > 0) {
-        for (const { deudor, monto } of atribuciones) {
-          ensure(deudor).ingresos.push({ ...ingreso, monto: monto.toFixed(2) });
+      const atribuciones = ingresoDeudores.get(ingreso.id) ?? [];
+      for (const { deudor, monto } of atribuciones) {
+        ensure(deudor).ingresos.push({ ...ingreso, monto: monto.toFixed(2) });
+      }
+      const aplicadoTotal = atribuciones.reduce((acc, a) => acc + a.monto, 0);
+      const sobrante = Math.max(Number(ingreso.monto) - aplicadoTotal, 0);
+      if (sobrante > 0.01) {
+        const deudorPropio: DeudorResuelto | null = ingreso.obligadoTerceroId != null
+          ? { tipo: "tercero", id: ingreso.obligadoTerceroId }
+          : ((ingreso.obligadoClienteId ?? ingreso.clienteId) != null
+              ? { tipo: "cliente", id: (ingreso.obligadoClienteId ?? ingreso.clienteId)! }
+              : null);
+        if (deudorPropio) {
+          ensure(deudorPropio).ingresos.push({ ...ingreso, monto: sobrante.toFixed(2) });
         }
-      } else if (ingreso.clienteId) {
-        ensure({ tipo: "cliente", id: ingreso.clienteId }).ingresos.push(ingreso);
       }
     }
 
@@ -409,20 +422,29 @@ export class CuentaCorrienteService {
   ): Promise<CCIngresoConMeta[]> {
     const map = await this.mapIngresosADeudores(estudioId, ingresosList, honorariosList);
 
+    // Deudor "propio" del ingreso (quién pagó): obligado explícito, o el cliente como legado.
+    const deudorPropio = (ingreso: CCIngresoConMeta): DeudorResuelto | null => {
+      if (ingreso.obligadoTerceroId != null) return { tipo: "tercero", id: ingreso.obligadoTerceroId };
+      const clienteId = ingreso.obligadoClienteId ?? ingreso.clienteId ?? null;
+      return clienteId != null ? { tipo: "cliente", id: clienteId } : null;
+    };
+    const esDeudor = (d: DeudorResuelto | null) => d !== null && d.tipo === deudor.tipo && d.id === deudor.id;
+
     const result: CCIngresoConMeta[] = [];
     for (const ingreso of ingresosList) {
-      const atribuciones = map.get(ingreso.id);
-      if (atribuciones && atribuciones.length > 0) {
-        const match = atribuciones.find((a) => a.deudor.tipo === deudor.tipo && a.deudor.id === deudor.id);
-        if (match) {
-          result.push({ ...ingreso, monto: match.monto.toFixed(2) });
-        }
-        continue;
+      const atribuciones = map.get(ingreso.id) ?? [];
+      const aplicadoTotal = atribuciones.reduce((acc, a) => acc + a.monto, 0);
+      const match = atribuciones.find((a) => esDeudor(a.deudor));
+      // El sobrante no imputado (saldo a favor) es del deudor propio del ingreso.
+      const sobrante = Math.max(Number(ingreso.monto) - aplicadoTotal, 0);
+      let monto = match?.monto ?? 0;
+      if (sobrante > 0.01 && esDeudor(deudorPropio(ingreso))) monto += sobrante;
+      // Legado: ingresos sin aplicaciones y sin obligado, atribuidos por clienteId.
+      if (monto <= 0.01 && atribuciones.length === 0 && deudorPropio(ingreso) === null
+        && deudor.tipo === "cliente" && fallbackClienteId != null && ingreso.clienteId === fallbackClienteId) {
+        monto = Number(ingreso.monto);
       }
-      // Sin aplicaciones: pago a cuenta del cliente.
-      if (deudor.tipo === "cliente" && fallbackClienteId != null && ingreso.clienteId === fallbackClienteId) {
-        result.push(ingreso);
-      }
+      if (monto > 0.01) result.push({ ...ingreso, monto: monto.toFixed(2) });
     }
     return result;
   }
@@ -543,6 +565,8 @@ export class CuentaCorrienteService {
       ingresos: ingresosRows.map((ingreso): CCIngresoConMeta => ({
         id: ingreso.id,
         clienteId: ingreso.clienteId,
+        obligadoClienteId: ingreso.obligadoClienteId ?? null,
+        obligadoTerceroId: ingreso.obligadoTerceroId ?? null,
         descripcion: ingreso.descripcion ?? "Ingreso",
         fecha: ingreso.fechaIngreso,
         monto: ingreso.monto,

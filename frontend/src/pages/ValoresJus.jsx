@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSnackbar } from "notistack";
 import { usePermisos } from "../auth/usePermissions";
 import { useListState } from "../hooks/useListState";
@@ -8,11 +7,6 @@ import {
   Box,
   Button,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
   Paper,
   Stack,
   Table,
@@ -22,17 +16,10 @@ import {
   TableHead,
   TablePagination,
   TableRow,
-  TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
-import { Delete, Sync } from "@mui/icons-material";
-import {
-  createValorJus,
-  deleteValorJus,
-  getValoresJus,
-  syncValoresJus,
-} from "../api/valorjus.api";
+import { Sync } from "@mui/icons-material";
+import { getValoresJus, syncValoresJus } from "../api/valorjus.api";
 
 const moneyFormatter = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -40,11 +27,6 @@ const moneyFormatter = new Intl.NumberFormat("es-AR", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
-
-const initialForm = {
-  fecha: "",
-  valor: "",
-};
 
 function getApiError(error, fallback) {
   return error?.response?.data?.error?.message ?? fallback;
@@ -66,7 +48,7 @@ function formatDate(value) {
 export default function ValoresJus() {
   const queryClient = useQueryClient();
   const { enqueueSnackbar } = useSnackbar();
-  const { canCrear, canEliminar } = usePermisos("VALORJUS");
+  const { canCrear } = usePermisos("VALORJUS");
   const [list, setList] = useListState(
     { page: 0, rowsPerPage: 10 },
     { debounceKeys: [] },
@@ -74,10 +56,6 @@ export default function ValoresJus() {
   const { page, rowsPerPage } = list;
   const setPage = (page) => setList({ page });
   const setRowsPerPage = (rowsPerPage) => setList({ rowsPerPage });
-  const [manualOpen, setManualOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [form, setForm] = useState(initialForm);
-  const [errors, setErrors] = useState({});
 
   const valoresQuery = useQuery({
     queryKey: ["valorjus", page + 1, rowsPerPage],
@@ -104,76 +82,6 @@ export default function ValoresJus() {
       enqueueSnackbar(getApiError(error, "No se pudieron sincronizar los valores JUS"), { variant: "error" });
     },
   });
-
-  const createMutation = useMutation({
-    mutationFn: createValorJus,
-    onSuccess: () => {
-      enqueueSnackbar("Valor JUS cargado correctamente", { variant: "success" });
-      setManualOpen(false);
-      setForm(initialForm);
-      setErrors({});
-      setPage(0);
-      invalidateValoresJus();
-    },
-    onError: (error) => {
-      enqueueSnackbar(getApiError(error, "No se pudo cargar el valor JUS"), { variant: "error" });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: deleteValorJus,
-    onSuccess: () => {
-      enqueueSnackbar("Valor JUS eliminado", { variant: "success" });
-      setDeleteTarget(null);
-      invalidateValoresJus();
-    },
-    onError: (error) => {
-      enqueueSnackbar(getApiError(error, "No se pudo eliminar el valor JUS"), { variant: "error" });
-    },
-  });
-
-  const handleOpenManual = () => {
-    setForm(initialForm);
-    setErrors({});
-    setManualOpen(true);
-  };
-
-  const handleCloseManual = () => {
-    if (createMutation.isPending) return;
-    setManualOpen(false);
-    setErrors({});
-  };
-
-  const handleFormChange = (field) => (event) => {
-    setForm((current) => ({ ...current, [field]: event.target.value }));
-    setErrors((current) => ({ ...current, [field]: undefined }));
-  };
-
-  const validateForm = () => {
-    const nextErrors = {};
-    const value = Number(form.valor);
-    const date = form.fecha ? new Date(form.fecha) : null;
-
-    if (!form.fecha || !date || Number.isNaN(date.getTime())) {
-      nextErrors.fecha = "Ingresá una fecha de vigencia válida";
-    }
-
-    if (!form.valor || Number.isNaN(value) || value <= 0) {
-      nextErrors.valor = "Ingresá un valor en pesos mayor a cero";
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleSaveManual = () => {
-    if (!validateForm()) return;
-
-    createMutation.mutate({
-      fecha: new Date(form.fecha).toISOString(),
-      valor: Number(form.valor),
-    });
-  };
 
   const handleRowsPerPageChange = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
@@ -211,13 +119,6 @@ export default function ValoresJus() {
             >
               Actualizar JUS
             </Button>
-            <Button
-              variant="outlined"
-              onClick={handleOpenManual}
-              sx={{ borderRadius: "10px", fontWeight: 800 }}
-            >
-              Cargar manualmente
-            </Button>
           </Stack>
         )}
       </Stack>
@@ -249,13 +150,12 @@ export default function ValoresJus() {
               <TableRow>
                 <TableCell sx={{ fontWeight: 900 }}>Fecha de Vigencia</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Valor JUS ($)</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 900 }}>Acciones</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {valoresQuery.isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={3}>
+                  <TableCell colSpan={2}>
                     <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
                       <CircularProgress />
                     </Box>
@@ -263,19 +163,14 @@ export default function ValoresJus() {
                 </TableRow>
               ) : isTableEmpty ? (
                 <TableRow>
-                  <TableCell colSpan={3}>
+                  <TableCell colSpan={2}>
                     <Box sx={{ py: 6, textAlign: "center" }}>
                       <Typography variant="h6" sx={{ fontWeight: 900 }}>
                         No hay valores JUS cargados
                       </Typography>
                       <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
-                        Sincronizá el historial oficial o cargá un valor manualmente.
+                        Usá "Actualizar JUS" para sincronizar el historial oficial.
                       </Typography>
-                      {canCrear && (
-                        <Button variant="outlined" onClick={handleOpenManual} sx={{ mt: 2, borderRadius: "10px", fontWeight: 800 }}>
-                          Cargar manualmente
-                        </Button>
-                      )}
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -284,22 +179,6 @@ export default function ValoresJus() {
                   <TableRow key={item.id} hover>
                     <TableCell>{formatDate(item.fecha)}</TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>{moneyFormatter.format(Number(item.valor))}</TableCell>
-                    <TableCell align="right">
-                      {canEliminar && (
-                        <Tooltip title="Eliminar valor JUS">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => setDeleteTarget(item)}
-                            disabled={deleteMutation.isPending}
-                            aria-label="Eliminar valor JUS"
-                            sx={{ p: 0.5 }}
-                          >
-                            <Delete sx={{ fontSize: 19 }} />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -338,73 +217,6 @@ export default function ValoresJus() {
         </Typography>
       )}
 
-      <Dialog open={manualOpen} onClose={handleCloseManual} PaperProps={{ sx: { borderRadius: "16px", width: "100%", maxWidth: 460 } }}>
-        <DialogTitle sx={{ fontWeight: 900 }}>Cargar Valor JUS</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              label="Fecha de Vigencia"
-              type="date"
-              value={form.fecha}
-              onChange={handleFormChange("fecha")}
-              error={Boolean(errors.fecha)}
-              helperText={errors.fecha}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-            />
-            <TextField
-              label="Valor en Pesos"
-              type="number"
-              value={form.valor}
-              onChange={handleFormChange("valor")}
-              error={Boolean(errors.valor)}
-              helperText={errors.valor}
-              fullWidth
-              inputProps={{ min: 0, step: "0.01" }}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={handleCloseManual} disabled={createMutation.isPending}>
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleSaveManual}
-            disabled={createMutation.isPending}
-            startIcon={createMutation.isPending ? <CircularProgress size={18} color="inherit" /> : null}
-          >
-            Guardar
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(deleteTarget)}
-        onClose={() => !deleteMutation.isPending && setDeleteTarget(null)}
-        PaperProps={{ sx: { borderRadius: "16px", width: "100%", maxWidth: 420 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 900 }}>Eliminar Valor JUS</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            Se eliminará lógicamente el valor vigente desde {formatDate(deleteTarget?.fecha)}.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => deleteMutation.mutate(deleteTarget.id)}
-            disabled={deleteMutation.isPending}
-            startIcon={deleteMutation.isPending ? <CircularProgress size={18} color="inherit" /> : null}
-          >
-            Eliminar
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

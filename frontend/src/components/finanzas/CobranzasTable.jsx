@@ -33,6 +33,7 @@ import {
   ellipsisSx,
   findParamByCodigo,
   formatDateShort,
+  formatJusQty,
   formatMoneyAr,
   invalidateFinanzasQueries,
   isDeudorTercero,
@@ -223,7 +224,9 @@ function CuotasSection({
                         <TableCell sx={{ ...compactCellSx, fontWeight: 800 }}>#{cuota.numero}</TableCell>
                         <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatDateShort(cuota.vencimiento)}</TableCell>
                         <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", fontWeight: 900 }}>
-                          {formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}
+                          <Tooltip title={formatJusQty(cuota.saldoJus) ?? formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}>
+                            <Box component="span">{formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}</Box>
+                          </Tooltip>
                         </TableCell>
                         <TableCell sx={compactCellSx}>
                           <CuotaRowActions cuota={cuota} cobrarMutation={cobrarMutation} />
@@ -259,9 +262,11 @@ function CuotasSection({
                         </Typography>
                       </Box>
                       <Stack alignItems="flex-end" spacing={0.5} sx={{ flexShrink: 0 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>
-                          {formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}
-                        </Typography>
+                        <Tooltip title={formatJusQty(cuota.saldoJus) ?? formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}>
+                          <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>
+                            {formatMoneyAr(cuota.totalAPagarPesos ?? cuota.saldoPesos)}
+                          </Typography>
+                        </Tooltip>
                         <CuotaRowActions cuota={cuota} cobrarMutation={cobrarMutation} />
                       </Stack>
                     </Stack>

@@ -257,6 +257,7 @@ export class PlanesService {
           numero: cuota.numero,
           vencimiento: cuota.vencimiento,
           saldoPesos: saldo,
+          saldoJus: cuota.saldoJus ?? null,
           totalAPagarPesos: Number(cuota.totalAPagarPesos ?? saldo),
           estadoCodigo: estado,
           clienteId: plan.clienteId ?? null,
@@ -288,7 +289,15 @@ export class PlanesService {
     }
 
     if (cuotaIds.length === 0 && gastoIds.length === 0 && honorarioIds.length === 0) {
-      if (!data.clienteId) {
+      // FIFO por deudor: si el obligado es un tercero, sus deudas; si no, las del cliente
+      // (explícito, del obligado o derivado del expediente).
+      const fifoTerceroId = data.obligadoTerceroId ?? null;
+      let fifoClienteId = fifoTerceroId ? null : (data.obligadoClienteId ?? data.clienteId ?? null);
+      if (!fifoTerceroId && !fifoClienteId && data.casoId) {
+        const caso = await CasosQueries.findById(data.casoId, estudioId);
+        fifoClienteId = caso?.clienteId ?? null;
+      }
+      if (!fifoTerceroId && !fifoClienteId) {
         throw new Error("DEBES_SELECCIONAR_AL_MENOS_UNA_CUOTA_O_UN_GASTO");
       }
 
@@ -307,9 +316,13 @@ export class PlanesService {
         .where(
           and(
             eq(planesPago.estudioId, estudioId),
-            // FIFO del cliente: solo cuotas cuyo deudor es ese cliente (no cruza a terceros).
-            isNull(honorarios.obligadoTerceroId),
-            sql`coalesce(${honorarios.obligadoClienteId}, ${honorarios.clienteId}) = ${data.clienteId}`,
+            // FIFO por deudor: cuotas cuyo deudor es el tercero indicado, o el cliente (sin cruzar entre ambos).
+            ...(fifoTerceroId
+              ? [eq(honorarios.obligadoTerceroId, fifoTerceroId)]
+              : [
+                  isNull(honorarios.obligadoTerceroId),
+                  sql`coalesce(${honorarios.obligadoClienteId}, ${honorarios.clienteId}) = ${fifoClienteId}`,
+                ]),
             data.casoId ? eq(planesPago.casoId, data.casoId) : undefined,
             eq(planCuotas.activo, true),
             eq(planesPago.activo, true),
@@ -321,28 +334,32 @@ export class PlanesService {
           )
         );
 
-      // Query outstanding (unpaid) gastos for the client
+      // Gastos: siempre deuda del cliente (por diseño); un tercero no paga gastos vía FIFO.
       const gastoPagadoParam = await PlanesQueries.findParametroByCodigo("ESTADO_GASTO", "PAGADO");
       const gastoPagadoId = gastoPagadoParam?.id;
-      const queryGastos = await db
-        .select({
-          id: gastos.id,
-          vencimiento: gastos.fechaGasto,
-        })
-        .from(gastos)
-        .where(
-          and(
-            eq(gastos.estudioId, estudioId),
-            eq(gastos.clienteId, data.clienteId),
-            data.casoId ? eq(gastos.casoId, data.casoId) : undefined,
-            eq(gastos.activo, true),
-            isNull(gastos.deletedAt),
-            gastoPagadoId ? ne(gastos.estadoId, gastoPagadoId) : undefined
-          )
-        );
+      const queryGastos = fifoClienteId
+        ? await db
+            .select({
+              id: gastos.id,
+              vencimiento: gastos.fechaGasto,
+            })
+            .from(gastos)
+            .where(
+              and(
+                eq(gastos.estudioId, estudioId),
+                eq(gastos.clienteId, fifoClienteId),
+                data.casoId ? eq(gastos.casoId, data.casoId) : undefined,
+                eq(gastos.activo, true),
+                isNull(gastos.deletedAt),
+                gastoPagadoId ? ne(gastos.estadoId, gastoPagadoId) : undefined
+              )
+            )
+        : [];
 
-      // Honorarios que cobran de forma directa (sin plan) y siguen pendientes
-      const queryHonorarios = await PlanesQueries.findHonorariosSinPlanCobrables(estudioId, data.clienteId, data.casoId ?? undefined);
+      // Honorarios que cobran de forma directa (sin plan) y siguen pendientes (solo deudor-cliente)
+      const queryHonorarios = fifoClienteId
+        ? await PlanesQueries.findHonorariosSinPlanCobrables(estudioId, fifoClienteId, data.casoId ?? undefined)
+        : [];
 
       // Sort by date to apply FIFO
       queryCuotas.sort((a, b) => new Date(a.vencimiento).getTime() - new Date(b.vencimiento).getTime());
@@ -354,9 +371,8 @@ export class PlanesService {
       gastoIds = queryGastos.map(g => g.id);
       honorarioIds = queryHonorarios.map(h => h.id);
 
-      if (cuotaIds.length === 0 && gastoIds.length === 0 && honorarioIds.length === 0) {
-        throw new Error("NO_HAY_DEUDAS_PENDIENTES_PARA_APLICAR_FIFO");
-      }
+      // Sin deudas pendientes: el ingreso se registra igual, sin aplicaciones (queda a cuenta
+      // del obligado y se refleja como saldo a favor en la cuenta corriente).
     }
 
     const cuotasDetalle: PlanCuotaDetalle[] = [];
@@ -431,8 +447,18 @@ export class PlanesService {
         obligadoTerceroId: null,
       });
     }
-    if (honorariosParaDeudor.length > 0) {
-      assertMismoDeudor(honorariosParaDeudor);
+    const deudorSeleccion = honorariosParaDeudor.length > 0 ? assertMismoDeudor(honorariosParaDeudor) : null;
+
+    // Obligado al pago del ingreso: manda el deudor de la selección; si no hay, el del payload; último recurso, el cliente.
+    let obligadoClienteId: number | null = null;
+    let obligadoTerceroId: number | null = null;
+    if (deudorSeleccion) {
+      obligadoClienteId = deudorSeleccion.tipo === "cliente" ? deudorSeleccion.id : null;
+      obligadoTerceroId = deudorSeleccion.tipo === "tercero" ? deudorSeleccion.id : null;
+    } else if (data.obligadoTerceroId) {
+      obligadoTerceroId = data.obligadoTerceroId;
+    } else {
+      obligadoClienteId = data.obligadoClienteId ?? data.clienteId ?? null;
     }
 
     const fechaIngreso = new Date(data.fechaIngreso);
@@ -452,6 +478,8 @@ export class PlanesService {
         estudioId,
         clienteId: data.clienteId ?? null,
         casoId: data.casoId ?? null,
+        obligadoClienteId,
+        obligadoTerceroId,
         cuotaId: null,
         descripcion: data.descripcion ?? null,
         monto: data.monto.toFixed(2),
@@ -932,23 +960,30 @@ function normalizeCuota(cuota: any, opts: {
 
   let saldoJus: number | null = null;
   let cobradoJus: number | null = null;
-  if (isJus && valorJusRef) {
+  let saldoJusPreciso: Decimal | null = null;
+  // AL_COBRO no guarda valorJusRef en el plan (por diseño): usar el valor vigente como base.
+  const valorJusBase = valorJusRef ?? valorJusEfectivo;
+  if (isJus && valorJusBase) {
+    // Precisión completa (8 dec) en el intermedio; se redondea a 4 solo al exponer,
+    // para que el saldo pesificado coincida con el motor de cuenta corriente.
     const jusPagadosDecimal = aplicacionesByCuota.reduce((acc: Decimal, app: any) => {
       const divisor = isAlCobro
-        ? (app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : jus(valorJusRef))
-        : jus(valorJusRef);
-      return acc.add(pesos(app.montoCapital ?? app.monto).divByRate(divisor, 4));
-    }, Decimal.zero(4));
-    const saldoJusDecimal = jus(montoJus).sub(jusPagadosDecimal).max(Decimal.zero(4));
-    cobradoJus = jusPagadosDecimal.toNumber();
-    saldoJus = saldoJusDecimal.toNumber();
+        ? (app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : jus(valorJusBase))
+        : jus(valorJusBase);
+      return acc.add(pesos(app.montoCapital ?? app.monto).divByRate(divisor, 8));
+    }, Decimal.zero(8));
+    saldoJusPreciso = Decimal.of(String(montoJus), 8).sub(jusPagadosDecimal).max(Decimal.zero(8));
+    cobradoJus = jusPagadosDecimal.toScale(4).toNumber();
+    saldoJus = saldoJusPreciso.toScale(4).toNumber();
   }
 
   let saldoPesos: number | null = null;
   let objetivoPesos: number | null = null;
   if (isJus && valorJusEfectivo !== null) {
     objetivoPesos = montoJus * valorJusEfectivo;
-    saldoPesos = saldoJus !== null ? saldoJus * valorJusEfectivo : null;
+    saldoPesos = saldoJusPreciso !== null
+      ? saldoJusPreciso.mulByRate(jus(valorJusEfectivo), 2).toNumber()
+      : null;
   } else if (montoPesos !== null) {
     objetivoPesos = montoPesos;
     saldoPesos = pesos(String(montoPesos)).sub(montoCobradoDecimal).max(Decimal.zero(2)).toNumber();

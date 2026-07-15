@@ -1,4 +1,4 @@
-export type DecimalScale = 2 | 4 | 6;
+export type DecimalScale = 2 | 4 | 6 | 8;
 export type RoundingMode = "HALF_UP" | "BANKERS";
 
 const POW10: Record<number, bigint> = {

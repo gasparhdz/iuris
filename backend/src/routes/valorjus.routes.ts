@@ -74,8 +74,14 @@ export const valorJusRoutes: FastifyPluginAsync = async (fastify) => {
     },
   }, ValorJusController.create);
 
+  // El sync solo trae valores del portal oficial (no acepta datos del usuario):
+  // alcanza con el permiso de creación del módulo, no requiere admin de plataforma.
+  const canSync = {
+    preHandler: [fastify.authenticate, fastify.authorize("VALORJUS", "crear")],
+  };
+
   server.post("/sync", {
-    ...canMutate,
+    ...canSync,
     schema: {
       tags: ["Valor JUS"],
       summary: "Sincronizar valores JUS desde el portal oficial",

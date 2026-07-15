@@ -62,7 +62,9 @@ import {
   finanzasEditarUrl,
   finanzasNuevoUrl,
   formatDateShort,
+  formatJusQty,
   formatMoneyAr,
+  jusEquivLabel,
   honorarioEstadoChip,
   isHonorarioPendiente,
   linkSx,
@@ -1110,9 +1112,11 @@ export default function Finanzas() {
                           </Tooltip>
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
-                          <Box sx={{ fontWeight: 900 }}>
-                            {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
-                          </Box>
+                          <Tooltip title={formatJusQty(item.calc?.saldoJus) ?? jusEquivLabel(saldoPendiente.value, valorJusQuery.data?.valor) ?? formatCurrency(saldoPendiente.value, saldoPendiente.currency)}>
+                            <Box sx={{ fontWeight: 900 }}>
+                              {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
+                            </Box>
+                          </Tooltip>
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Chip size="small" label={chip.label} color={chip.color} sx={{ fontWeight: 900 }} role="status" aria-label={`Estado: ${chip.label}`} />
@@ -1208,7 +1212,7 @@ export default function Finanzas() {
                             <VinculacionCell caso={caso} cliente={cliente} currentPath={currentPath} />
                           </Box>
                           <Box sx={{ flexShrink: 0, textAlign: "right" }}>
-                            <Tooltip title={computed.originalRef || formatCurrency(saldoPendiente.value, saldoPendiente.currency)}>
+                            <Tooltip title={formatJusQty(item.calc?.saldoJus) ?? jusEquivLabel(saldoPendiente.value, valorJusQuery.data?.valor) ?? computed.originalRef ?? formatCurrency(saldoPendiente.value, saldoPendiente.currency)}>
                               <Typography variant="body1" fontWeight={800} color="primary.main" sx={{ lineHeight: 1.2, whiteSpace: "nowrap" }}>
                                 {formatCurrency(saldoPendiente.value, saldoPendiente.currency)}
                               </Typography>
@@ -1517,6 +1521,7 @@ export default function Finanzas() {
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.06) }}>
                     {sortableHead("concepto", "Concepto")}
                     {sortableHead("expediente", "Expte / Cliente")}
+                    {staticHead("Obligado")}
                     {sortableHead("fecha", "Fecha")}
                     {sortableHead("monto", "Monto")}
                     {staticHead("Acciones", 100)}
@@ -1527,21 +1532,14 @@ export default function Finanzas() {
                     const cliente = clientesById.get(Number(item.clienteId));
                     const clienteNombre = clienteLabelFromTareas(cliente) || "Cliente";
                     const caso = expedientesById.get(Number(item.casoId));
+                    const obligadoNombre = item.obligadoNombre || "—";
                     const conceptoIngreso = conceptosIngresoById.get(Number(item.tipoId));
                     const label = conceptoIngreso?.nombre || item.descripcion || `Ingreso #${item.id}`;
                     const currency = getItemCurrencyGeneral(item, catalogQuery.data?.MONEDA ?? []);
                     const amount = Number(item.monto ?? 0);
-                    const cotizacion = Number(item.cotizacionArs ?? 0);
-                    let montoDisplay = formatCurrency(amount, currency);
-                    let montoTooltip = montoDisplay;
-                    if (cotizacion > 0) {
-                      const formattedJus = new Intl.NumberFormat("es-AR", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 4,
-                      }).format(amount / cotizacion);
-                      montoDisplay = `${formatMoneyAr(amount)} (${formattedJus} JUS)`;
-                      montoTooltip = montoDisplay;
-                    }
+                    const valorJus = Number(item.cotizacionArs ?? 0) || Number(item.valorJusAlCobro ?? 0);
+                    const montoDisplay = formatCurrency(amount, currency);
+                    const montoTooltip = jusEquivLabel(amount, valorJus) ?? montoDisplay;
                     return (
                       <TableRow key={item.id} hover>
                         <TableCell sx={{ maxWidth: 260 }}>
@@ -1556,6 +1554,11 @@ export default function Finanzas() {
                             clienteLabelText={clienteLabelFromTareas(cliente)}
                             currentPath={currentPath}
                           />
+                        </TableCell>
+                        <TableCell sx={{ maxWidth: 160, whiteSpace: "nowrap" }}>
+                          <Tooltip title={obligadoNombre}>
+                            <Typography variant="body2" sx={{ ...ellipsisSx, maxWidth: 160 }}>{obligadoNombre}</Typography>
+                          </Tooltip>
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateShort(item.fechaIngreso)}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap", color: "success.main", maxWidth: 180 }}>
@@ -1587,14 +1590,11 @@ export default function Finanzas() {
                     const label = conceptoIngreso?.nombre || item.descripcion || `Ingreso #${item.id}`;
                     const currency = getItemCurrencyGeneral(item, catalogQuery.data?.MONEDA ?? []);
                     const amount = Number(item.monto ?? 0);
-                    const cotizacion = Number(item.cotizacionArs ?? 0);
-                    const formattedAmount = cotizacion > 0
-                      ? formatMoneyAr(amount)
-                      : formatCurrency(amount, currency);
-                    const jusLabel = cotizacion > 0
-                      ? `${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(amount / cotizacion)} JUS`
-                      : null;
-                    const montoTooltip = jusLabel ? `${formattedAmount} (${jusLabel})` : formattedAmount;
+                    const valorJus = Number(item.cotizacionArs ?? 0) || Number(item.valorJusAlCobro ?? 0);
+                    const formattedAmount = formatCurrency(amount, currency);
+                    const jusLabel = jusEquivLabel(amount, valorJus);
+                    const montoTooltip = jusLabel ?? formattedAmount;
+                    const obligadoNombre = item.obligadoNombre || null;
                     return (
                       <Paper
                         key={item.id}
@@ -1621,7 +1621,7 @@ export default function Finanzas() {
                           </Box>
                           <Tooltip title={montoTooltip}>
                             <Typography variant="body1" fontWeight={800} color="success.main" sx={{ lineHeight: 1.2, whiteSpace: "nowrap", flexShrink: 0 }}>
-                              {formattedAmount}{jusLabel ? ` (${jusLabel})` : ""}
+                              {formattedAmount}
                             </Typography>
                           </Tooltip>
                         </Box>
@@ -1629,7 +1629,7 @@ export default function Finanzas() {
                         {/* Nivel 2 — contexto */}
                         <Box sx={{ px: 2, pb: 1 }}>
                           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                            {label}
+                            {label}{obligadoNombre ? ` — Obligado: ${obligadoNombre}` : ""}
                           </Typography>
                         </Box>
 

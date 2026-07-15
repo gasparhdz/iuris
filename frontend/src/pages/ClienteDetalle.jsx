@@ -5,7 +5,7 @@ import { useSnackbar } from "notistack";
 import { alpha, useTheme } from "@mui/material/styles";
 import api from "../api/axios";
 import { usePermisos } from "../auth/usePermissions";
-import { finanzasNuevoUrl, formatMoneyAr, formatDateShort, isHonorarioPendiente, computeHonorarioAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
+import { finanzasNuevoUrl, formatJusQty, formatMoneyAr, formatDateShort, isHonorarioPendiente, computeHonorarioAmounts, mapCuentaCorrienteApiRows } from "./finanzasUtils";
 import PlanesPagoTable from "../components/finanzas/PlanesPagoTable";
 import {
   Avatar,
@@ -1036,12 +1036,14 @@ function CuentaCorrienteLedger({ subtitle, rows, formatDate, formatMoney, onPrin
                   {row.descripcion}
                   {row.cantidadJus != null && row.valorJusAplicado != null && (
                     <Typography variant="caption" display="block" color="text.secondary" sx={{ fontWeight: 700 }}>
-                      {row.cantidadJus} JUS × {formatMoney(row.valorJusAplicado)}
+                      {formatJusQty(row.cantidadJus) ?? "0,00 JUS"} × {formatMoney(row.valorJusAplicado)}
                     </Typography>
                   )}
                 </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>
-                  {row.cantidadJus != null ? row.cantidadJus : "—"}
+                  {row.cantidadJus != null
+                    ? new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(row.cantidadJus))
+                    : "—"}
                 </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>
                   {row.debe > 0 ? <MoneyWithNote value={row.debe} note={row.note} formatMoney={formatMoney} /> : "-"}

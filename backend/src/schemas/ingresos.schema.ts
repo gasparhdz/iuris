@@ -8,6 +8,8 @@ const positiveAmountSchema = z.coerce.number().positive();
 export const updateIngresoSchema = z.object({
   clienteId: positiveIntSchema.optional().nullable(),
   casoId: positiveIntSchema.optional().nullable(),
+  obligadoClienteId: positiveIntSchema.optional().nullable(),
+  obligadoTerceroId: positiveIntSchema.optional().nullable(),
   cuotaId: positiveIntSchema.optional().nullable(),
   descripcion: z.string().optional().nullable(),
   monto: positiveAmountSchema.optional(),

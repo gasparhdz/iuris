@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, clientes, ingresoAplicaciones, ingresos, parametros } from "../schema.js";
+import { casos, clientes, ingresoAplicaciones, ingresos, parametros, terceros } from "../schema.js";
 import { personaNombreSortExpr, vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
 
 type NewIngreso = typeof ingresos.$inferInsert;
@@ -38,13 +38,44 @@ export class IngresosQueries {
     if (filters.cuotaId) conditions.push(eq(ingresos.cuotaId, filters.cuotaId));
     if (filters.from) conditions.push(gte(ingresos.fechaIngreso, filters.from));
     if (filters.to) conditions.push(lte(ingresos.fechaIngreso, filters.to));
+    const tipoParam = alias(parametros, "ingreso_tipo_sort");
+    const obligadoCliente = alias(clientes, "ingreso_obligado_cliente");
+    const obligadoTercero = alias(terceros, "ingreso_obligado_tercero");
+
     if (filters.search?.trim()) {
-      conditions.push(ilike(ingresos.descripcion, `%${filters.search.trim()}%`));
+      const term = `%${filters.search.trim()}%`;
+      conditions.push(or(
+        ilike(ingresos.descripcion, term),
+        ilike(clientes.nombre, term),
+        ilike(clientes.apellido, term),
+        ilike(clientes.razonSocial, term),
+        ilike(obligadoCliente.nombre, term),
+        ilike(obligadoCliente.apellido, term),
+        ilike(obligadoCliente.razonSocial, term),
+        ilike(obligadoTercero.nombre, term),
+        ilike(obligadoTercero.apellido, term),
+        ilike(obligadoTercero.razonSocial, term),
+        ilike(casos.caratula, term),
+        ilike(casos.nroExpte, term),
+      )!);
     }
 
     const whereCondition = and(...conditions);
-
-    const tipoParam = alias(parametros, "ingreso_tipo_sort");
+    const obligadoNombreExpr = sql<string | null>`CASE
+      WHEN ${ingresos.obligadoTerceroId} IS NOT NULL THEN
+        COALESCE(
+          ${obligadoTercero.razonSocial},
+          NULLIF(CONCAT_WS(', ', ${obligadoTercero.apellido}, ${obligadoTercero.nombre}), ''),
+          ${obligadoTercero.nombre}
+        )
+      WHEN ${ingresos.obligadoClienteId} IS NOT NULL THEN
+        COALESCE(
+          ${obligadoCliente.razonSocial},
+          NULLIF(CONCAT_WS(', ', ${obligadoCliente.apellido}, ${obligadoCliente.nombre}), ''),
+          ${obligadoCliente.nombre}
+        )
+      ELSE NULL
+    END`;
     const sortDir = order === "desc" ? desc : asc;
     const clienteNombre = personaNombreSortExpr(clientes.razonSocial, clientes.apellido, clientes.nombre);
     const expedienteExpr = vinculacionExpteClienteSortExpr(
@@ -76,6 +107,9 @@ export class IngresosQueries {
         estudioId: ingresos.estudioId,
         clienteId: ingresos.clienteId,
         casoId: ingresos.casoId,
+        obligadoClienteId: ingresos.obligadoClienteId,
+        obligadoTerceroId: ingresos.obligadoTerceroId,
+        obligadoNombre: obligadoNombreExpr,
         cuotaId: ingresos.cuotaId,
         descripcion: ingresos.descripcion,
         monto: ingresos.monto,
@@ -102,16 +136,22 @@ export class IngresosQueries {
       // join solo para ordenar/filtrar; NO se proyecta
       .leftJoin(casos, eq(ingresos.casoId, casos.id))
       .leftJoin(tipoParam, eq(ingresos.tipoId, tipoParam.id))
+      .leftJoin(obligadoCliente, eq(ingresos.obligadoClienteId, obligadoCliente.id))
+      .leftJoin(obligadoTercero, eq(ingresos.obligadoTerceroId, obligadoTercero.id))
       .leftJoin(ingresoAplicaciones, and(eq(ingresoAplicaciones.ingresoId, ingresos.id), eq(ingresoAplicaciones.activo, true), isNull(ingresoAplicaciones.deletedAt)))
       .where(whereCondition)
-      .groupBy(ingresos.id, clientes.id, casos.id, tipoParam.id)
+      .groupBy(ingresos.id, clientes.id, casos.id, tipoParam.id, obligadoCliente.id, obligadoTercero.id)
       .limit(pagination.limit)
       .offset(pagination.offset)
       .orderBy(orderExpr, asc(ingresos.id));
 
     const [{ count }] = await db
-      .select({ count: sql`count(*)`.mapWith(Number) })
+      .select({ count: sql`count(distinct ${ingresos.id})`.mapWith(Number) })
       .from(ingresos)
+      .leftJoin(clientes, eq(ingresos.clienteId, clientes.id))
+      .leftJoin(casos, eq(ingresos.casoId, casos.id))
+      .leftJoin(obligadoCliente, eq(ingresos.obligadoClienteId, obligadoCliente.id))
+      .leftJoin(obligadoTercero, eq(ingresos.obligadoTerceroId, obligadoTercero.id))
       .where(whereCondition);
 
     return { data, count };

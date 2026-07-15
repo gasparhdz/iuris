@@ -152,7 +152,9 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
     let capitalOriginal: Decimal;
     let valorJusAplicadoHon: number | null = null;
     if (esJus) {
-      const valuacion = esAlCobro ? valorJusActual : (valorJusRef ?? valorJusActual);
+      // Siempre al valor JUS de origen: la revalorización AL_COBRO se expone en la fila AJUSTE,
+      // no inflando el capital original (si no, el ajuste de lo ya pagado salía al haber).
+      const valuacion = valorJusRef ?? valorJusActual;
       valorJusAplicadoHon = valuacion.toNumber();
       capitalOriginal = jus(honorario.jus!).mulByRate(valuacion, 2);
     } else {
@@ -167,7 +169,7 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
       moneda: esJus ? "JUS" : "ARS",
       cantidadJus: esJus ? jus(honorario.jus!).toNumber() : null,
       valorJusAplicado: valorJusAplicadoHon,
-      esEstimado: esJus && esAlCobro,
+      esEstimado: esJus && esAlCobro && valorJusRef === null,
       debe: capitalOriginal.toNumber(),
       haber: 0,
       orden: 0,

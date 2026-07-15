@@ -33,6 +33,12 @@ Thumbs.db
 *.bat
 *.ps1
 
+# Backups de bases de datos (datos sensibles, nunca versionar)
+_backups/
+*.dump
+*.backup
+*.sql.gz
+
 # Notas y documentacion interna (no versionar)
 TODO.md
 scratch/

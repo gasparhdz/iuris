@@ -37,6 +37,7 @@ import {
   deudorNombreFromItem,
   findParamByCodigo,
   formatDateShort,
+  formatJusQty,
   formatMoneyAr,
   invalidateFinanzasQueries,
   isDeudorTercero,
@@ -182,9 +183,10 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
                   const interesPesos = Number(cuota.interes?.pesos ?? 0);
                   const chip = cuotaEstadoChip(cuota);
                   const saldoLabel = formatMoneyAr(cuota.interes?.aplica ? totalAPagar : saldo);
+                  const saldoJusLabel = formatJusQty(cuota.saldoJus);
                   const saldoTooltip = cuota.interes?.aplica
-                    ? `Saldo ${formatMoneyAr(saldo)} · Total ${formatMoneyAr(totalAPagar)}`
-                    : saldoLabel;
+                    ? `Saldo ${formatMoneyAr(saldo)} · Total ${formatMoneyAr(totalAPagar)}${saldoJusLabel ? ` · ${saldoJusLabel}` : ""}`
+                    : (saldoJusLabel ?? saldoLabel);
                   const pending = cobrarMutation.isPending
                     && Number(cobrarMutation.variables?.id) === Number(cuota.id);
                   return (
@@ -192,9 +194,15 @@ function PlanCuotasPanel({ plan, invalidateKeys = [] }) {
                       <TableCell sx={{ ...compactCellSx, fontWeight: 800 }}>#{cuota.numero}</TableCell>
                       <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatDateShort(cuota.vencimiento)}</TableCell>
                       <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", fontWeight: 800 }}>
-                        {formatMoneyAr(cuotaMontoDisplay(cuota))}
+                        <Tooltip title={formatJusQty(cuota.montoJus) ?? formatMoneyAr(cuotaMontoDisplay(cuota))}>
+                          <Box component="span">{formatMoneyAr(cuotaMontoDisplay(cuota))}</Box>
+                        </Tooltip>
                       </TableCell>
-                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatMoneyAr(cuota.montoCobrado)}</TableCell>
+                      <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>
+                        <Tooltip title={formatJusQty(cuota.cobradoJus) ?? formatMoneyAr(cuota.montoCobrado)}>
+                          <Box component="span">{formatMoneyAr(cuota.montoCobrado)}</Box>
+                        </Tooltip>
+                      </TableCell>
                       <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap", fontWeight: 900 }}>
                         <Tooltip title={saldoTooltip}>
                           <Box component="span">{saldoLabel}</Box>

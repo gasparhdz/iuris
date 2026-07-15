@@ -237,8 +237,12 @@ describe("cuenta corriente (motor Decimal)", () => {
     expect(result.totales.saldoPesos).toBe(110000);
     const ajustes = result.rows.filter((r) => r.tipo === "AJUSTE");
     expect(ajustes).toHaveLength(1);
-    // debe 4x110000=440000, haber 300000 → el ajuste devuelve 30000 para cerrar en 110000
-    expect(ajustes[0].haber).toBe(30000);
+    // debe 4x100000=400000 (valor de origen), haber 300000 → la revalorización
+    // del JUS adeudado (1 JUS x 10000) entra como ajuste AL DEBE, nunca al haber.
+    expect(ajustes[0].debe).toBe(10000);
+    expect(ajustes[0].haber).toBe(0);
+    const honorarioRow = result.rows.find((r) => r.tipo === "HONORARIO");
+    expect(honorarioRow?.debe).toBe(400000);
   });
 
   it("gastos suman al debe y un ingreso sin aplicaciones igual descuenta del saldo", () => {

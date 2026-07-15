@@ -239,7 +239,7 @@ export function mapCuentaCorrienteApiRows(rows = []) {
     debe: Number(row.debe ?? 0),
     haber: Number(row.haber ?? 0),
     saldo: Number(row.saldo ?? 0),
-    note: row.esEstimado ? "Valuado al JUS vigente (estimado)" : undefined,
+    note: row.esEstimado ? "Valuado al JUS vigente" : undefined,
   }));
 }
 
@@ -365,9 +365,24 @@ export function cuotaTotalAPagar(cuota) {
   return cuota?.totalAPagarPesos ?? cuota?.saldoPesos ?? null;
 }
 
+/** Formato único para cantidades JUS en toda la app: "X,XX JUS" (2 decimales, sin paréntesis). */
+export function formatJusQty(jusQty) {
+  const n = Number(jusQty);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)} JUS`;
+}
+
+/** "X JUS" convirtiendo pesos al valor JUS dado; null si falta alguno. */
+export function jusEquivLabel(montoPesos, valorJus) {
+  const m = Number(montoPesos);
+  const v = Number(valorJus);
+  if (!(m > 0) || !(v > 0)) return null;
+  return formatJusQty(m / v);
+}
+
 export function formatJusConPesos(jus, ars) {
   if (jus == null) return formatCurrency(ars);
-  const jusStr = `${Number(jus).toFixed(2)} JUS`;
+  const jusStr = formatJusQty(jus) ?? "0,00 JUS";
   if (ars == null) return jusStr;
   return `${jusStr} (${formatCurrency(ars)})`;
 }
@@ -377,11 +392,7 @@ export function movementCurrencyNote(item, currency) {
   const cotizacion = Number(item?.cotizacionArs ?? 0);
   if (currency === "JUS") {
     const quantity = Number(item?.cantidadOriginal ?? item?.jus ?? (cotizacion > 0 ? amount / cotizacion : item?.monto) ?? 0);
-    const formatted = new Intl.NumberFormat("es-AR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 4,
-    }).format(Number.isFinite(quantity) ? quantity : 0);
-    return `${formatted} JUS`;
+    return formatJusQty(quantity) ?? "0,00 JUS";
   }
   if (currency === "USD") {
     const value = Number(item?.cantidadOriginal ?? item?.monto ?? item?.montoPesos ?? 0);
@@ -423,13 +434,10 @@ export function computeGastoAmounts(item, catalogMonedas) {
   let formattedVal = "";
 
   if (isJus) {
-    const jusStr = new Intl.NumberFormat("es-AR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 4,
-    }).format(monto);
+    const jusStr = formatJusQty(monto) ?? "0,00 JUS";
     formattedVal = cotizacion > 0
-      ? `${jusStr} JUS (≈ ${formatMoneyAr(monto * cotizacion)})`
-      : `${jusStr} JUS`;
+      ? `${jusStr} (≈ ${formatMoneyAr(monto * cotizacion)})`
+      : jusStr;
   } else if (isUsd) {
     formattedVal = `USD ${new Intl.NumberFormat("es-AR", {
       minimumFractionDigits: 2,
@@ -464,14 +472,11 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
     let originalRef = "";
     let updatedRef = "";
     if (isJus) {
-      const quantityJus = Number(item.jus ?? 0);
-      const fmt = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-      originalRef = `(${fmt.format(quantityJus)} JUS)`;
+      originalRef = formatJusQty(item.jus) ?? "";
       updatedRef = originalRef;
     } else if (!isUsd && valorJusActual > 0) {
-      const fmt = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-      originalRef = `(${fmt.format(originalVal / valorJusActual)} JUS)`;
-      updatedRef = `(${fmt.format(updatedVal / valorJusActual)} JUS)`;
+      originalRef = formatJusQty(originalVal / valorJusActual) ?? "";
+      updatedRef = formatJusQty(updatedVal / valorJusActual) ?? "";
     }
     return { currency, originalVal, updatedVal, originalRef, updatedRef, saldoPesos: Number(backendSaldo) };
   }
@@ -505,8 +510,8 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
     if (isAlCobro) {
       originalVal = quantityJus * valorJusRef;
       updatedVal = quantityJus * valorJusActual;
-      originalRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(quantityJus)} JUS)`;
-      updatedRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(quantityJus)} JUS)`;
+      originalRef = formatJusQty(quantityJus) ?? "";
+      updatedRef = originalRef;
     } else {
       originalVal = quantityJus * valorJusRef;
       let interestJus = 0;
@@ -517,8 +522,8 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
       const updatedJus = quantityJus + interestJus;
       updatedVal = updatedJus * valorJusRef;
 
-      originalRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(quantityJus)} JUS)`;
-      updatedRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(updatedJus)} JUS)`;
+      originalRef = formatJusQty(quantityJus) ?? "";
+      updatedRef = formatJusQty(updatedJus) ?? "";
     }
   } else {
     originalVal = Number(item.montoPesos ?? 0);
@@ -530,13 +535,11 @@ export function computeHonorarioAmounts(item, valorJusActual, catalogMonedas, ca
     updatedVal = originalVal + interest;
 
     if (valorJusActual > 0) {
-      const origJus = originalVal / valorJusActual;
-      const updJus = updatedVal / valorJusActual;
-      originalRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(origJus)} JUS)`;
-      updatedRef = `(${new Intl.NumberFormat("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(updJus)} JUS)`;
+      originalRef = formatJusQty(originalVal / valorJusActual) ?? "0,00 JUS";
+      updatedRef = formatJusQty(updatedVal / valorJusActual) ?? "0,00 JUS";
     } else {
-      originalRef = "(0,000 JUS)";
-      updatedRef = "(0,000 JUS)";
+      originalRef = "0,00 JUS";
+      updatedRef = "0,00 JUS";
     }
   }
 

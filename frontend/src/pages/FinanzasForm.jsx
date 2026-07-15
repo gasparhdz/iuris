@@ -66,6 +66,7 @@ import {
   ESTADO_HONORARIO_UI,
   estadoUiFromHonorario,
   findParamByCodigo,
+  formatJusQty,
   formatMoneyAr,
   getItemCurrencyGeneral,
   honorarioEstadoChip,
@@ -1511,8 +1512,12 @@ export default function FinanzasForm() {
         finalMonto = montoNum;
         finalMonedaId = monedaArs?.id ?? null;
       }
+      const [obligadoTipo, obligadoIdRaw] = String(obligadoIngresoKey ?? "").split(":");
+      const obligadoId = obligadoIdRaw ? Number(obligadoIdRaw) : null;
       const payload = {
         ...clienteCasoPayload(form),
+        obligadoClienteId: obligadoTipo === "cliente" && obligadoId ? obligadoId : null,
+        obligadoTerceroId: obligadoTipo === "tercero" && obligadoId ? obligadoId : null,
         descripcion: descripcion || null,
         monto: finalMonto,
         fechaIngreso: toIsoDateTimeLocal(form.fechaIngreso),
@@ -3671,12 +3676,12 @@ export default function FinanzasForm() {
                   <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
                     {form.convenioCuotas} cuotas de{" "}
                     <Box component="span" sx={{ fontWeight: 900, color: "text.primary" }}>
-                      {isConvenioHonorarioJus ? `${Number(form.convenioMontoCuota).toLocaleString("es-AR", { maximumFractionDigits: 4 })} JUS` : formatMoneyAr(Number(form.convenioMontoCuota))}
+                      {isConvenioHonorarioJus ? (formatJusQty(form.convenioMontoCuota) ?? "0,00 JUS") : formatMoneyAr(Number(form.convenioMontoCuota))}
                     </Box>
                     {" "}- Total:{" "}
                     <Box component="span" sx={{ fontWeight: 900, color: "primary.main" }}>
                       {isConvenioHonorarioJus
-                        ? `${(Number(form.convenioCuotas) * Number(form.convenioMontoCuota)).toLocaleString("es-AR", { maximumFractionDigits: 4 })} JUS`
+                        ? (formatJusQty(Number(form.convenioCuotas) * Number(form.convenioMontoCuota)) ?? "0,00 JUS")
                         : formatMoneyAr(Number(form.convenioCuotas) * Number(form.convenioMontoCuota))}
                     </Box>
                     {isConvenioHonorarioJus && valorJusActual > 0 && (
