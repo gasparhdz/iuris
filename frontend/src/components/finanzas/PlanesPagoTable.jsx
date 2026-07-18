@@ -41,6 +41,7 @@ import {
   formatMoneyAr,
   invalidateFinanzasQueries,
   isDeudorTercero,
+  planEstadoChip,
   planMontoCuota,
   ellipsisSx,
   linkSx,
@@ -317,13 +318,17 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
               <TableCell sx={compactHeadSx}>Cuota</TableCell>
               <TableCell sx={compactHeadSx}>Periodicidad</TableCell>
               <TableCell sx={compactHeadSx}>Inicio</TableCell>
+              <TableCell sx={compactHeadSx}>Estado</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {planes.map((plan) => {
               const expanded = expandedPlanId === plan.id;
+              const cuotaJusLabel = formatJusQty(plan.montoCuotaJus);
               const cuotaLabel = formatMoneyAr(planMontoCuota(plan));
               const totalLabel = formatMoneyAr(plan.totalHonorarioArs ?? planMontoCuota(plan));
+              const estadoChip = planEstadoChip(plan);
+              const cuotaTooltip = [cuotaJusLabel, `Total: ${totalLabel}`].filter(Boolean).join(" · ");
               return (
                 <Fragment key={plan.id}>
                   <TableRow
@@ -364,16 +369,19 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
                       </Stack>
                     </TableCell>
                     <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>
-                      <Tooltip title={`Total: ${totalLabel}`}>
+                      <Tooltip title={cuotaTooltip || totalLabel}>
                         <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem" }}>{cuotaLabel}</Typography>
                       </Tooltip>
                     </TableCell>
                     <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{plan.periodicidad?.nombre ?? "—"}</TableCell>
                     <TableCell sx={{ ...compactCellSx, whiteSpace: "nowrap" }}>{formatDateShort(plan.fechaInicio)}</TableCell>
+                    <TableCell sx={compactCellSx}>
+                      <Chip size="small" label={estadoChip.label} color={estadoChip.color} sx={{ fontWeight: 800, height: 22, fontSize: "0.7rem" }} />
+                    </TableCell>
                   </TableRow>
                   {expanded && (
                     <TableRow>
-                      <TableCell colSpan={6} sx={{ p: 0, borderBottom: "1px solid", borderColor: "divider" }}>
+                      <TableCell colSpan={7} sx={{ p: 0, borderBottom: "1px solid", borderColor: "divider" }}>
                         <Collapse in={expanded} timeout="auto" unmountOnExit>
                           <PlanCuotasPanel plan={plan} invalidateKeys={invalidateKeys} />
                         </Collapse>
@@ -390,14 +398,18 @@ export default function PlanesPagoTable({ planes, loading, error, empty, invalid
       <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" }, p: 1 }}>
         {planes.map((plan) => {
           const expanded = expandedPlanId === plan.id;
+          const estadoChip = planEstadoChip(plan);
           return (
             <Paper key={plan.id} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: "10px", overflow: "hidden" }}>
               <Box sx={{ px: 1.5, py: 1.25, cursor: "pointer" }} onClick={() => setExpandedPlanId(expanded ? null : plan.id)}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem", display: "block" }} noWrap>
-                      {plan.caso ? casoCaratulaLabel(plan.caso) : (plan.cliente ? clienteLabel(plan.cliente) : "Sin expte / cliente")}
-                    </Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.25, minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 900, fontSize: "0.8125rem", minWidth: 0 }} noWrap>
+                        {plan.caso ? casoCaratulaLabel(plan.caso) : (plan.cliente ? clienteLabel(plan.cliente) : "Sin expte / cliente")}
+                      </Typography>
+                      <Chip size="small" label={estadoChip.label} color={estadoChip.color} sx={{ fontWeight: 800, height: 20, fontSize: "0.65rem", flexShrink: 0 }} />
+                    </Stack>
                     <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 700, display: "block", lineHeight: 1.3 }}>
                       {deudorNombreFromItem(plan, plan.cliente)}
                       {isDeudorTercero(plan) ? " · Tercero" : ""}

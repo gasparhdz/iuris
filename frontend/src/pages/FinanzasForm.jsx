@@ -112,10 +112,14 @@ function politicaJusLabel(parametro) {
 }
 
 function cuotaMonto(cuota) {
-  if (cuota?.montoPesos != null) return Number(cuota.montoPesos);
-  if (cuota?.montoJus != null && cuota?.valorJusRef != null) {
-    return Number(cuota.montoJus) * Number(cuota.valorJusRef);
-  }
+  if (cuota?.montoPesos != null && Number(cuota.montoPesos) > 0) return Number(cuota.montoPesos);
+  const jus = Number(cuota?.montoJus);
+  if (!(jus > 0)) return 0;
+  const valor = Number(cuota?.valorJusHoy ?? cuota?.valorJusRef);
+  if (valor > 0) return jus * valor;
+  const cobrado = Number(cuota?.montoCobrado ?? 0);
+  const saldo = Number(cuota?.saldoPesos ?? cuota?.saldo ?? 0);
+  if (cobrado > 0 || saldo > 0) return cobrado + saldo;
   return 0;
 }
 

@@ -9,6 +9,7 @@ import { TercerosQueries } from "../db/queries/terceros.queries.js";
 import { db } from "../db/index.js";
 import { gastos, honorarios, ingresoAplicaciones, ingresos, planCuotas, planesPago } from "../db/schema.js";
 import { ValorJusService } from "./valorjus.service.js";
+import { ValorJusQueries } from "../db/queries/valorjus.queries.js";
 import {
   buildCuentaCorriente,
   type CCAplicacion,
@@ -74,6 +75,7 @@ export class CuentaCorrienteService {
     return buildCuentaCorriente({
       fechaCorte: datos.fechaCorte,
       valorJusActual: datos.valorJusActual,
+      valoresJus: datos.valoresJus,
       honorarios: honorariosCliente,
       gastos: gastosCliente,
       ingresos: ingresosCliente,
@@ -98,6 +100,7 @@ export class CuentaCorrienteService {
     return buildCuentaCorriente({
       fechaCorte: datos.fechaCorte,
       valorJusActual: datos.valorJusActual,
+      valoresJus: datos.valoresJus,
       honorarios: honorariosTercero,
       gastos: [],
       ingresos: ingresosTercero,
@@ -188,6 +191,7 @@ export class CuentaCorrienteService {
       const totales = buildCuentaCorriente({
         fechaCorte: datos.fechaCorte,
         valorJusActual: datos.valorJusActual,
+        valoresJus: datos.valoresJus,
         honorarios: grupo.honorarios,
         gastos: grupo.gastos,
         ingresos: grupo.ingresos,
@@ -451,12 +455,13 @@ export class CuentaCorrienteService {
 
   private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {
     const fechaCorte = new Date();
-    const [honorariosRows, gastos, ingresosRows, valorJusActual, planes] = await Promise.all([
+    const [honorariosRows, gastos, ingresosRows, valorJusActual, planes, valoresJus] = await Promise.all([
       fetchAllRows((p) => HonorariosQueries.findHonorarios(estudioId, filters, p)),
       fetchAllRows((p) => GastosQueries.findGastos(estudioId, filters, p)),
       fetchAllRows((p) => IngresosQueries.findIngresos(estudioId, filters, p)),
       ValorJusService.getValorJusSnapshot(fechaCorte, estudioId),
       PlanesQueries.findPlanes(estudioId, filters),
+      ValorJusQueries.findHistorialActivo(),
     ]);
 
     const parametroCache = new Map<number, Awaited<ReturnType<typeof HonorariosQueries.findParametroById>>>();
@@ -560,6 +565,7 @@ export class CuentaCorrienteService {
     return {
       fechaCorte,
       valorJusActual: String(valorJusActual ?? 0),
+      valoresJus,
       honorarios: ccHonorarios,
       gastos: gastosMapped,
       ingresos: ingresosRows.map((ingreso): CCIngresoConMeta => ({

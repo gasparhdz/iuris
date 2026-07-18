@@ -71,6 +71,36 @@ export class PlanesService {
       const totalCobradoArs = cuotasNorm.reduce((acc, cuota: any) => acc + Number(cuota.montoCobrado ?? 0), 0);
       const totalSaldoArs = cuotasNorm.reduce((acc, cuota: any) => acc + Number(cuota.saldoPesos ?? 0), 0);
 
+      // Estado a nivel plan, derivado de las cuotas (condonadas no cuentan como pendientes).
+      const cuotasVivas = cuotasNorm.filter((cuota: any) => String(cuota.estadoCodigo ?? "").toUpperCase() !== "CONDONADA");
+      const saldoVivo = cuotasVivas.reduce((acc: number, cuota: any) => acc + Number(cuota.saldoPesos ?? 0), 0);
+      let estadoPlan: "PAGADO" | "VENCIDO" | "PARCIAL" | "PENDIENTE";
+      if (cuotasNorm.length > 0 && saldoVivo <= 0.01) {
+        estadoPlan = "PAGADO";
+      } else if (cuotasVivas.some((cuota: any) => String(cuota.estadoCodigo ?? "").toUpperCase() === "VENCIDA")) {
+        estadoPlan = "VENCIDO";
+      } else if (totalCobradoArs > 0.01) {
+        estadoPlan = "PARCIAL";
+      } else {
+        estadoPlan = "PENDIENTE";
+      }
+
+      // Sincroniza honorarios ya cubiertos al 100% por cuotas (casos históricos o
+      // pagos previos a la propagación automática de estado).
+      if (estadoPlan === "PAGADO" && plan.honorarioId) {
+        await PlanesService.recomputeHonorarioEstado(plan.honorarioId, estudioId);
+      }
+
+      // Monto de cuota en pesos para mostrar: AL_COBRO no tiene valorJusRef (por diseño),
+      // se estima al valor JUS vigente.
+      const montoCuotaJusNum = plan.montoCuotaJus !== null ? Number(plan.montoCuotaJus) : null;
+      const refPlan = plan.valorJusRef !== null ? Number(plan.valorJusRef) : null;
+      const montoCuotaArsEstimado = plan.montoCuotaPesos !== null
+        ? Number(plan.montoCuotaPesos)
+        : (montoCuotaJusNum !== null && (refPlan ?? valorJusActual) !== null
+            ? montoCuotaJusNum * Number(refPlan ?? valorJusActual)
+            : null);
+
       return normalizePlan({
         ...plan,
         cliente: plan.cliente?.id ? plan.cliente : null,
@@ -83,6 +113,8 @@ export class PlanesService {
         totalCobradoArs,
         totalSaldoArs,
         totalHonorarioArs: totalCobradoArs + totalSaldoArs,
+        estadoPlan,
+        montoCuotaArsEstimado,
       });
     }));
   }
@@ -721,35 +753,42 @@ export class PlanesService {
     await PlanesQueries.syncMontoAplicadoCuota(cuotaId, tx);
 
     const estadoActualCodigo = await PlanesQueries.getCodigoEstadoCuota(cuota.estadoId);
-    if (estadoActualCodigo === "CONDONADA") return;
+    if (estadoActualCodigo !== "CONDONADA") {
+      const aplicaciones = await PlanesQueries.findAplicacionesByCuotaActivas(cuotaId, tx);
+      const saldo = await calcularSaldoCuota(cuota, aplicaciones, new Date(), async () => {
+        const snapshot = await ValorJusService.getValorJusSnapshot(new Date(), estudioId);
+        if (snapshot === null) throw new Error("VALOR_JUS_NOT_FOUND");
+        return Number(snapshot);
+      });
+      if (saldo.tieneCapital) {
+        const hoyInicio = startOfDayArgentina(new Date());
+        const vencida = endOfDayArgentina(cuota.vencimiento) < hoyInicio;
+        let nuevoEstadoCodigo: "PENDIENTE" | "PARCIAL" | "VENCIDA" | "PAGADA";
+        if (saldo.capitalNativo.isZeroOrLess()) {
+          nuevoEstadoCodigo = "PAGADA";
+        } else if (aplicaciones.length > 0) {
+          nuevoEstadoCodigo = vencida ? "VENCIDA" : "PARCIAL";
+        } else {
+          nuevoEstadoCodigo = vencida ? "VENCIDA" : "PENDIENTE";
+        }
 
-    const aplicaciones = await PlanesQueries.findAplicacionesByCuotaActivas(cuotaId, tx);
-    const saldo = await calcularSaldoCuota(cuota, aplicaciones, new Date(), async () => {
-      const snapshot = await ValorJusService.getValorJusSnapshot(new Date(), estudioId);
-      if (snapshot === null) throw new Error("VALOR_JUS_NOT_FOUND");
-      return Number(snapshot);
-    });
-    if (!saldo.tieneCapital) {
-      return;
+        const estadoId = await PlanesService.getEstadoCuotaId(nuevoEstadoCodigo);
+        if (estadoId) {
+          await PlanesQueries.updatePlanCuota(cuotaId, estudioId, { estadoId, updatedAt: new Date() }, tx);
+        }
+      }
     }
 
-    const hoyInicio = startOfDayArgentina(new Date());
-    const vencida = endOfDayArgentina(cuota.vencimiento) < hoyInicio;
-    let nuevoEstadoCodigo: "PENDIENTE" | "PARCIAL" | "VENCIDA" | "PAGADA";
-    if (saldo.capitalNativo.isZeroOrLess()) {
-      nuevoEstadoCodigo = "PAGADA";
-    } else if (aplicaciones.length > 0) {
-      nuevoEstadoCodigo = vencida ? "VENCIDA" : "PARCIAL";
-    } else {
-      nuevoEstadoCodigo = vencida ? "VENCIDA" : "PENDIENTE";
+    // Propagar al honorario del plan: si las cuotas cubren todo el capital, la
+    // cabecera pasa a COBRADO (y a PARCIAL/PENDIENTE en los demás casos).
+    const plan = await PlanesQueries.findPlanById(cuota.planId, estudioId, tx ?? db);
+    if (plan) {
+      await PlanesService.recomputeHonorarioEstado(plan.honorarioId, estudioId, tx);
     }
-
-    const estadoId = await PlanesService.getEstadoCuotaId(nuevoEstadoCodigo);
-    if (!estadoId) return;
-    await PlanesQueries.updatePlanCuota(cuotaId, estudioId, { estadoId, updatedAt: new Date() }, tx);
   }
 
   static async recomputeHonorarioEstado(honorarioId: number, estudioId: number, tx?: DbTransaction) {
+    const executor = tx ?? db;
     const honorario = await HonorariosQueries.findHonorarioById(honorarioId, estudioId);
     if (!honorario) throw new Error("HONORARIO_NOT_FOUND");
 
@@ -758,7 +797,33 @@ export class PlanesService {
     if (estadoCodigo === "ANULADO" || estadoCodigo === "INCOBRABLE") return;
 
     const politica = honorario.politicaJusId ? await PlanesQueries.findParametroById(honorario.politicaJusId) : null;
-    const aplicaciones = await PlanesQueries.findAplicacionesByHonorarioActivas(honorarioId, tx ?? db);
+    const aplicaciones = await PlanesQueries.findAplicacionesByHonorarioActivas(honorarioId, executor);
+
+    // Con plan activo el honorario se cobra por sus cuotas (las aplicaciones
+    // guardan cuotaId, no honorarioId). Criterio primario: todas las cuotas
+    // vivas PAGADAS ⇒ COBRADO, sin depender del redondeo JUS/pesos.
+    const planActivo = await PlanesQueries.findPlanActivoByHonorarioId(honorarioId, estudioId, executor);
+    if (planActivo) {
+      const cuotasPlan = await PlanesQueries.findCuotasByPlan(planActivo.id, estudioId, executor);
+      for (const cuotaPlan of cuotasPlan) {
+        const appsCuota = await PlanesQueries.findAplicacionesByCuotaActivas(cuotaPlan.id, executor);
+        aplicaciones.push(...appsCuota);
+      }
+
+      const cuotasVivas = cuotasPlan.filter(
+        (c) => String(c.estadoCodigo ?? "").toUpperCase() !== "CONDONADA",
+      );
+      const planCubierto = cuotasVivas.length > 0
+        && cuotasVivas.every((c) => String(c.estadoCodigo ?? "").toUpperCase() === "PAGADA");
+      if (planCubierto) {
+        const estadoCobrado = await HonorariosQueries.findParametroByCodigo("ESTADO_HONORARIO", "COBRADO");
+        if (estadoCobrado) {
+          await PlanesQueries.updateHonorarioEstado(honorarioId, estudioId, estadoCobrado.id, executor);
+        }
+        return;
+      }
+    }
+
     const saldo = await calcularSaldoCuota(
       {
         montoJus: honorario.jus,
@@ -786,7 +851,7 @@ export class PlanesService {
 
     const estado = await HonorariosQueries.findParametroByCodigo("ESTADO_HONORARIO", nuevoEstadoCodigo);
     if (!estado) return;
-    await PlanesQueries.updateHonorarioEstado(honorarioId, estudioId, estado.id, tx ?? db);
+    await PlanesQueries.updateHonorarioEstado(honorarioId, estudioId, estado.id, executor);
   }
 
   private static async ensureRelatedEntities(estudioId: number, clienteId?: number, casoId?: number) {

@@ -337,7 +337,12 @@ export function formatCurrency(value, currency) {
 }
 
 export function cuotaMonto(cuota) {
-  return cuota?.montoPesos ?? (cuota?.montoJus && cuota?.valorJusRef ? Number(cuota.montoJus) * Number(cuota.valorJusRef) : null);
+  if (cuota?.montoPesos != null && Number(cuota.montoPesos) > 0) return Number(cuota.montoPesos);
+  const jus = Number(cuota?.montoJus);
+  if (!(jus > 0)) return null;
+  const valor = Number(cuota?.valorJusHoy ?? cuota?.valorJusRef);
+  if (valor > 0) return jus * valor;
+  return null;
 }
 
 export function cuotaMontoDisplay(cuota) {
@@ -345,11 +350,25 @@ export function cuotaMontoDisplay(cuota) {
   const saldo = Number(cuota?.saldoPesos ?? cuota?.saldo ?? 0);
   const cobrado = Number(cuota?.montoCobrado ?? 0);
   if ((estado === "PAGADA" || saldo <= 0.01) && cobrado > 0) return cobrado;
-  return cuotaMonto(cuota);
+  const monto = cuotaMonto(cuota);
+  if (monto != null && monto > 0) return monto;
+  // Fallback: capital original reconstruido desde cobrado + saldo.
+  if (cobrado > 0 || saldo > 0) return cobrado + saldo;
+  return monto;
 }
 
 export function planMontoCuota(plan) {
-  return plan?.montoCuotaPesos ?? (plan?.montoCuotaJus && plan?.valorJusRef ? Number(plan.montoCuotaJus) * Number(plan.valorJusRef) : null);
+  return plan?.montoCuotaPesos
+    ?? plan?.montoCuotaArsEstimado
+    ?? (plan?.montoCuotaJus && plan?.valorJusRef ? Number(plan.montoCuotaJus) * Number(plan.valorJusRef) : null);
+}
+
+export function planEstadoChip(plan) {
+  const estado = String(plan?.estadoPlan ?? "").toUpperCase();
+  if (estado === "PAGADO") return { label: "Pagado", color: "success" };
+  if (estado === "VENCIDO") return { label: "Vencido", color: "error" };
+  if (estado === "PARCIAL") return { label: "Parcial", color: "warning" };
+  return { label: "Pendiente", color: "default" };
 }
 
 export function cuotaEstadoChip(cuota) {

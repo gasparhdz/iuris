@@ -347,10 +347,7 @@ export class HonorariosService {
       if (pendienteId) await HonorariosQueries.updateHonorario(id, estudioId, { estadoId: pendienteId });
     }
 
-    // Un honorario con plan activo se cobra por sus cuotas; su estado no depende de cobros directos.
-    const planActivo = await PlanesQueries.findPlanActivoByHonorarioId(id, estudioId);
-    if (planActivo) return;
-
+    // Con o sin plan: recomputeHonorarioEstado contempla aplicaciones directas y de cuotas.
     await PlanesService.recomputeHonorarioEstado(id, estudioId);
   }
 

@@ -87,6 +87,15 @@ export class ValorJusQueries {
       .returning();
   }
 
+  /** Historial completo de valores activos, ascendente por fecha (para ajustes de CC). */
+  static async findHistorialActivo(estudioId = VALORES_JUS_ESTUDIO_GLOBAL_ID) {
+    return await db
+      .select({ fecha: valoresJus.fecha, valor: valoresJus.valor })
+      .from(valoresJus)
+      .where(and(eq(valoresJus.estudioId, estudioId), eq(valoresJus.activo, true), isNull(valoresJus.deletedAt)))
+      .orderBy(valoresJus.fecha);
+  }
+
   static async findMaxFechaActiva(estudioId = VALORES_JUS_ESTUDIO_GLOBAL_ID) {
     const [row] = await db
       .select({

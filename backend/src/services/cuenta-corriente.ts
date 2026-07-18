@@ -74,12 +74,23 @@ export type CCIngreso = {
   monto: string;
 };
 
+export type CCValorJusHistorial = {
+  fecha: Date; // fecha de vigencia del valor
+  valor: string;
+};
+
 export type CCInput = {
   fechaCorte: Date;
   valorJusActual: string | number | Decimal;
   honorarios: CCHonorario[];
   gastos: CCGasto[];
   ingresos: CCIngreso[];
+  /**
+   * Historial de valores JUS (cualquier orden). Con historial, los ajustes AL_COBRO
+   * se emiten en cada fecha de vigencia sobre los JUS adeudados a esa fecha.
+   * Sin historial, queda solo el ajuste residual a la fecha de corte.
+   */
+  valoresJus?: CCValorJusHistorial[];
 };
 
 export type CCRowTipo = "HONORARIO" | "GASTO" | "INGRESO" | "INTERES" | "AJUSTE";
@@ -121,17 +132,24 @@ type DeudaCalculada = {
   saldoJus: Decimal; // scale 4 (0 si no es JUS)
   interesDevengadoPesos: Decimal; // scale 2
   pagosCapitalPesos: Decimal; // scale 2 (nominal pagado)
+  // AL_COBRO: JUS cancelados por cada pago con su monto nominal y cotización (para
+  // los ajustes por vigencia y para detectar pagos a cotización fuera del historial).
+  pagosJus: { fecha: Date; jus: Decimal; montoCapital: Decimal; cotizacion: Decimal }[];
 };
 
 type RowDraft = Omit<CCRow, "saldo" | "fecha"> & { fecha: Date; orden: number };
 
 const ZERO2 = Decimal.zero(2);
 const ZERO4 = Decimal.zero(4);
+const ZERO6 = Decimal.zero(6);
 const CIEN = tasa("100");
 
 export function buildCuentaCorriente(input: CCInput): CCResult {
   const fechaCorte = input.fechaCorte;
   const valorJusActual = Decimal.of(input.valorJusActual, 4);
+  const historialJus = (input.valoresJus ?? [])
+    .map((v) => ({ fecha: v.fecha, valor: jus(v.valor) }))
+    .sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
   const drafts: RowDraft[] = [];
 
   let totalCapitalDebe = ZERO2;
@@ -204,7 +222,10 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
         }];
 
     let saldoCapitalHonorario = ZERO2;
+    let saldoJusHonorario = ZERO4;
     let pagosCapitalHonorario = ZERO2;
+    let ajustesEmitidos = ZERO2;
+    const pagosJusHonorario: DeudaCalculada["pagosJus"] = [];
 
     for (const deuda of deudas) {
       const calc = calcularDeuda(deuda, {
@@ -218,7 +239,9 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
 
       saldoCapitalHonorario = saldoCapitalHonorario.add(calc.saldoCapitalPesos);
       pagosCapitalHonorario = pagosCapitalHonorario.add(calc.pagosCapitalPesos);
-      totalSaldoJus = totalSaldoJus.add(calc.saldoJus);
+      saldoJusHonorario = saldoJusHonorario.add(calc.saldoJus);
+
+      pagosJusHonorario.push(...calc.pagosJus);
 
       if (calc.interesDevengadoPesos.isPositive()) {
         totalInteres = totalInteres.add(calc.interesDevengadoPesos);
@@ -238,12 +261,115 @@ export function buildCuentaCorriente(input: CCInput): CCResult {
       }
     }
 
+    // Clamp a nivel honorario: una cuota sobre-pagada por centavos compensa a las
+    // demás; el saldo del honorario nunca queda negativo.
+    saldoCapitalHonorario = saldoCapitalHonorario.max(ZERO2);
+    saldoJusHonorario = saldoJusHonorario.max(ZERO4);
+    totalSaldoJus = totalSaldoJus.add(saldoJusHonorario);
+
+    // AL_COBRO con historial: un ajuste por cada cambio de valor JUS posterior a la
+    // regulación, sobre los JUS adeudados a esa fecha de vigencia. Va con la fecha
+    // del cambio (antes de los pagos de ese día) para que el saldo corrido refleje
+    // la deuda real en cada momento y nunca invente un "a favor".
+    if (esJus && esAlCobro && valorJusRef !== null && historialJus.length > 0) {
+      const totalJusHonorario = jus(honorario.jus!).toScale(6);
+      let valorAnterior = valorJusRef;
+      for (const cambio of historialJus) {
+        if (cambio.fecha <= honorario.fechaRegulacion) continue;
+        if (cambio.fecha > fechaCorte) break;
+        if (cambio.valor.sub(valorAnterior).isZero()) continue;
+        // Base del ajuste: JUS aún no cancelados a una cotización anterior al valor
+        // nuevo. Se compara por COTIZACIÓN, no por fecha: los valores JUS se publican
+        // meses después de su vigencia retroactiva, y un pago hecho al valor conocido
+        // en su momento cancela esos JUS definitivamente — la retroactividad no los toca.
+        const jusAdeudados = pagosJusHonorario
+          .filter((p) => cambio.valor.sub(p.cotizacion).isPositive())
+          .reduce((acc, p) => acc.sub(p.jus), totalJusHonorario)
+          .max(ZERO6);
+        const monto = jusAdeudados.mulByRate(cambio.valor.sub(valorAnterior), 2);
+        valorAnterior = cambio.valor;
+        if (monto.abs().lt(pesos("0.01"))) continue;
+        ajustesEmitidos = ajustesEmitidos.add(monto);
+        drafts.push({
+          tipo: "AJUSTE",
+          refId: honorario.id,
+          fecha: cambio.fecha,
+          descripcion: `Ajuste por actualización JUS — ${honorario.descripcion}`,
+          moneda: "ARS",
+          cantidadJus: jusAdeudados.toNumber(),
+          valorJusAplicado: cambio.valor.toNumber(),
+          esEstimado: false,
+          debe: monto.isPositive() ? monto.toNumber() : 0,
+          haber: monto.isPositive() ? 0 : monto.abs().toNumber(),
+          orden: 0.5,
+        });
+      }
+
+      // Pagos a una cotización que no figura en la cadena de valores del honorario
+      // (típico: pago a cuenta anterior a la regulación que canceló JUS a un valor
+      // más viejo). La diferencia contra el valor de la cadena inmediatamente
+      // inferior (o el de origen) cristaliza en la fecha del pago — o en la de la
+      // regulación si el pago fue anterior — nunca a la fecha de corte.
+      const cadenaValores = [valorJusRef, ...historialJus
+        .filter((c) => c.fecha > honorario.fechaRegulacion && c.fecha <= fechaCorte)
+        .map((c) => c.valor)];
+      const valorComparable = (cotizacion: Decimal): Decimal | null => {
+        let comparable: Decimal | null = null;
+        for (const valor of cadenaValores) {
+          if (valor.sub(cotizacion).isZero()) return null; // está en la cadena: sin mismatch
+          if (cotizacion.sub(valor).isPositive() && (comparable === null || valor.sub(comparable).isPositive())) {
+            comparable = valor;
+          }
+        }
+        // Cotización menor a todas: los JUS entraron al libro al valor de origen.
+        return comparable ?? valorJusRef;
+      };
+      const mismatches = new Map<number, { fecha: Date; monto: Decimal; vigente: Decimal }>();
+      for (const pago of pagosJusHonorario) {
+        const comparable = valorComparable(pago.cotizacion);
+        if (comparable === null) continue;
+        const fechaEfectiva = pago.fecha < honorario.fechaRegulacion ? honorario.fechaRegulacion : pago.fecha;
+        const monto = pago.montoCapital.sub(pago.jus.mulByRate(comparable, 2));
+        if (monto.abs().lt(pesos("0.01"))) continue;
+        const vigente = comparable;
+        const previo = mismatches.get(fechaEfectiva.getTime());
+        if (previo) {
+          previo.monto = previo.monto.add(monto);
+        } else {
+          mismatches.set(fechaEfectiva.getTime(), { fecha: fechaEfectiva, monto, vigente });
+        }
+      }
+      for (const mismatch of mismatches.values()) {
+        if (mismatch.monto.abs().lt(pesos("0.01"))) continue;
+        ajustesEmitidos = ajustesEmitidos.add(mismatch.monto);
+        drafts.push({
+          tipo: "AJUSTE",
+          refId: honorario.id,
+          fecha: mismatch.fecha,
+          descripcion: `Ajuste por actualización JUS — ${honorario.descripcion}`,
+          moneda: "ARS",
+          cantidadJus: null,
+          valorJusAplicado: mismatch.vigente.toNumber(),
+          esEstimado: false,
+          debe: mismatch.monto.isPositive() ? mismatch.monto.toNumber() : 0,
+          haber: mismatch.monto.isPositive() ? 0 : mismatch.monto.abs().toNumber(),
+          orden: 0.5,
+        });
+      }
+    }
+
     totalSaldoCapitalHonorarios = totalSaldoCapitalHonorarios.add(saldoCapitalHonorario);
 
-    // Revaluación AL_COBRO: cierra la diferencia entre el libro nominal
-    // (capital original - pagos) y el saldo real valuado al JUS vigente.
-    const ajuste = saldoCapitalHonorario.sub(capitalOriginal.sub(pagosCapitalHonorario));
-    if (!ajuste.abs().lt(pesos("0.01"))) {
+    // Revaluación AL_COBRO residual: cierra la diferencia entre el libro nominal
+    // (capital original - pagos + ajustes ya emitidos por vigencia) y el saldo real
+    // valuado al JUS vigente. Con historial completo y pagos a cotización vigente
+    // queda en cero; absorbe redondeos o datos inconsistentes.
+    const ajuste = saldoCapitalHonorario.sub(
+      capitalOriginal.sub(pagosCapitalHonorario).add(ajustesEmitidos),
+    );
+    // Umbral de centavos: los ajustes por vigencia redondean fila a fila, y ese
+    // arrastre no amerita una fila residual "al día de hoy".
+    if (!ajuste.abs().lt(pesos("0.05"))) {
       drafts.push({
         tipo: "AJUSTE",
         refId: honorario.id,
@@ -401,6 +527,10 @@ export function calcularSaldosHonorario(
     saldoJus = saldoJus.add(calc.saldoJus);
   }
 
+  // Clamp a nivel honorario (las cuotas sobre-pagadas compensan a las demás).
+  saldoCapitalPesos = saldoCapitalPesos.max(ZERO2);
+  saldoJus = saldoJus.max(ZERO4);
+
   return {
     saldoCapitalPesos: saldoCapitalPesos.toNumber(),
     interesPesos: interesPesos.toNumber(),
@@ -441,26 +571,40 @@ function calcularDeuda(
 
   let saldoCapitalPesos: Decimal;
   let saldoJus = ZERO4;
+  const pagosJus: DeudaCalculada["pagosJus"] = [];
 
   if (esJus && esAlCobro) {
     // Cada pago cancela JUS a su cotización; el residuo en pesos se calcula
     // multiplicando primero (escala 6) para que pesos→JUS→pesos sea exacto
     // cuando la cotización no cambió.
+    // La cotización nunca puede ser menor al valor de origen del honorario: un pago
+    // a cuenta anterior a la regulación resta sus pesos al valor de la regulación
+    // (no puede cancelar JUS a un valor previo a que exista la deuda).
+    const cotizacionEfectiva = (app: CCAplicacion): Decimal => {
+      const cotizacion = app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : (valorJusRef ?? jus(1));
+      return valorJusRef !== null && valorJusRef.sub(cotizacion).isPositive() ? valorJusRef : cotizacion;
+    };
     const capitalHoy = jus(deuda.montoJus!).mulByRate(ctx.valorJusActual, 2);
     const pagosRevaluados = deuda.aplicaciones.reduce((acc, app) => {
-      const cotizacionPago = app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : (valorJusRef ?? jus(1));
       const revaluado = Decimal.of(app.montoCapital, 6)
         .mulByRate(ctx.valorJusActual, 6)
-        .divByRate(cotizacionPago, 2);
+        .divByRate(cotizacionEfectiva(app), 2);
       return acc.add(revaluado);
     }, ZERO2);
-    saldoCapitalPesos = capitalHoy.sub(pagosRevaluados).max(ZERO2);
+    // Sin clamp por cuota: una cuota sobre-pagada por centavos de imputación se
+    // compensa con las demás; el clamp a cero se aplica a nivel honorario.
+    saldoCapitalPesos = capitalHoy.sub(pagosRevaluados);
 
-    const jusPagados = deuda.aplicaciones.reduce((acc, app) => {
-      const cotizacionPago = app.valorJusAlCobro !== null ? jus(app.valorJusAlCobro) : (valorJusRef ?? jus(1));
-      return acc.add(pesos(app.montoCapital).divByRate(cotizacionPago, 4));
-    }, ZERO4);
-    saldoJus = jus(deuda.montoJus!).sub(jusPagados).max(ZERO4);
+    let jusPagados = ZERO4;
+    for (const app of deuda.aplicaciones) {
+      const cotizacionPago = cotizacionEfectiva(app);
+      jusPagados = jusPagados.add(pesos(app.montoCapital).divByRate(cotizacionPago, 4));
+      // Escala 6 para los ajustes por vigencia: a 4 decimales el redondeo multiplicado
+      // por las diferencias de cotización deriva algunos pesos y ensucia el residual.
+      const cancelados = Decimal.of(app.montoCapital, 6).divByRate(cotizacionPago, 6);
+      pagosJus.push({ fecha: app.fecha, jus: cancelados, montoCapital: pesos(app.montoCapital), cotizacion: cotizacionPago });
+    }
+    saldoJus = jus(deuda.montoJus!).sub(jusPagados);
   } else if (esJus) {
     // FECHA_REGULACION: capital congelado en pesos a valorJusRef.
     const capitalCongelado = jus(deuda.montoJus!).mulByRate(valorJusRef ?? ctx.valorJusActual, 2);
@@ -511,5 +655,5 @@ function calcularDeuda(
   // acá solo se devenga el total para que la identidad del saldo cierre.
   void interesCobrado;
 
-  return { saldoCapitalPesos, saldoJus, interesDevengadoPesos, pagosCapitalPesos };
+  return { saldoCapitalPesos, saldoJus, interesDevengadoPesos, pagosCapitalPesos, pagosJus };
 }
