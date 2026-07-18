@@ -365,6 +365,7 @@ export function planMontoCuota(plan) {
 
 export function planEstadoChip(plan) {
   const estado = String(plan?.estadoPlan ?? "").toUpperCase();
+  if (estado === "CONDONADO") return { label: "Condonado", color: "info" };
   if (estado === "PAGADO") return { label: "Pagado", color: "success" };
   if (estado === "VENCIDO") return { label: "Vencido", color: "error" };
   if (estado === "PARCIAL") return { label: "Parcial", color: "warning" };

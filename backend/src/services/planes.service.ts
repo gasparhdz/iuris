@@ -74,8 +74,10 @@ export class PlanesService {
       // Estado a nivel plan, derivado de las cuotas (condonadas no cuentan como pendientes).
       const cuotasVivas = cuotasNorm.filter((cuota: any) => String(cuota.estadoCodigo ?? "").toUpperCase() !== "CONDONADA");
       const saldoVivo = cuotasVivas.reduce((acc: number, cuota: any) => acc + Number(cuota.saldoPesos ?? 0), 0);
-      let estadoPlan: "PAGADO" | "VENCIDO" | "PARCIAL" | "PENDIENTE";
-      if (cuotasNorm.length > 0 && saldoVivo <= 0.01) {
+      let estadoPlan: "PAGADO" | "VENCIDO" | "PARCIAL" | "PENDIENTE" | "CONDONADO";
+      if (cuotasNorm.length > 0 && cuotasVivas.length === 0) {
+        estadoPlan = "CONDONADO";
+      } else if (cuotasNorm.length > 0 && saldoVivo <= 0.01) {
         estadoPlan = "PAGADO";
       } else if (cuotasVivas.some((cuota: any) => String(cuota.estadoCodigo ?? "").toUpperCase() === "VENCIDA")) {
         estadoPlan = "VENCIDO";
@@ -86,9 +88,14 @@ export class PlanesService {
       }
 
       // Sincroniza honorarios ya cubiertos al 100% por cuotas (casos históricos o
-      // pagos previos a la propagación automática de estado).
+      // pagos previos a la propagación automática de estado). Best-effort: un dato
+      // inconsistente (p. ej. honorario borrado) no debe romper el listado.
       if (estadoPlan === "PAGADO" && plan.honorarioId) {
-        await PlanesService.recomputeHonorarioEstado(plan.honorarioId, estudioId);
+        try {
+          await PlanesService.recomputeHonorarioEstado(plan.honorarioId, estudioId);
+        } catch (error) {
+          console.warn(`No se pudo sincronizar el estado del honorario ${plan.honorarioId} (plan ${plan.id}):`, error);
+        }
       }
 
       // Monto de cuota en pesos para mostrar: AL_COBRO no tiene valorJusRef (por diseño),

@@ -81,7 +81,7 @@ export const planPagoItemSchema = z.object({
   totalCobradoArs: z.number().optional(),
   totalSaldoArs: z.number().optional(),
   totalHonorarioArs: z.number().optional(),
-  estadoPlan: z.enum(["PAGADO", "VENCIDO", "PARCIAL", "PENDIENTE"]).optional(),
+  estadoPlan: z.enum(["PAGADO", "VENCIDO", "PARCIAL", "PENDIENTE", "CONDONADO"]).optional(),
   montoCuotaArsEstimado: z.number().nullable().optional(),
   activo: z.boolean(),
   createdBy: z.number().nullable(),
