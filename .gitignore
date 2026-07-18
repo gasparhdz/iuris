@@ -32,6 +32,8 @@ Thumbs.db
 # Scripts locales de desarrollo (especificos de cada maquina)
 *.bat
 *.ps1
+# El script de deploy si se versiona (sirve desde cualquier maquina)
+!scripts/deploy.ps1
 
 # Backups de bases de datos (datos sensibles, nunca versionar)
 _backups/
