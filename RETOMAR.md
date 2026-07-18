@@ -1,7 +1,7 @@
 # RETOMAR — estado del proyecto iuris
 
 > Documento para retomar el trabajo desde otra computadora o después de una pausa.
-> Última actualización: sesión del 11/07/2026.
+> Última actualización: sesión del 18/07/2026.
 
 ---
 
@@ -68,9 +68,20 @@ Cerrado y verificado:
 
 ---
 
-## 4. Qué falta (pendientes reales)
+## 4. Recarga de finanzas — estado al 18/07/2026
 
-1. **Vista de Cobranzas** (en curso / prompt pasado a Cursor): la notificación de cobranza debe llevar a un listado específico de cuotas vencidas/por vencer, no al tab genérico de planes. El backend ya tiene el endpoint `GET /planes/cuotas/proyeccion`.
+- Se truncaron las tablas de finanzas de la base `iuris` local y Gaspar está **recargando a mano** honorarios/gastos/ingresos desde lexmanager (decisión: carga manual, no re-volcado automático).
+- Convenciones vigentes: montos JUS con 2 decimales ("X,XX JUS", helper `formatJusQty`); saldo CC positivo = cliente debe; ingresos JUS se guardan en pesos + cotización (`valor_jus_al_cobro`); política JUS **AL_COBRO** en todos los honorarios JUS (el saldo en pesos se revalúa al valor JUS vigente — por eso "monto − saldo ≠ cobrado" en la vista Honorarios: el monto se muestra al JUS histórico y el saldo al actual).
+- **Análisis caso por caso en curso.** Verificado ZALAZAR, DEBORA (expte 21-27883724-3): honorario 9.28 JUS, 2 ingresos (dic/2025 y abr/2026), saldo 8.0159 JUS = $1.092.709,88 — cruza al centavo en Honorarios, Planes y CC. **Continuar con los demás clientes.**
+- Las bases de referencia `iuris_check`, `iuris_orig_check` y `lexmanager_check` fueron **eliminadas el 18/07** — quedan dumps en `_backups/*-20260718.dump` (carpeta NO versionada; restaurar con `pg_restore` si hace falta comparar contra lexmanager).
+- Para mudar de PC: dump fresco de `iuris` + clone del repo + los `.env` (backend y frontend). Los adjuntos viven en Drive, no en disco.
+- Después del análisis: cutover (backup fresco lexmanager → delta → verificación con `backend/scripts/verify-lexmanager-migration.cjs`) y deploy.
+
+---
+
+## 5. Qué falta (pendientes reales)
+
+1. **Terminar el análisis financiero caso por caso** (ver sección 4) y luego el cutover.
 2. **Prueba funcional end-to-end** (la hace Gaspar): ejercer el sistema completo con datos reales —circuito financiero deudor-céntrico, ingresos con obligado, SISFE, reportes, y el iPhone con push/emails (probar el deep-link deslogueado → login → destino).
 3. **Deploy a `iurispro.com.ar`** — la última etapa, todavía no empezada. Incluye:
    - Decisión de hosting (VPS vs PaaS) y dónde va Postgres.
@@ -88,7 +99,7 @@ Cerrado y verificado:
 
 ---
 
-## 5. Notas de contexto importantes
+## 6. Notas de contexto importantes
 
 - **No hay producción todavía.** La base de dev es recreable; las migraciones y ops destructivas se pueden correr sin miedo a perder datos reales.
 - **Dominio de prod:** `iurispro.com.ar` (registrado). Al desplegar toca CORS, APP_URL, VAPID.
@@ -97,6 +108,6 @@ Cerrado y verificado:
 
 ---
 
-## 6. Repo
+## 7. Repo
 
 `https://github.com/gasparhdz/iuris` — rama `main`. Todo el trabajo está commiteado y pusheado.
