@@ -21,6 +21,7 @@ import {
 import {
   atribuirMontosPorDeudor,
   deudorKey,
+  filtrarIngresosAtribuidosParaDeudor,
   honorarioDeudorEsCliente,
   honorarioDeudorEsTercero,
   resolveHonorarioDeudor,
@@ -61,7 +62,10 @@ export class CuentaCorrienteService {
     const cliente = await ClientesQueries.findById(clienteId, estudioId);
     if (!cliente) throw new Error("CLIENTE_NOT_FOUND");
 
-    const datos = await this.loadDatos(estudioId, {});
+    const datos = await this.loadDatos(estudioId, {
+      deudor: { tipo: "cliente", id: clienteId },
+      clienteId,
+    });
     const honorariosCliente = datos.honorarios.filter((h) => honorarioDeudorEsCliente(h, clienteId));
     const ingresosCliente = await this.filterIngresosParaDeudor(
       estudioId,
@@ -87,7 +91,9 @@ export class CuentaCorrienteService {
     const tercero = await TercerosQueries.findById(terceroId, estudioId);
     if (!tercero) throw new Error("TERCERO_NOT_FOUND");
 
-    const datos = await this.loadDatos(estudioId, {});
+    const datos = await this.loadDatos(estudioId, {
+      deudor: { tipo: "tercero", id: terceroId },
+    });
     const honorariosTercero = datos.honorarios.filter((h) => honorarioDeudorEsTercero(h, terceroId));
     const ingresosTercero = await this.filterIngresosParaDeudor(
       estudioId,
@@ -425,44 +431,48 @@ export class CuentaCorrienteService {
     fallbackClienteId: number | null,
   ): Promise<CCIngresoConMeta[]> {
     const map = await this.mapIngresosADeudores(estudioId, ingresosList, honorariosList);
-
-    // Deudor "propio" del ingreso (quién pagó): obligado explícito, o el cliente como legado.
-    const deudorPropio = (ingreso: CCIngresoConMeta): DeudorResuelto | null => {
-      if (ingreso.obligadoTerceroId != null) return { tipo: "tercero", id: ingreso.obligadoTerceroId };
-      const clienteId = ingreso.obligadoClienteId ?? ingreso.clienteId ?? null;
-      return clienteId != null ? { tipo: "cliente", id: clienteId } : null;
-    };
-    const esDeudor = (d: DeudorResuelto | null) => d !== null && d.tipo === deudor.tipo && d.id === deudor.id;
-
-    const result: CCIngresoConMeta[] = [];
-    for (const ingreso of ingresosList) {
-      const atribuciones = map.get(ingreso.id) ?? [];
-      const aplicadoTotal = atribuciones.reduce((acc, a) => acc + a.monto, 0);
-      const match = atribuciones.find((a) => esDeudor(a.deudor));
-      // El sobrante no imputado (saldo a favor) es del deudor propio del ingreso.
-      const sobrante = Math.max(Number(ingreso.monto) - aplicadoTotal, 0);
-      let monto = match?.monto ?? 0;
-      if (sobrante > 0.01 && esDeudor(deudorPropio(ingreso))) monto += sobrante;
-      // Legado: ingresos sin aplicaciones y sin obligado, atribuidos por clienteId.
-      if (monto <= 0.01 && atribuciones.length === 0 && deudorPropio(ingreso) === null
-        && deudor.tipo === "cliente" && fallbackClienteId != null && ingreso.clienteId === fallbackClienteId) {
-        monto = Number(ingreso.monto);
-      }
-      if (monto > 0.01) result.push({ ...ingreso, monto: monto.toFixed(2) });
-    }
-    return result;
+    return filtrarIngresosAtribuidosParaDeudor(ingresosList, map, deudor, fallbackClienteId);
   }
 
-  private static async loadDatos(estudioId: number, filters: { clienteId?: number; casoId?: number }) {
+  private static async loadDatos(
+    estudioId: number,
+    filters: {
+      clienteId?: number;
+      casoId?: number;
+      deudor?: { tipo: "cliente" | "tercero"; id: number };
+    },
+  ) {
     const fechaCorte = new Date();
-    const [honorariosRows, gastos, ingresosRows, valorJusActual, planes, valoresJus] = await Promise.all([
-      fetchAllRows((p) => HonorariosQueries.findHonorarios(estudioId, filters, p)),
-      fetchAllRows((p) => GastosQueries.findGastos(estudioId, filters, p)),
-      fetchAllRows((p) => IngresosQueries.findIngresos(estudioId, filters, p)),
+    const honorarioFilters = filters.deudor
+      ? { deudor: filters.deudor, casoId: filters.casoId }
+      : { clienteId: filters.clienteId, casoId: filters.casoId };
+    const gastoFilters = { clienteId: filters.clienteId, casoId: filters.casoId };
+
+    const ingresosPromise = filters.deudor
+      ? fetchAllRows((p) => IngresosQueries.findIngresosCandidatosParaDeudor(estudioId, filters.deudor!, p))
+      : fetchAllRows((p) => IngresosQueries.findIngresos(estudioId, {
+        clienteId: filters.clienteId,
+        casoId: filters.casoId,
+      }, p));
+
+    const gastosPromise = filters.deudor?.tipo === "tercero"
+      ? Promise.resolve([] as Awaited<ReturnType<typeof GastosQueries.findGastos>>["data"])
+      : fetchAllRows((p) => GastosQueries.findGastos(estudioId, gastoFilters, p));
+
+    const [honorariosRows, gastos, ingresosRows, valorJusActual, valoresJus] = await Promise.all([
+      fetchAllRows((p) => HonorariosQueries.findHonorarios(estudioId, honorarioFilters, p)),
+      gastosPromise,
+      ingresosPromise,
       ValorJusService.getValorJusSnapshot(fechaCorte, estudioId),
-      PlanesQueries.findPlanes(estudioId, filters),
       ValorJusQueries.findHistorialActivo(),
     ]);
+
+    const planes = await PlanesQueries.findPlanes(
+      estudioId,
+      filters.deudor
+        ? { honorarioIds: honorariosRows.map((h) => h.id) }
+        : { clienteId: filters.clienteId, casoId: filters.casoId },
+    );
 
     const parametroCache = new Map<number, Awaited<ReturnType<typeof HonorariosQueries.findParametroById>>>();
     const getParametroCodigo = async (id: number | null | undefined): Promise<string | null> => {

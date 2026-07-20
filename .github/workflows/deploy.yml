@@ -1,10 +1,8 @@
 name: Deploy production
 
+# Deploy MANUAL: pushear a main NO despliega. Para desplegar:
+# GitHub → Actions → "Deploy production" → Run workflow.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
   workflow_dispatch:
 
 concurrency:

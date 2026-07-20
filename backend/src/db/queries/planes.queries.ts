@@ -10,11 +10,19 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type DbExecutor = typeof db | DbTransaction;
 
 export class PlanesQueries {
-  static async findPlanes(estudioId: number, filters: { clienteId?: number; casoId?: number } = {}) {
+  static async findPlanes(
+    estudioId: number,
+    filters: { clienteId?: number; casoId?: number; honorarioIds?: number[] } = {},
+  ) {
+    if (filters.honorarioIds !== undefined && filters.honorarioIds.length === 0) {
+      return [];
+    }
+
     const conditions = [
       eq(planesPago.estudioId, estudioId),
       isNull(planesPago.deletedAt),
     ];
+    if (filters.honorarioIds) conditions.push(inArray(planesPago.honorarioId, filters.honorarioIds));
     if (filters.clienteId) conditions.push(eq(planesPago.clienteId, filters.clienteId));
     if (filters.casoId) conditions.push(eq(planesPago.casoId, filters.casoId));
 

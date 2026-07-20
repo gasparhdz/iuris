@@ -112,3 +112,106 @@ export function atribuirMontosPorDeudor(
   }
   return [...byKey.values()];
 }
+
+type IngresoParaFiltroDeudor = {
+  id: number;
+  clienteId: number | null;
+  obligadoClienteId?: number | null;
+  obligadoTerceroId?: number | null;
+  monto: string;
+};
+
+/**
+ * Parte pura de filterIngresosParaDeudor: dado el mapa de atribuciones por ingreso,
+ * recorta montos al deudor pedido (incluye sobrante y legado).
+ */
+export function filtrarIngresosAtribuidosParaDeudor<T extends IngresoParaFiltroDeudor>(
+  ingresosList: T[],
+  atribucionesByIngresoId: Map<number, Array<{ deudor: DeudorResuelto; monto: number }>>,
+  deudor: DeudorResuelto,
+  fallbackClienteId: number | null,
+): T[] {
+  const deudorPropio = (ingreso: IngresoParaFiltroDeudor): DeudorResuelto | null => {
+    if (ingreso.obligadoTerceroId != null) return { tipo: "tercero", id: ingreso.obligadoTerceroId };
+    const clienteId = ingreso.obligadoClienteId ?? ingreso.clienteId ?? null;
+    return clienteId != null ? { tipo: "cliente", id: clienteId } : null;
+  };
+  const esDeudor = (d: DeudorResuelto | null) => d !== null && d.tipo === deudor.tipo && d.id === deudor.id;
+
+  const result: T[] = [];
+  for (const ingreso of ingresosList) {
+    const atribuciones = atribucionesByIngresoId.get(ingreso.id) ?? [];
+    const aplicadoTotal = atribuciones.reduce((acc, a) => acc + a.monto, 0);
+    const match = atribuciones.find((a) => esDeudor(a.deudor));
+    const sobrante = Math.max(Number(ingreso.monto) - aplicadoTotal, 0);
+    let monto = match?.monto ?? 0;
+    if (sobrante > 0.01 && esDeudor(deudorPropio(ingreso))) monto += sobrante;
+    if (monto <= 0.01 && atribuciones.length === 0 && deudorPropio(ingreso) === null
+      && deudor.tipo === "cliente" && fallbackClienteId != null && ingreso.clienteId === fallbackClienteId) {
+      monto = Number(ingreso.monto);
+    }
+    if (monto > 0.01) result.push({ ...ingreso, monto: monto.toFixed(2) });
+  }
+  return result;
+}
+
+/**
+ * Espejo en memoria del superset SQL de ingresos candidatos para un deudor
+ * (findIngresosCandidatosParaDeudor).
+ */
+export function ingresoEsCandidatoParaDeudor(
+  ingreso: {
+    id: number;
+    clienteId: number | null;
+    obligadoClienteId?: number | null;
+    obligadoTerceroId?: number | null;
+  },
+  deudor: DeudorResuelto,
+  ctx: {
+    apps: Array<{
+      ingresoId: number;
+      honorarioId: number | null;
+      cuotaId: number | null;
+      gastoId: number | null;
+      activo: boolean;
+      deletedAt: Date | null;
+    }>;
+    honorarioById: Map<number, HonorarioDeudorRef>;
+    cuotaToHonorario: Map<number, number>;
+    gastoClienteById: Map<number, number>;
+  },
+): boolean {
+  if (deudor.tipo === "tercero" && ingreso.obligadoTerceroId === deudor.id) return true;
+  if (deudor.tipo === "cliente" && ingreso.obligadoClienteId === deudor.id) return true;
+  if (
+    deudor.tipo === "cliente"
+    && ingreso.obligadoClienteId == null
+    && ingreso.obligadoTerceroId == null
+    && ingreso.clienteId === deudor.id
+  ) {
+    return true;
+  }
+
+  for (const app of ctx.apps) {
+    if (app.ingresoId !== ingreso.id || !app.activo || app.deletedAt != null) continue;
+
+    let honorarioId = app.honorarioId;
+    if (!honorarioId && app.cuotaId != null) {
+      honorarioId = ctx.cuotaToHonorario.get(app.cuotaId) ?? null;
+    }
+    if (honorarioId != null) {
+      const h = ctx.honorarioById.get(honorarioId);
+      if (h) {
+        if (deudor.tipo === "cliente" && honorarioDeudorEsCliente(h, deudor.id)) return true;
+        if (deudor.tipo === "tercero" && honorarioDeudorEsTercero(h, deudor.id)) return true;
+      }
+    }
+
+    if (deudor.tipo === "cliente" && app.gastoId != null) {
+      const gastoClienteId = ctx.gastoClienteById.get(app.gastoId);
+      if (gastoClienteId === deudor.id) return true;
+    }
+  }
+
+  return false;
+}

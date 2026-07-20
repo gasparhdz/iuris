@@ -14,12 +14,28 @@ export interface HonorarioPagination {
 export interface HonorarioFilters {
   clienteId?: number;
   casoId?: number;
+  /** Deudor del honorario (semántica de resolveHonorarioDeudor). Si está, tiene prioridad sobre clienteId. */
+  deudor?: { tipo: "cliente" | "tercero"; id: number };
   estadoId?: number;
   search?: string;
   from?: Date;
   to?: Date;
   orderBy?: "fecha" | "concepto" | "cliente" | "expediente" | "vencimiento" | "monto" | "interes" | "saldo" | "estado";
   order?: "asc" | "desc";
+}
+
+/** Condición SQL equivalente a resolveHonorarioDeudor / honorarioDeudorEsCliente|Tercero. */
+export function honorarioDeudorSqlCondition(deudor: { tipo: "cliente" | "tercero"; id: number }) {
+  if (deudor.tipo === "tercero") {
+    return eq(honorarios.obligadoTerceroId, deudor.id);
+  }
+  return and(
+    isNull(honorarios.obligadoTerceroId),
+    or(
+      eq(honorarios.obligadoClienteId, deudor.id),
+      and(isNull(honorarios.obligadoClienteId), eq(honorarios.clienteId, deudor.id)),
+    ),
+  )!;
 }
 
 export class HonorariosQueries {
@@ -34,7 +50,11 @@ export class HonorariosQueries {
       isNull(honorarios.deletedAt),
     ];
 
-    if (filters.clienteId) conditions.push(eq(honorarios.clienteId, filters.clienteId));
+    if (filters.deudor) {
+      conditions.push(honorarioDeudorSqlCondition(filters.deudor));
+    } else if (filters.clienteId) {
+      conditions.push(eq(honorarios.clienteId, filters.clienteId));
+    }
     if (filters.casoId) conditions.push(eq(honorarios.casoId, filters.casoId));
     if (filters.estadoId) conditions.push(eq(honorarios.estadoId, filters.estadoId));
     if (filters.from) conditions.push(gte(honorarios.fechaRegulacion, filters.from));

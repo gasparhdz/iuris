@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, getTableColumns, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../index.js";
-import { casos, clientes, ingresoAplicaciones, ingresos, parametros, terceros } from "../schema.js";
+import { casos, clientes, gastos, ingresoAplicaciones, ingresos, parametros, planCuotas, planesPago, terceros, honorarios } from "../schema.js";
 import { personaNombreSortExpr, vinculacionExpteClienteSortExpr } from "../sql/personaNombre.js";
+import { honorarioDeudorSqlCondition } from "./honorarios.queries.js";
 
 type NewIngreso = typeof ingresos.$inferInsert;
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -152,6 +153,104 @@ export class IngresosQueries {
       .leftJoin(casos, eq(ingresos.casoId, casos.id))
       .leftJoin(obligadoCliente, eq(ingresos.obligadoClienteId, obligadoCliente.id))
       .leftJoin(obligadoTercero, eq(ingresos.obligadoTerceroId, obligadoTercero.id))
+      .where(whereCondition);
+
+    return { data, count };
+  }
+
+  /**
+   * Superset de ingresos candidatos para la CC de un deudor:
+   * - con aplicación viva sobre honorarios/cuotas del deudor (o gastos del cliente),
+   * - cuyo obligado propio sea el deudor,
+   * - legacy: ambos obligados null y cliente_id = deudor (solo cliente).
+   */
+  static async findIngresosCandidatosParaDeudor(
+    estudioId: number,
+    deudor: { tipo: "cliente" | "tercero"; id: number },
+    pagination: Pagination,
+  ) {
+    const deudorHon = honorarioDeudorSqlCondition(deudor);
+
+    const appSobreHonorario = exists(
+      db
+        .select({ one: sql`1` })
+        .from(ingresoAplicaciones)
+        .innerJoin(honorarios, eq(ingresoAplicaciones.honorarioId, honorarios.id))
+        .where(and(
+          eq(ingresoAplicaciones.ingresoId, ingresos.id),
+          eq(ingresoAplicaciones.activo, true),
+          isNull(ingresoAplicaciones.deletedAt),
+          eq(honorarios.estudioId, estudioId),
+          isNull(honorarios.deletedAt),
+          deudorHon,
+        )),
+    );
+
+    const appSobreCuota = exists(
+      db
+        .select({ one: sql`1` })
+        .from(ingresoAplicaciones)
+        .innerJoin(planCuotas, eq(ingresoAplicaciones.cuotaId, planCuotas.id))
+        .innerJoin(planesPago, eq(planCuotas.planId, planesPago.id))
+        .innerJoin(honorarios, eq(planesPago.honorarioId, honorarios.id))
+        .where(and(
+          eq(ingresoAplicaciones.ingresoId, ingresos.id),
+          eq(ingresoAplicaciones.activo, true),
+          isNull(ingresoAplicaciones.deletedAt),
+          eq(honorarios.estudioId, estudioId),
+          isNull(honorarios.deletedAt),
+          isNull(planesPago.deletedAt),
+          deudorHon,
+        )),
+    );
+
+    const obligadoPropio = deudor.tipo === "tercero"
+      ? eq(ingresos.obligadoTerceroId, deudor.id)
+      : eq(ingresos.obligadoClienteId, deudor.id);
+
+    const candidatoParts = [appSobreHonorario, appSobreCuota, obligadoPropio];
+    if (deudor.tipo === "cliente") {
+      candidatoParts.push(
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(ingresoAplicaciones)
+            .innerJoin(gastos, eq(ingresoAplicaciones.gastoId, gastos.id))
+            .where(and(
+              eq(ingresoAplicaciones.ingresoId, ingresos.id),
+              eq(ingresoAplicaciones.activo, true),
+              isNull(ingresoAplicaciones.deletedAt),
+              eq(gastos.estudioId, estudioId),
+              isNull(gastos.deletedAt),
+              eq(gastos.clienteId, deudor.id),
+            )),
+        ),
+        and(
+          isNull(ingresos.obligadoClienteId),
+          isNull(ingresos.obligadoTerceroId),
+          eq(ingresos.clienteId, deudor.id),
+        )!,
+      );
+    }
+
+    const whereCondition = and(
+      eq(ingresos.estudioId, estudioId),
+      eq(ingresos.activo, true),
+      isNull(ingresos.deletedAt),
+      or(...candidatoParts)!,
+    );
+
+    const data = await db
+      .select(getTableColumns(ingresos))
+      .from(ingresos)
+      .where(whereCondition)
+      .limit(pagination.limit)
+      .offset(pagination.offset)
+      .orderBy(desc(ingresos.fechaIngreso), asc(ingresos.id));
+
+    const [{ count }] = await db
+      .select({ count: sql`count(*)`.mapWith(Number) })
+      .from(ingresos)
       .where(whereCondition);
 
     return { data, count };
