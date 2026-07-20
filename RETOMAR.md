@@ -92,11 +92,11 @@ Cerrado y verificado:
 - **Drive:** app OAuth publicada (token permanente, se acabó el `invalid_grant` semanal del modo Testing). Estructura: raíz global → `Estudio Meotto` → cliente → expediente (`estudios.drive_folder_id` corregido en ambas bases).
 - **Usuario de Nadir:** `nadirmeotto@hotmail.com`.
 
-### Pendientes reales
+### ⚠️ REGLA DE ORO desde el 20/07/2026
 
-1. **Terminar el análisis financiero caso por caso** (ver sección 4).
-2. **Prueba funcional end-to-end en producción** (la hace Gaspar): circuito financiero, SISFE completo (verificar subida de PDFs a Drive con el token nuevo), reportes, y el iPhone con push/emails (re-suscribir push desde el dominio; deep-link deslogueado → login → destino).
-3. **Cutover final:** dump fresco de la base local → VPS (`pg_dump` local + `pg_restore` en :5433). **Post-restore obligatorio:** `DELETE FROM push_subscriptions;` (las suscripciones de dev usan VAPID viejas) y re-login interactivo SISFE si la sesión quedó vieja.
+**La base del VPS es LA FUENTE DE VERDAD.** El análisis financiero está terminado, el cutover está HECHO y las suscripciones push de producción son las reales. La base local es solo de desarrollo: **NUNCA volcar un dump local sobre producción**. Si hace falta datos reales en dev, el dump va VPS → local (y en local borrar `push_subscriptions` si molestan los errores de push).
+
+Todo verificado en producción: login, finanzas, SISFE completo (sesión remota, descarga de PDFs, subida a Drive), push, emails.
 
 ### Deuda técnica documentada (no bloquea)
 - Agregación SQL para cuenta corriente si el volumen crece (hoy se lee en lotes, correcto pero no óptimo a gran escala).
@@ -110,7 +110,7 @@ Cerrado y verificado:
 
 ## 6. Notas de contexto importantes
 
-- **HAY PRODUCCIÓN** (ver sección 5). La base del VPS es hoy una copia de dev del 18/07 — hasta el cutover final, la fuente de verdad de los datos sigue siendo la base local; ops destructivas en el VPS no pierden nada que no esté acá.
+- **HAY PRODUCCIÓN y su base es la fuente de verdad** (ver sección 5). Ops destructivas en el VPS ahora SÍ pierden datos reales — siempre backup antes (además del automático diario).
 - **Push en iPhone:** requiere HTTPS + PWA instalada — en producción ya se cumple; instalar la PWA desde https://iurispro.com.ar.
 - **Plan de integración de IA** (futuro, post-deploy): resúmenes de movimientos SISFE → redacción de escritos → sugerencia de plazos → chat sobre expedientes. Con la API de Claude (`@anthropic-ai/sdk`, modelo `claude-opus-4-8`), tool use sin RAG. La key nunca en el frontend.
 
