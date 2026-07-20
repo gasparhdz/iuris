@@ -37,6 +37,7 @@ import {
   startSisfeInteractiveLogin,
 } from "../api/sisfe.api";
 import { invalidateSisfeQueries } from "../utils/sisfeInvalidation";
+import { openSisfeRemoteScreen } from "../utils/sisfeRemoteScreen";
 
 const statusKey = ["sisfe", "status"];
 const syncKey = ["sisfe", "sync-status"];
@@ -147,6 +148,7 @@ export default function SisfeSyncPanel() {
     mutationFn: startSisfeInteractiveLogin,
     onMutate: () => {
       setInteractiveOpen(true);
+      openSisfeRemoteScreen();
     },
     onSuccess: () => {
       enqueueSnackbar("Conectado exitosamente con SISFE", { variant: "success" });

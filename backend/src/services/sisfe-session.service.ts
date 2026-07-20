@@ -301,9 +301,15 @@ export async function verifySesionActiva(cookieName: string, cookieValue: string
 }
 
 export async function iniciarLoginInteractivo(usuarioId: number, estudioId: number): Promise<void> {
+  // En el VPS el navegador se abre sobre una pantalla virtual (Xvfb, DISPLAY=:99)
+  // que el usuario ve vía noVNC; sin window manager no existe "maximizar", se fija
+  // el tamaño a la resolución de esa pantalla. En desktop (sin DISPLAY) se maximiza.
+  const esPantallaVirtual = process.platform === "linux" && Boolean(process.env.DISPLAY);
   const browser = await chromium.launch({
     headless: false,
-    args: ["--start-maximized"],
+    args: esPantallaVirtual
+      ? ["--window-size=1366,768", "--window-position=0,0"]
+      : ["--start-maximized"],
   });
 
   const context = await browser.newContext({

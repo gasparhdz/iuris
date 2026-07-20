@@ -7,6 +7,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale/es";
 import { getSisfeStatus, startSisfeSync, startSisfeInteractiveLogin } from "../api/sisfe.api";
+import { openSisfeRemoteScreen, isRemoteScreenMode } from "../utils/sisfeRemoteScreen";
 import { invalidateSisfeQueries } from "../utils/sisfeInvalidation";
 
 const MotionBox = motion.div;
@@ -84,9 +85,12 @@ export default function SisfeSyncButton({
 
   const launchInteractiveLogin = (motivo) => {
     enqueueSnackbar(
-      `${motivo} Se abrió una ventana de Chrome controlada para SISFE en tu computadora. Completá tus credenciales y resolvé el reCAPTCHA allí.`,
+      isRemoteScreenMode
+        ? `${motivo} Se abrió una pestaña con la pantalla de SISFE. Completá tus credenciales y resolvé el reCAPTCHA allí.`
+        : `${motivo} Se abrió una ventana de Chrome controlada para SISFE en tu computadora. Completá tus credenciales y resolvé el reCAPTCHA allí.`,
       { variant: "info", autoHideDuration: 10000 }
     );
+    openSisfeRemoteScreen();
     interactiveMutation.mutate();
   };
 
