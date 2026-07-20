@@ -1,7 +1,7 @@
 # RETOMAR — estado del proyecto iuris
 
 > Documento para retomar el trabajo desde otra computadora o después de una pausa.
-> Última actualización: sesión del 18/07/2026.
+> Última actualización: sesión del 20/07/2026 (deploy a producción completado).
 
 ---
 
@@ -79,31 +79,39 @@ Cerrado y verificado:
 
 ---
 
-## 5. Qué falta (pendientes reales)
+## 5. PRODUCCIÓN — desplegado el 18-20/07/2026
 
-1. **Terminar el análisis financiero caso por caso** (ver sección 4) y luego el cutover.
-2. **Prueba funcional end-to-end** (la hace Gaspar): ejercer el sistema completo con datos reales —circuito financiero deudor-céntrico, ingresos con obligado, SISFE, reportes, y el iPhone con push/emails (probar el deep-link deslogueado → login → destino).
-3. **Deploy a `iurispro.com.ar`** — la última etapa, todavía no empezada. Incluye:
-   - Decisión de hosting (VPS vs PaaS) y dónde va Postgres.
-   - `.env` de producción con secretos NUEVOS y fuertes (nunca los de dev): `JWT_SECRET`, `ENCRYPTION_KEY`, `AUDIT_HMAC_KEY` generados con `openssl rand -base64 48/32`.
-   - `NODE_ENV=production`, `CORS_ORIGIN`, `APP_URL`, VAPID keys, SMTP real.
-   - HTTPS obligatorio (para que funcionen push en iPhone y service worker).
-   - Migraciones en prod con el script + verificación posterior.
-   - Backups automáticos de la base.
+**iuris está EN PRODUCCIÓN en https://iurispro.com.ar**, conviviendo con lexmanager en el VPS (`ssh lex-vps` → root@200.58.103.155). Arquitectura:
 
-### Deuda técnica documentada (no bloquea deploy)
+- **Backend:** servicio systemd `iuris-backend` (usuario `iuris`, `node dist/server.js`, límites de memoria). Postgres 18 propio en :5433 (el 14 de :5432 es de lexmanager; ambos solo-localhost). Redis 8 (repo oficial). Node 22. Swap 2 GB.
+- **Frontend:** build estático servido por nginx; `/api/*` se reescribe a `/api/v1/*` hacia :3000 (misma reescritura que el proxy de Vite en dev).
+- **HTTPS:** certbot/Let's Encrypt con renovación automática. DNS en Cloudflare (delegado desde nic.ar).
+- **Deploy:** `powershell -File scripts\deploy.ps1` (build local de ambos, scp, git pull en VPS, migraciones, restart). **NUNCA buildear en el VPS** (tsc y vite OOMean con 2 GB).
+- **Backups:** `pg_dump` diario 3 AM (`/etc/cron.d/backup-iuris` → `/var/backups/iuris/`, 14 días).
+- **SISFE:** sync headless funciona en el VPS (usa Google Chrome real instalado vía Playwright). El **login interactivo** corre sobre pantalla virtual (servicios `iuris-xvfb`/`iuris-x11vnc`/`iuris-novnc`, backend con `DISPLAY=:99`) y el usuario lo ve en `https://iurispro.com.ar/sisfe-vnc/` (basic auth, user `iuris`; Gaspar tiene la password). El frontend abre esa pestaña solo.
+- **Drive:** app OAuth publicada (token permanente, se acabó el `invalid_grant` semanal del modo Testing). Estructura: raíz global → `Estudio Meotto` → cliente → expediente (`estudios.drive_folder_id` corregido en ambas bases).
+- **Usuario de Nadir:** `nadirmeotto@hotmail.com`.
+
+### Pendientes reales
+
+1. **Terminar el análisis financiero caso por caso** (ver sección 4).
+2. **Prueba funcional end-to-end en producción** (la hace Gaspar): circuito financiero, SISFE completo (verificar subida de PDFs a Drive con el token nuevo), reportes, y el iPhone con push/emails (re-suscribir push desde el dominio; deep-link deslogueado → login → destino).
+3. **Cutover final:** dump fresco de la base local → VPS (`pg_dump` local + `pg_restore` en :5433). **Post-restore obligatorio:** `DELETE FROM push_subscriptions;` (las suscripciones de dev usan VAPID viejas) y re-login interactivo SISFE si la sesión quedó vieja.
+
+### Deuda técnica documentada (no bloquea)
 - Agregación SQL para cuenta corriente si el volumen crece (hoy se lee en lotes, correcto pero no óptimo a gran escala).
 - SSE multi-instancia (Redis pub/sub) si se escala horizontalmente.
 - Migrar validación de `tipoPersonaId` de IDs hardcodeados a `codigo`.
 - Módulo Plantillas: oculto en la UI, sin desarrollar.
+- Drive por estudio (cliente con cuenta propia): hoy una cuenta central comparte la carpeta del estudio al admin; si un cliente exige propiedad/cuota propia, falta feature (credenciales OAuth por estudio cifradas + flujo "Conectar mi Drive" + provider con fallback).
+- Deploy vía GitHub Actions (hoy `deploy.ps1` local).
 
 ---
 
 ## 6. Notas de contexto importantes
 
-- **No hay producción todavía.** La base de dev es recreable; las migraciones y ops destructivas se pueden correr sin miedo a perder datos reales.
-- **Dominio de prod:** `iurispro.com.ar` (registrado). Al desplegar toca CORS, APP_URL, VAPID.
-- **Push en iPhone:** requiere HTTPS + PWA instalada. En dev sobre `http://IP-local` NO funciona (por eso se probó con un túnel Cloudflare).
+- **HAY PRODUCCIÓN** (ver sección 5). La base del VPS es hoy una copia de dev del 18/07 — hasta el cutover final, la fuente de verdad de los datos sigue siendo la base local; ops destructivas en el VPS no pierden nada que no esté acá.
+- **Push en iPhone:** requiere HTTPS + PWA instalada — en producción ya se cumple; instalar la PWA desde https://iurispro.com.ar.
 - **Plan de integración de IA** (futuro, post-deploy): resúmenes de movimientos SISFE → redacción de escritos → sugerencia de plazos → chat sobre expedientes. Con la API de Claude (`@anthropic-ai/sdk`, modelo `claude-opus-4-8`), tool use sin RAG. La key nunca en el frontend.
 
 ---
